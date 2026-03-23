@@ -11,6 +11,22 @@ import { cmdConflicts } from "./commands/conflicts.ts";
 import { cmdBatchOrder } from "./commands/batch-order.ts";
 import { cmdRepos } from "./commands/repos.ts";
 import { cmdStatus, cmdPartitions } from "./commands/status.ts";
+import { cmdStart } from "./commands/start.ts";
+import {
+  cmdCloseWorkspaces,
+  cmdCloseWorkspace,
+  cmdClean,
+  cmdCleanSingle,
+} from "./commands/clean.ts";
+import { cmdMarkDone, cmdMergedIds } from "./commands/mark-done.ts";
+import {
+  cmdWatchReady,
+  cmdAutopilotWatch,
+  cmdPrWatch,
+  cmdPrActivity,
+} from "./commands/watch.ts";
+import { cmdCiFailures } from "./commands/ci.ts";
+import { cmdVersionBump } from "./commands/version-bump.ts";
 
 // Resolve project root via git
 function getProjectRoot(): string {
@@ -110,6 +126,15 @@ const needsTodos = ![
   "partitions",
   "close-workspaces",
   "close-workspace",
+  "clean",
+  "clean-single",
+  "merged-ids",
+  "watch-ready",
+  "autopilot-watch",
+  "pr-watch",
+  "ci-failures",
+  "pr-activity",
+  "version-bump",
 ].includes(command);
 
 if (needsTodos && !existsSync(todosFile)) {
@@ -138,21 +163,44 @@ switch (command) {
   case "partitions":
     cmdPartitions(partitionDir);
     break;
-  // Write commands handled by other agents — placeholder imports
   case "start":
+    cmdStart(args, todosFile, worktreeDir, projectRoot);
+    break;
   case "close-workspaces":
+    cmdCloseWorkspaces();
+    break;
   case "close-workspace":
+    cmdCloseWorkspace(args[0] ?? "");
+    break;
   case "clean":
+    cmdClean(args, worktreeDir, projectRoot);
+    break;
   case "clean-single":
+    cmdCleanSingle(args, worktreeDir, projectRoot);
+    break;
   case "mark-done":
+    cmdMarkDone(args, todosFile);
+    break;
   case "merged-ids":
+    cmdMergedIds(worktreeDir, projectRoot);
+    break;
   case "watch-ready":
+    cmdWatchReady(worktreeDir, projectRoot);
+    break;
   case "autopilot-watch":
+    await cmdAutopilotWatch(args, worktreeDir, projectRoot);
+    break;
   case "pr-watch":
+    await cmdPrWatch(args, projectRoot);
+    break;
   case "ci-failures":
+    cmdCiFailures(args, projectRoot);
+    break;
   case "pr-activity":
+    cmdPrActivity(args, projectRoot);
+    break;
   case "version-bump":
-    die(`Command '${command}' is not yet implemented`);
+    cmdVersionBump(projectRoot);
     break;
   default:
     die(`Unknown command: ${command}`);
