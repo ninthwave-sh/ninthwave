@@ -6,19 +6,6 @@
 
 
 
-### Docs: Update documentation to reflect TypeScript CLI (M-MIG-4)
-
-**Priority:** Medium
-**Source:** Migration plan 2026-03-23
-**Depends on:** H-MIG-3
-
-Update all documentation that still references `batch-todos.sh`. In `CONTRIBUTING.md`: replace `batch-todos.sh` in architecture tree with `cli.ts` + `commands/` directory, update key files table, update "How the Pieces Fit" step 3. In `README.md`: remove legacy references on lines 255 and 262. In `core/docs/todos-format.md`: change `batch-todos.sh` references on lines 28 and 125 to `core/parser.ts` / "the ninthwave CLI". Leave `CHANGELOG.md` unchanged (historical record).
-
-Acceptance: No remaining references to `batch-todos.sh` in any `.md` file except `CHANGELOG.md`.
-
-Key files: `CONTRIBUTING.md`, `README.md`, `core/docs/todos-format.md`
-
----
 
 ### Test: Add tests for start, clean, watch, and ci commands (M-MIG-5)
 
