@@ -35,9 +35,9 @@ This skill is highly interactive. You MUST use your interactive question tool to
 
 ## Instructions
 
-This skill decomposes a feature spec into work items sized for individual human-reviewable PRs. The items are written to `TODOS.md` in a format compatible with `scripts/batch-todos.sh`, ready for processing via `/work`.
+This skill decomposes a feature spec into work items sized for individual human-reviewable PRs. The items are written to `TODOS.md` in a format compatible with `.ninthwave/nw`, ready for processing via `/work`.
 
-**Prerequisites:** `scripts/batch-todos.sh` must exist and be executable. `TODOS.md` must exist at the project root.
+**Prerequisites:** `.ninthwave/nw` must exist and be executable. `TODOS.md` must exist at the project root.
 
 ---
 
@@ -146,8 +146,8 @@ Show totals and ask for approval. Options: looks good, adjust, re-decompose.
 
 1. Read current TODOS.md
 2. Add section: `## <Feature Name> (feature decomposition, <YYYY-MM-DD>)`
-3. Write each TODO following the format in `docs/guides/todos-format.md`
-4. Verify parseable: `scripts/batch-todos.sh list | grep <feature_code>`
+3. Write each TODO following the format guide. Read it with: `cat "$(cat .ninthwave/dir)/core/docs/todos-format.md"`
+4. Verify parseable: `.ninthwave/nw list | grep <feature_code>`
 
 ---
 

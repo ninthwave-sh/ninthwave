@@ -1,6 +1,6 @@
 # TODOS.md Format Guide
 
-Canonical reference for the `TODOS.md` format. Used by `/decompose` (feature decomposition) and ad-hoc TODO creation. Parsed by `scripts/batch-todos.sh`.
+Canonical reference for the `TODOS.md` format. Used by `/decompose` (feature decomposition) and ad-hoc TODO creation. Parsed by `.ninthwave/nw` (the ninthwave CLI).
 
 ## Empty Template
 
@@ -9,7 +9,7 @@ When `TODOS.md` is cleared down, it should contain:
 ```markdown
 # TODOS
 
-<!-- Format guide: docs/guides/todos-format.md -->
+<!-- Format guide: see $(cat .ninthwave/dir)/core/docs/todos-format.md -->
 ```
 
 ## Section Headers

@@ -1,6 +1,6 @@
 # TODOS
 
-<!-- Format guide: core/docs/todos-format.md -->
+<!-- Format guide: see $(cat .ninthwave/dir)/core/docs/todos-format.md -->
 
 ## Engineering Review (eng review, 2026-03-23)
 

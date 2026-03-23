@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec "$(cat "$(dirname "$0")/dir")/core/batch-todos.sh" "$@"

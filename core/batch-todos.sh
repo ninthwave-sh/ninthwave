@@ -4,7 +4,7 @@
 # Tool-agnostic: auto-detects the AI tool (Claude Code, OpenCode, Copilot CLI)
 # from the orchestrator's environment and launches workers with the same tool.
 #
-# Usage: ./scripts/batch-todos.sh <command> [options]
+# Usage: .ninthwave/nw <command> [options]
 #
 # Commands:
 #   list [--priority P] [--domain D] [--feature F] [--ready]
@@ -31,7 +31,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+_GIT_COMMON="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || {
+  echo "Error: not inside a git repository" >&2; exit 1
+}
+PROJECT_ROOT="${_GIT_COMMON%/.git}"
 TODOS_FILE="$PROJECT_ROOT/TODOS.md"
 VERSION_FILE="$PROJECT_ROOT/VERSION"
 CHANGELOG_FILE="$PROJECT_ROOT/CHANGELOG.md"
@@ -1008,6 +1011,7 @@ cmd_start() {
     local system_prompt
     system_prompt="YOUR_TODO_ID: ${id}
 YOUR_PARTITION: ${partition}
+PROJECT_ROOT: ${PROJECT_ROOT}
 
 ${todo_text}"
 

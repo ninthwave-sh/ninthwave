@@ -1,14 +1,33 @@
 #!/usr/bin/env bash
 # Remote installer for ninthwave.
-# Downloads the latest files and runs the install without cloning the repo.
+# Clones ninthwave and runs setup in the current project.
 #
-# Usage: bash <(curl -fsSL https://raw.githubusercontent.com/roblambell/ninthwave/main/remote-install.sh)
+# Global install (recommended):
+#   bash <(curl -fsSL https://raw.githubusercontent.com/roblambell/ninthwave/main/remote-install.sh)
+#
+# Per-project install:
+#   bash <(curl -fsSL https://raw.githubusercontent.com/roblambell/ninthwave/main/remote-install.sh) --local
 
 set -euo pipefail
 
-REPO="roblambell/ninthwave"
-BRANCH="main"
-BASE_URL="https://raw.githubusercontent.com/$REPO/$BRANCH"
+REPO="https://github.com/roblambell/ninthwave.git"
+INSTALL_TYPE="global"
+
+# Parse args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --local) INSTALL_TYPE="local"; shift ;;
+    -h|--help)
+      echo "Usage: $0 [--local]"
+      echo
+      echo "  (default)  Global install to ~/.claude/skills/ninthwave"
+      echo "  --local    Per-project install to .claude/skills/ninthwave"
+      exit 0
+      ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
 PROJECT_DIR="$(pwd)"
 
 # Verify we're in a git repo
@@ -17,32 +36,54 @@ if [[ ! -d "$PROJECT_DIR/.git" ]]; then
   exit 1
 fi
 
-echo "ninthwave remote install"
+echo "ninthwave install"
 echo "Project: $PROJECT_DIR"
+echo "Type: $INSTALL_TYPE"
 echo
 
-# Create a temp directory for downloaded files
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
-
-echo "Downloading ninthwave..."
-
-# Download the full repo as a tarball (much faster than individual files)
-if command -v gh &>/dev/null; then
-  # Prefer gh for private repos
-  gh api "repos/$REPO/tarball/$BRANCH" > "$TMPDIR/archive.tar.gz" 2>/dev/null
+if [[ "$INSTALL_TYPE" == "global" ]]; then
+  INSTALL_DIR="$HOME/.claude/skills/ninthwave"
+  if [[ -d "$INSTALL_DIR" ]]; then
+    echo "Updating existing global install..."
+    git -C "$INSTALL_DIR" pull --ff-only origin main
+  else
+    echo "Cloning ninthwave..."
+    git clone "$REPO" "$INSTALL_DIR"
+  fi
 else
-  curl -fsSL "https://api.github.com/repos/$REPO/tarball/$BRANCH" \
-    -H "Accept: application/vnd.github+json" \
-    -o "$TMPDIR/archive.tar.gz"
+  INSTALL_DIR="$PROJECT_DIR/.claude/skills/ninthwave"
+  if [[ -d "$INSTALL_DIR" ]]; then
+    echo "Updating existing local install..."
+    # Vendored -- re-download
+    TMPDIR="$(mktemp -d)"
+    trap 'rm -rf "$TMPDIR"' EXIT
+    if command -v gh &>/dev/null; then
+      gh api "repos/roblambell/ninthwave/tarball/main" > "$TMPDIR/archive.tar.gz" 2>/dev/null
+    else
+      curl -fsSL "https://api.github.com/repos/roblambell/ninthwave/tarball/main" \
+        -H "Accept: application/vnd.github+json" \
+        -o "$TMPDIR/archive.tar.gz"
+    fi
+    mkdir -p "$INSTALL_DIR"
+    tar xzf "$TMPDIR/archive.tar.gz" -C "$INSTALL_DIR" --strip-components=1
+  else
+    echo "Downloading ninthwave..."
+    TMPDIR="$(mktemp -d)"
+    trap 'rm -rf "$TMPDIR"' EXIT
+    if command -v gh &>/dev/null; then
+      gh api "repos/roblambell/ninthwave/tarball/main" > "$TMPDIR/archive.tar.gz" 2>/dev/null
+    else
+      curl -fsSL "https://api.github.com/repos/roblambell/ninthwave/tarball/main" \
+        -H "Accept: application/vnd.github+json" \
+        -o "$TMPDIR/archive.tar.gz"
+    fi
+    mkdir -p "$INSTALL_DIR"
+    tar xzf "$TMPDIR/archive.tar.gz" -C "$INSTALL_DIR" --strip-components=1
+  fi
 fi
 
-# Extract
-mkdir -p "$TMPDIR/extracted"
-tar xzf "$TMPDIR/archive.tar.gz" -C "$TMPDIR/extracted" --strip-components=1
-
-echo "Running installer..."
+echo
+echo "Running setup..."
 echo
 
-# Run the install script from the extracted copy
-bash "$TMPDIR/extracted/install.sh" --project-dir "$PROJECT_DIR"
+"$INSTALL_DIR/setup" --project-dir "$PROJECT_DIR"

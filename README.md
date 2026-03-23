@@ -25,7 +25,7 @@ graph TD
 Take your PRDs, transcripts, specs — decompose into work items. Output goes to your task management tool, or to `TODOS.md` if you prefer markdown.
 
 Two ways to create work items:
-- **Write them yourself** following the [format guide](docs/guides/todos-format.md)
+- **Write them yourself** following the [format guide](core/docs/todos-format.md)
 - **Use `/decompose`** to break down a feature spec automatically
 
 ### 2. Deliver
@@ -63,48 +63,46 @@ Works with Claude Code, OpenCode, Copilot CLI, and any tool supporting the [Agen
 
 ## Quick Start
 
+**Global install** (recommended — shared across projects):
+
 ```bash
-git clone https://github.com/roblambell/ninthwave.git ~/ninthwave
+git clone https://github.com/roblambell/ninthwave.git ~/.claude/skills/ninthwave
 cd /path/to/your/project
-~/ninthwave/install.sh
+~/.claude/skills/ninthwave/setup
 ```
 
-One developer runs the install; the rest get the files via `git pull`. Review with `git diff`, then commit.
-
-Or, if you prefer a one-liner:
+**Per-project install** (committed to git, shared by the team):
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/roblambell/ninthwave/main/remote-install.sh)
+cd /path/to/your/project
+bash <(curl -fsSL https://raw.githubusercontent.com/roblambell/ninthwave/main/remote-install.sh) --local
 ```
+
+One developer runs setup; the rest get the project-level files via `git pull`. Review with `git diff`, then commit.
 
 ## What Gets Installed
 
-Everything is **project-level** — committed to git, shared by the whole team. No per-user project setup needed.
+ninthwave is a **self-contained bundle** — all skills, agents, and the CLI live inside the ninthwave directory. The `setup` script creates minimal project-level config.
 
-The installer adds: three skills (`/work`, `/decompose`, `/todo-preview`) via the cross-tool `.agents/skills/` directory, a worker agent installed to all tool-specific agent directories, a CLI script (`scripts/batch-todos.sh`), and project config.
+**The bundle** (stays in `.claude/skills/ninthwave/` or `~/.claude/skills/ninthwave/`):
+- Skills: `/work`, `/decompose`, `/todo-preview`, `/ninthwave-upgrade`
+- Worker agent: `todo-worker.md`
+- CLI: `core/batch-todos.sh`
+- Docs: `core/docs/todos-format.md`
 
-<details>
-<summary>Full file inventory</summary>
+**Project-level files** (created by setup, committed to git):
 
 | Path | Purpose |
 |------|---------|
-| `scripts/batch-todos.sh` | CLI for work item parsing, worktree management, session launching, PR monitoring |
-| `TODOS.md` | Work items (created if missing) |
-| `docs/guides/todos-format.md` | TODOS.md format reference |
+| `.ninthwave/nw` | CLI shim — calls the bundle's `core/batch-todos.sh` |
+| `.ninthwave/dir` | Points to the ninthwave bundle location |
 | `.ninthwave/config` | Project settings (LOC extensions, domain mappings) |
-| `.ninthwave/domains.conf` | Custom domain slug mappings for section headers |
-| `.agents/skills/work/SKILL.md` | `/work` — batch orchestration |
-| `.agents/skills/decompose/SKILL.md` | `/decompose` — feature breakdown |
-| `.agents/skills/todo-preview/SKILL.md` | `/todo-preview` — dev servers |
+| `.ninthwave/domains.conf` | Custom domain slug mappings |
+| `.claude/skills/*` | Symlinks to bundle skills (for discovery) |
 | `.claude/agents/todo-worker.md` | Worker agent (Claude Code) |
 | `.opencode/agents/todo-worker.md` | Worker agent (OpenCode) |
 | `.github/agents/todo-worker.agent.md` | Worker agent (Copilot CLI) |
-
-**Skills** use `.agents/skills/` — the cross-tool standard. One copy, discovered by all tools.
-
-**Agents** are installed to all three tool directories unconditionally — any team member works regardless of which AI tool they use.
-
-</details>
+| `TODOS.md` | Work items (created if missing) |
 
 ### Expected skills (bring your own)
 
@@ -122,12 +120,12 @@ Workers reference these skill names during execution. If available, they're used
 ## Standalone CLI
 
 ```bash
-scripts/batch-todos.sh list --ready          # List ready work items
-scripts/batch-todos.sh batch-order H-1 H-2   # Check dependency order
-scripts/batch-todos.sh start H-1 H-2         # Launch sessions (auto-detects tool)
-scripts/batch-todos.sh status                 # Check worktree status
-scripts/batch-todos.sh watch-ready            # Watch PR readiness
-scripts/batch-todos.sh version-bump           # Bump version from commits
+.ninthwave/nw list --ready          # List ready work items
+.ninthwave/nw batch-order H-1 H-2   # Check dependency order
+.ninthwave/nw start H-1 H-2         # Launch sessions (auto-detects tool)
+.ninthwave/nw status                 # Check worktree status
+.ninthwave/nw watch-ready            # Watch PR readiness
+.ninthwave/nw version-bump           # Bump version from commits
 ```
 
 ## Project Configuration
@@ -155,12 +153,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture, and 
 
 ## Updating
 
-Re-run the same command you used to install. Core files are overwritten; project-specific config (`TODOS.md`, `.ninthwave/config`, `domains.conf`) is preserved.
+Run `/ninthwave-upgrade` from any AI coding session, or manually:
 
 ```bash
-# Clone users
-~/ninthwave/install.sh
+# Global install (git-based)
+cd ~/.claude/skills/ninthwave && git pull
+~/.claude/skills/ninthwave/setup --project-dir /path/to/your/project
 
-# One-liner users
-bash <(curl -fsSL https://raw.githubusercontent.com/roblambell/ninthwave/main/remote-install.sh)
+# Per-project install (re-download)
+bash <(curl -fsSL https://raw.githubusercontent.com/roblambell/ninthwave/main/remote-install.sh) --local
 ```
+
+Project-specific config (`TODOS.md`, `.ninthwave/config`, `domains.conf`) is preserved.
