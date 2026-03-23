@@ -63,6 +63,7 @@ Key files: `path/to/file.ex`, `path/to/component.tsx:42`
 | Field | Location | Format |
 |-------|----------|--------|
 | Bundle with | Metadata line | `**Bundle with:** <ID>` |
+| Repo | Metadata line | `**Repo:** <alias>` -- target repo for cross-repo items |
 | Key files | Body | Backtick-quoted paths, `file:line` references |
 
 ### Writing Good Acceptance Criteria
@@ -80,6 +81,14 @@ Acceptance: `npx cap sync` completes without errors. Adapter correctly stores/re
 refresh tokens via Preferences. Platform detection switches adapters correctly. CapacitorHttp
 enabled. Tests pass for all paths.
 ```
+
+### Repo Field
+
+`**Repo:** <alias>` -- Optional. Short alias for the target repository where work should be done. If omitted, work targets the hub repo (the repo containing `TODOS.md`).
+
+The alias is resolved via convention (sibling directory `../<alias>`) or explicit mapping in `.ninthwave/repos.conf`.
+
+Example: `**Repo:** api-service`
 
 ### Separator
 
@@ -118,6 +127,7 @@ Each TODO should target one human-reviewable PR:
 - **Priority**: from `**Priority:**` line, converted to lowercase
 - **Depends on**: from `**Depends on:**` line, comma/space-separated IDs
 - **Bundle with**: from `**Bundle with:**` line (optional)
+- **Repo**: from `**Repo:**` line (optional, defaults to hub repo)
 - **Domain**: from the `## ` section header, auto-slugified
 - **File paths**: from backtick-quoted paths and `file:line` patterns in the body
 

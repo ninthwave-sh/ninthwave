@@ -25,6 +25,7 @@
 #   ci-failures <PR_NUMBER>                       Show failing CI check details for a PR
 #   pr-activity <PR1> [PR2]... [--since T]        Check for new comments/reviews on PRs
 #   version-bump                                  Bump version and generate changelog
+#   repos                                         List discovered repos (sibling dirs + repos.conf)
 #
 # Dependencies: git, gh (for PR checks), cmux (for session launch)
 
@@ -233,16 +234,193 @@ get_partition_for() {
 }
 
 # Remove stale partition locks (worktree gone but lock remains).
+# Checks cross-repo index + disk verification for cross-repo items.
 cleanup_stale_partitions() {
   [[ -d "$PARTITION_DIR" ]] || return 0
   for f in "$PARTITION_DIR"/*; do
     [[ -f "$f" ]] || continue
     local lock_id
     lock_id="$(cat "$f")"
-    if [[ ! -d "$WORKTREE_DIR/todo-$lock_id" ]]; then
-      rm -f "$f"
+    # Check hub worktree first (backwards compat)
+    if [[ -d "$WORKTREE_DIR/todo-$lock_id" ]]; then
+      continue
+    fi
+    # Check cross-repo index + verify on disk
+    local wt_info
+    wt_info="$(get_worktree_info "$lock_id")"
+    if [[ -n "$wt_info" ]]; then
+      local wt_path
+      wt_path="$(echo "$wt_info" | cut -f3)"
+      if [[ -d "$wt_path" ]]; then
+        continue
+      fi
+    fi
+    # Worktree not found anywhere — stale lock
+    rm -f "$f"
+  done
+}
+
+# --- Cross-repo support ---
+# Resolve repo aliases, manage cross-repo index, and run commands in target repos.
+
+CROSS_REPO_INDEX="$WORKTREE_DIR/.cross-repo-index"
+REPOS_CONF="$PROJECT_ROOT/.ninthwave/repos.conf"
+GH_REPO_CACHE="$WORKTREE_DIR/.gh-repo-cache"
+
+# Resolve a repo alias to an absolute path.
+# Resolution chain: repos.conf → sibling convention (../<alias>) → error.
+# Returns PROJECT_ROOT if alias is empty, "self", or "hub".
+resolve_repo() {
+  local alias="$1"
+  if [[ -z "$alias" || "$alias" == "self" || "$alias" == "hub" ]]; then
+    echo "$PROJECT_ROOT"
+    return
+  fi
+
+  # 1. Check repos.conf (explicit override wins)
+  if [[ -f "$REPOS_CONF" ]]; then
+    while IFS='=' read -r key value; do
+      key="$(echo "$key" | tr -d '[:space:]')"
+      [[ -z "$key" || "$key" =~ ^# ]] && continue
+      value="$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      if [[ "$key" == "$alias" ]]; then
+        if [[ -d "$value/.git" ]] || [[ -f "$value/.git" ]]; then
+          echo "$value"
+          return
+        else
+          die "repos.conf maps '$alias' to '$value' but it is not a git repository"
+        fi
+      fi
+    done < "$REPOS_CONF"
+  fi
+
+  # 2. Sibling convention: ../<alias>
+  local parent_dir
+  parent_dir="$(dirname "$PROJECT_ROOT")"
+  local sibling_path="$parent_dir/$alias"
+  if [[ -d "$sibling_path/.git" ]] || [[ -f "$sibling_path/.git" ]]; then
+    echo "$sibling_path"
+    return
+  fi
+
+  # 3. Not found locally
+  die "Repo '$alias' not found. Checked repos.conf and sibling directory '$sibling_path'. Add it to .ninthwave/repos.conf or clone it alongside this repo."
+}
+
+# Run a gh command in the context of a specific repo.
+gh_in_repo() {
+  local repo_root="$1"
+  shift
+  (cd "$repo_root" && gh "$@")
+}
+
+# Write an entry to the cross-repo index (flock-protected).
+write_cross_repo_index() {
+  local todo_id="$1" target_repo="$2" worktree_path="$3"
+  mkdir -p "$WORKTREE_DIR"
+  (
+    flock -x 200
+    printf '%s\t%s\t%s\n' "$todo_id" "$target_repo" "$worktree_path" >> "$CROSS_REPO_INDEX"
+  ) 200>"$CROSS_REPO_INDEX.lock"
+}
+
+# Remove an entry from the cross-repo index (flock-protected).
+remove_cross_repo_index() {
+  local todo_id="$1"
+  [[ -f "$CROSS_REPO_INDEX" ]] || return 0
+  (
+    flock -x 200
+    local tmp
+    tmp="$(mktemp)"
+    grep -v "^${todo_id}	" "$CROSS_REPO_INDEX" > "$tmp" 2>/dev/null || true
+    mv "$tmp" "$CROSS_REPO_INDEX"
+  ) 200>"$CROSS_REPO_INDEX.lock"
+}
+
+# Get worktree info for a TODO ID. Returns: ID\tREPO_ROOT\tWORKTREE_PATH
+# Checks cross-repo index first, falls back to hub worktree dir.
+get_worktree_info() {
+  local todo_id="$1"
+
+  # Check cross-repo index first
+  if [[ -f "$CROSS_REPO_INDEX" ]]; then
+    local line
+    line="$(awk -F'\t' -v id="$todo_id" '$1 == id' "$CROSS_REPO_INDEX" | head -1)"
+    if [[ -n "$line" ]]; then
+      echo "$line"
+      return
+    fi
+  fi
+
+  # Fallback: hub repo worktree (backwards compat)
+  if [[ -d "$WORKTREE_DIR/todo-$todo_id" ]]; then
+    printf '%s\t%s\t%s\n' "$todo_id" "$PROJECT_ROOT" "$WORKTREE_DIR/todo-$todo_id"
+    return
+  fi
+}
+
+# Ensure .worktrees/ is excluded in a target repo (via .git/info/exclude, not .gitignore).
+ensure_worktree_excluded() {
+  local target_repo="$1"
+  local exclude_file="$target_repo/.git/info/exclude"
+  if [[ -f "$exclude_file" ]]; then
+    if ! grep -q "^\.worktrees/" "$exclude_file" 2>/dev/null; then
+      echo ".worktrees/" >> "$exclude_file"
+    fi
+  else
+    mkdir -p "$(dirname "$exclude_file")"
+    echo ".worktrees/" > "$exclude_file"
+  fi
+}
+
+# List discovered repos: sibling directories that are git repos.
+cmd_repos() {
+  echo -e "${BOLD}Discovered repos:${RESET}"
+  echo
+
+  local parent_dir
+  parent_dir="$(dirname "$PROJECT_ROOT")"
+  local found=0
+
+  # Repos.conf overrides
+  if [[ -f "$REPOS_CONF" ]]; then
+    echo -e "${CYAN}From repos.conf:${RESET}"
+    while IFS='=' read -r key value; do
+      key="$(echo "$key" | tr -d '[:space:]')"
+      [[ -z "$key" || "$key" =~ ^# ]] && continue
+      value="$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+      local status="${GREEN}OK${RESET}"
+      if [[ ! -d "$value/.git" ]] && [[ ! -f "$value/.git" ]]; then
+        status="${RED}NOT FOUND${RESET}"
+      fi
+      printf "  %-20s %s  [%b]\n" "$key" "$value" "$status"
+      found=$((found + 1))
+    done < "$REPOS_CONF"
+    echo
+  fi
+
+  # Sibling directories
+  echo -e "${CYAN}Sibling directories ($(basename "$parent_dir")/):${RESET}"
+  for dir in "$parent_dir"/*/; do
+    [[ -d "$dir" ]] || continue
+    # Skip self
+    local resolved_dir
+    resolved_dir="$(cd "$dir" && pwd)"
+    [[ "$resolved_dir" == "$PROJECT_ROOT" ]] && continue
+    # Check if it's a git repo
+    if [[ -d "$dir/.git" ]] || [[ -f "$dir/.git" ]]; then
+      local repo_name
+      repo_name="$(basename "$dir")"
+      local remote_url
+      remote_url="$(git -C "$dir" remote get-url origin 2>/dev/null || echo "no remote")"
+      printf "  %-20s %s\n" "$repo_name" "$remote_url"
+      found=$((found + 1))
     fi
   done
+
+  if [[ $found -eq 0 ]]; then
+    echo "  No repos found"
+  fi
 }
 
 # --- Domain normalization ---
@@ -284,8 +462,26 @@ normalize_domain() {
   echo "$section" | sed 's/[^a-z0-9 -]//g' | sed 's/  */ /g' | sed 's/ /-/g' | sed 's/^-//;s/-$//'
 }
 
+# Emit a single parsed TODO item as an FS-separated line.
+# Uses variables from the calling parse_todos() scope.
+# Output: ID${FS}Priority${FS}Title${FS}Domain${FS}Dependencies${FS}BundleWith${FS}Status${FS}LineNumber${FS}RepoAlias
+_emit_item() {
+  local emit_id="$1" emit_priority="$2" emit_title="$3" emit_domain="$4"
+  local emit_depends="$5" emit_bundle="$6" emit_status="$7" emit_line="$8"
+  local emit_repo="${9:-}"
+  printf '%s' "$emit_id"; printf '%s' "$FS"
+  printf '%s' "$emit_priority"; printf '%s' "$FS"
+  printf '%s' "$emit_title"; printf '%s' "$FS"
+  printf '%s' "$emit_domain"; printf '%s' "$FS"
+  printf '%s' "$emit_depends"; printf '%s' "$FS"
+  printf '%s' "$emit_bundle"; printf '%s' "$FS"
+  printf '%s' "$emit_status"; printf '%s' "$FS"
+  printf '%s' "$emit_line"; printf '%s' "$FS"
+  printf '%s\n' "$emit_repo"
+}
+
 # Parse TODOS.md into a structured list.
-# Output: FS-separated lines: ID${FS}Priority${FS}Title${FS}Domain${FS}Dependencies${FS}BundleWith${FS}Status${FS}LineNumber
+# Output: FS-separated lines: ID${FS}Priority${FS}Title${FS}Domain${FS}Dependencies${FS}BundleWith${FS}Status${FS}LineNumber${FS}RepoAlias
 parse_todos() {
   local current_domain=""
   # Derive in-progress IDs from worktree directories (no TODOS.md mutation needed)
@@ -298,9 +494,19 @@ parse_todos() {
       in_progress_ids="$in_progress_ids $wt_id"
     done
   fi
+  # Also check cross-repo index for in-progress items in other repos
+  local cross_repo_index="$WORKTREE_DIR/.cross-repo-index"
+  if [[ -f "$cross_repo_index" ]]; then
+    while IFS=$'\t' read -r idx_id idx_repo idx_path; do
+      [[ -z "$idx_id" || "$idx_id" =~ ^# ]] && continue
+      if [[ -d "$idx_path" ]]; then
+        in_progress_ids="$in_progress_ids $idx_id"
+      fi
+    done < "$cross_repo_index"
+  fi
 
   # Parse all items
-  local id="" priority="" title="" depends="" bundle="" line_num=0
+  local id="" priority="" title="" depends="" bundle="" repo_alias="" line_num=0
   local in_item=false
   local item_start_line=0
 
@@ -315,16 +521,9 @@ parse_todos() {
         if [[ " $in_progress_ids " == *" $id "* ]]; then
           status="in-progress"
         fi
-        printf '%s' "$id"; printf '%s' "$FS"
-        printf '%s' "$priority"; printf '%s' "$FS"
-        printf '%s' "$title"; printf '%s' "$FS"
-        printf '%s' "$current_domain"; printf '%s' "$FS"
-        printf '%s' "$depends"; printf '%s' "$FS"
-        printf '%s' "$bundle"; printf '%s' "$FS"
-        printf '%s' "$status"; printf '%s' "$FS"
-        printf '%s\n' "$item_start_line"
+        _emit_item "$id" "$priority" "$title" "$current_domain" "$depends" "$bundle" "$status" "$item_start_line" "$repo_alias"
       fi
-      id="" priority="" title="" depends="" bundle="" in_item=false
+      id="" priority="" title="" depends="" bundle="" repo_alias="" in_item=false
 
       local section_name="${line#\#\# }"
       section_name="$(echo "$section_name" | sed 's/ (from .*//')"
@@ -345,14 +544,7 @@ parse_todos() {
         if [[ " $in_progress_ids " == *" $id "* ]]; then
           status="in-progress"
         fi
-        printf '%s' "$id"; printf '%s' "$FS"
-        printf '%s' "$priority"; printf '%s' "$FS"
-        printf '%s' "$title"; printf '%s' "$FS"
-        printf '%s' "$current_domain"; printf '%s' "$FS"
-        printf '%s' "$depends"; printf '%s' "$FS"
-        printf '%s' "$bundle"; printf '%s' "$FS"
-        printf '%s' "$status"; printf '%s' "$FS"
-        printf '%s\n' "$item_start_line"
+        _emit_item "$id" "$priority" "$title" "$current_domain" "$depends" "$bundle" "$status" "$item_start_line" "$repo_alias"
       fi
 
       # Extract ID: find first X-code-N pattern in parenthetical (e.g. H-8-3, H-BF5-1, D-2-1)
@@ -368,6 +560,7 @@ parse_todos() {
       priority=""
       depends=""
       bundle=""
+      repo_alias=""
       in_item=true
       item_start_line=$line_num
       continue
@@ -385,6 +578,9 @@ parse_todos() {
       if [[ "$line" =~ ^\*\*Bundle\ with:\*\*\ (.+) ]]; then
         bundle="${BASH_REMATCH[1]}"
       fi
+      if [[ "$line" =~ ^\*\*Repo:\*\*\ (.+) ]]; then
+        repo_alias="$(echo "${BASH_REMATCH[1]}" | xargs)"
+      fi
     fi
   done < "$TODOS_FILE"
 
@@ -394,14 +590,7 @@ parse_todos() {
     if [[ " $in_progress_ids " == *" $id "* ]]; then
       status="in-progress"
     fi
-    printf '%s' "$id"; printf '%s' "$FS"
-    printf '%s' "$priority"; printf '%s' "$FS"
-    printf '%s' "$title"; printf '%s' "$FS"
-    printf '%s' "$current_domain"; printf '%s' "$FS"
-    printf '%s' "$depends"; printf '%s' "$FS"
-    printf '%s' "$bundle"; printf '%s' "$FS"
-    printf '%s' "$status"; printf '%s' "$FS"
-    printf '%s\n' "$item_start_line"
+    _emit_item "$id" "$priority" "$title" "$current_domain" "$depends" "$bundle" "$status" "$item_start_line" "$repo_alias"
   fi
 }
 
@@ -581,13 +770,14 @@ cmd_list() {
   local count=0
   while IFS= read -r record; do
     [[ -z "$record" ]] && continue
-    local id priority title domain deps bundle status
+    local id priority title domain deps bundle status repo_alias
     id="$(echo "$record" | field 1)"
     priority="$(echo "$record" | field 2)"
     title="$(echo "$record" | field 3)"
     domain="$(echo "$record" | field 4)"
     deps="$(echo "$record" | field 5)"
     status="$(echo "$record" | field 7)"
+    repo_alias="$(echo "$record" | field 9)"
     [[ -z "$id" ]] && continue
 
     # Color-code priority
@@ -606,11 +796,17 @@ cmd_list() {
       *)           scolor="" ;;
     esac
 
-    # Truncate title if too long
+    # Truncate title if too long (shorter if repo label needed)
     local display_title="$title"
-    if [[ ${#display_title} -gt 53 ]]; then
-      display_title="${display_title:0:50}..."
+    local repo_suffix=""
+    if [[ -n "$repo_alias" && "$repo_alias" != "self" && "$repo_alias" != "hub" ]]; then
+      repo_suffix=" [${repo_alias}]"
     fi
+    local max_title_len=$((53 - ${#repo_suffix}))
+    if [[ ${#display_title} -gt $max_title_len ]]; then
+      display_title="${display_title:0:$((max_title_len - 3))}..."
+    fi
+    display_title="${display_title}${repo_suffix}"
 
     # Format deps
     local display_deps="-"
@@ -758,6 +954,23 @@ cmd_conflicts() {
   for ((i=0; i<${#ids[@]}; i++)); do
     for ((j=i+1; j<${#ids[@]}; j++)); do
       local id1="${ids[$i]}" id2="${ids[$j]}"
+
+      # Get repo aliases (field 9) to determine if items target the same repo
+      local repo1 repo2
+      repo1="$(echo "$items" | awk -F"$FS" -v id="$id1" '$1 == id' | field 9)"
+      repo2="$(echo "$items" | awk -F"$FS" -v id="$id2" '$1 == id' | field 9)"
+
+      # Normalise empty/self/hub aliases to a canonical value for comparison
+      local norm_repo1 norm_repo2
+      norm_repo1="${repo1:-hub}"
+      [[ "$norm_repo1" == "self" ]] && norm_repo1="hub"
+      norm_repo2="${repo2:-hub}"
+      [[ "$norm_repo2" == "self" ]] && norm_repo2="hub"
+
+      # Items targeting different repos can never have file conflicts — skip
+      if [[ "$norm_repo1" != "$norm_repo2" ]]; then
+        continue
+      fi
 
       local domain1 domain2
       domain1="$(echo "$items" | awk -F"$FS" -v id="$id1" '$1 == id' | field 4)"
@@ -955,6 +1168,18 @@ cmd_start() {
     fi
   done
 
+  # Resolve ALL repos before launching any workers (don't interleave prompts with sessions)
+  declare -A resolved_repos  # id -> repo_path
+  for id in "${ids[@]}"; do
+    local item_line
+    item_line="$(echo "$items" | awk -F"$FS" -v id="$id" '$1 == id')"
+    local repo_alias
+    repo_alias="$(echo "$item_line" | field 9)"
+    local target_repo
+    target_repo="$(resolve_repo "$repo_alias")" || die "Failed to resolve repo for $id (alias: '$repo_alias')"
+    resolved_repos["$id"]="$target_repo"
+  done
+
   # Check for file-level conflicts between selected items (warn only)
   if [[ ${#ids[@]} -gt 1 ]]; then
     info "Checking for file-level conflicts..."
@@ -983,19 +1208,46 @@ cmd_start() {
     title="$(echo "$item_line" | field 3)"
     local todo_text
     todo_text="$(extract_todo_text "$id")"
+    local target_repo="${resolved_repos[$id]}"
 
-    local worktree_path="$WORKTREE_DIR/todo-$id"
-    local branch_name="todo/$id"
+    # Determine worktree path based on target repo
+    local worktree_path branch_name
+    branch_name="todo/$id"
+    if [[ "$target_repo" == "$PROJECT_ROOT" ]]; then
+      # Hub repo — use existing local worktree path
+      worktree_path="$WORKTREE_DIR/todo-$id"
+    else
+      # Cross-repo — worktree in target repo
+      worktree_path="$target_repo/.worktrees/todo-$id"
+    fi
 
-    # Create worktree (fetch latest main first)
+    # Create worktree (fetch latest main in the TARGET repo first)
     if [[ -d "$worktree_path" ]]; then
       warn "Worktree already exists for $id at $worktree_path, reusing"
     else
-      info "Fetching latest main before creating worktree for $id"
-      git -C "$PROJECT_ROOT" fetch origin main --quiet 2>/dev/null || true
-      git -C "$PROJECT_ROOT" merge --ff-only origin/main --quiet 2>/dev/null || true
-      info "Creating worktree for $id on branch $branch_name"
-      git -C "$PROJECT_ROOT" worktree add "$worktree_path" -b "$branch_name" HEAD
+      # Ensure target worktree dir exists for cross-repo items
+      if [[ "$target_repo" != "$PROJECT_ROOT" ]]; then
+        mkdir -p "$target_repo/.worktrees"
+        ensure_worktree_excluded "$target_repo"
+      fi
+
+      info "Fetching latest main in $(basename "$target_repo") before creating worktree for $id"
+      git -C "$target_repo" fetch origin main --quiet 2>/dev/null || true
+      git -C "$target_repo" merge --ff-only origin/main --quiet 2>/dev/null || true
+
+      # Handle branch collision: if branch already exists, prompt for cleanup
+      if git -C "$target_repo" rev-parse --verify "$branch_name" &>/dev/null; then
+        warn "Branch $branch_name already exists in $(basename "$target_repo"). Deleting stale branch."
+        git -C "$target_repo" branch -D "$branch_name" 2>/dev/null || true
+      fi
+
+      info "Creating worktree for $id on branch $branch_name in $(basename "$target_repo")"
+      git -C "$target_repo" worktree add "$worktree_path" -b "$branch_name" HEAD
+    fi
+
+    # Track cross-repo items in the index
+    if [[ "$target_repo" != "$PROJECT_ROOT" ]]; then
+      write_cross_repo_index "$id" "$target_repo" "$worktree_path"
     fi
 
     # Allocate partition (reuse existing if worktree was reused)
@@ -1010,10 +1262,12 @@ cmd_start() {
     safe_title="$(echo "$title" | tr "\`\$'" "___")"
     info "Launching $ai_tool session for $id: $safe_title (partition $partition)"
 
+    # System prompt includes both PROJECT_ROOT (target) and HUB_ROOT (for callbacks)
     local system_prompt
     system_prompt="YOUR_TODO_ID: ${id}
 YOUR_PARTITION: ${partition}
-PROJECT_ROOT: ${PROJECT_ROOT}
+PROJECT_ROOT: ${target_repo}
+HUB_ROOT: ${PROJECT_ROOT}
 
 ${todo_text}"
 
@@ -1036,7 +1290,12 @@ ${todo_text}"
     item_line="$(echo "$items" | awk -F"$FS" -v id="$id" '$1 == id')"
     local title
     title="$(echo "$item_line" | field 3)"
-    echo "  - $id: $title"
+    local target_repo="${resolved_repos[$id]}"
+    if [[ "$target_repo" == "$PROJECT_ROOT" ]]; then
+      echo "  - $id: $title"
+    else
+      echo "  - $id: $title [$(basename "$target_repo")]"
+    fi
   done
 }
 
@@ -1049,44 +1308,40 @@ cmd_status() {
     return
   fi
 
-  local found=false
-  for wt_dir in "$WORKTREE_DIR"/todo-*/; do
-    [[ -d "$wt_dir" ]] || continue
-    found=true
-
-    local dir_name
-    dir_name="$(basename "$wt_dir")"
-    local id="${dir_name#todo-}"
+  # Helper: print status for a single worktree item.
+  # Args: id, repo_root, wt_dir, repo_label (empty for hub items)
+  _status_item() {
+    local id="$1" repo_root="$2" wt_dir="$3" repo_label="$4"
     local branch="todo/$id"
 
     local has_remote=false
-    if git -C "$PROJECT_ROOT" rev-parse --verify "origin/$branch" &>/dev/null; then
+    if git -C "$repo_root" rev-parse --verify "origin/$branch" &>/dev/null; then
       has_remote=true
     fi
 
     local base_commit
-    base_commit="$(git -C "$PROJECT_ROOT" merge-base HEAD "$branch" 2>/dev/null || echo "")"
+    base_commit="$(git -C "$repo_root" merge-base HEAD "$branch" 2>/dev/null || echo "")"
     local ahead=0
     if [[ -n "$base_commit" ]]; then
-      ahead="$(git -C "$PROJECT_ROOT" rev-list --count "$base_commit..$branch" 2>/dev/null || echo 0)"
+      ahead="$(git -C "$repo_root" rev-list --count "$base_commit..$branch" 2>/dev/null || echo 0)"
     fi
 
     local pr_info="" pr_state_val="none"
     if command -v gh &>/dev/null; then
       local merged_pr
-      merged_pr="$(gh pr list --head "$branch" --state merged --json number --jq '.[0].number' --limit 1 2>/dev/null || true)"
+      merged_pr="$(gh_in_repo "$repo_root" pr list --head "$branch" --state merged --json number --jq '.[0].number' --limit 1 2>/dev/null || true)"
       if [[ -n "$merged_pr" ]]; then
         pr_info="PR #$merged_pr (MERGED)"
         pr_state_val="merged"
       else
         local open_pr
-        open_pr="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number' --limit 1 2>/dev/null || true)"
+        open_pr="$(gh_in_repo "$repo_root" pr list --head "$branch" --state open --json number --jq '.[0].number' --limit 1 2>/dev/null || true)"
         if [[ -n "$open_pr" ]]; then
           pr_info="PR #$open_pr (Open)"
           pr_state_val="open"
         else
           local closed_pr
-          closed_pr="$(gh pr list --head "$branch" --state closed --json number --jq '.[0].number' --limit 1 2>/dev/null || true)"
+          closed_pr="$(gh_in_repo "$repo_root" pr list --head "$branch" --state closed --json number --jq '.[0].number' --limit 1 2>/dev/null || true)"
           if [[ -n "$closed_pr" ]]; then
             pr_info="PR #$closed_pr (Closed)"
             pr_state_val="closed"
@@ -1101,8 +1356,8 @@ cmd_status() {
 
     local branch_merged=false
     local ahead_count
-    ahead_count="$(git -C "$PROJECT_ROOT" rev-list --count main.."$branch" 2>/dev/null || echo "0")"
-    if [[ "$ahead_count" -gt 0 ]] && git -C "$PROJECT_ROOT" branch --merged main 2>/dev/null | grep -q "$branch"; then
+    ahead_count="$(git -C "$repo_root" rev-list --count main.."$branch" 2>/dev/null || echo "0")"
+    if [[ "$ahead_count" -gt 0 ]] && git -C "$repo_root" branch --merged main 2>/dev/null | grep -q "$branch"; then
       branch_merged=true
     fi
 
@@ -1122,14 +1377,39 @@ cmd_status() {
     local partition_num=""
     partition_num="$(get_partition_for "$id")"
 
-    echo -e "  ${BOLD}$id${RESET}  [$item_status]"
+    local label_suffix=""
+    [[ -n "$repo_label" ]] && label_suffix="  ${CYAN}[$repo_label]${RESET}"
+
+    echo -e "  ${BOLD}$id${RESET}${label_suffix}  [$item_status]"
     echo -e "    Branch:    $branch ($ahead commits ahead)"
     echo -e "    Remote:    $( $has_remote && echo -e "${GREEN}pushed${RESET}" || echo -e "${DIM}local only${RESET}" )"
     echo -e "    PR:        $pr_info"
     [[ -n "$partition_num" ]] && echo -e "    Partition:  $partition_num"
     echo -e "    Path:      $wt_dir"
     echo
+  }
+
+  local found=false
+
+  # Hub-local worktrees
+  for wt_dir in "$WORKTREE_DIR"/todo-*/; do
+    [[ -d "$wt_dir" ]] || continue
+    found=true
+    local dir_name
+    dir_name="$(basename "$wt_dir")"
+    local id="${dir_name#todo-}"
+    _status_item "$id" "$PROJECT_ROOT" "$wt_dir" ""
   done
+
+  # Cross-repo worktrees
+  if [[ -f "$CROSS_REPO_INDEX" ]]; then
+    while IFS=$'\t' read -r idx_id idx_repo idx_path; do
+      [[ -z "$idx_id" || "$idx_id" =~ ^# ]] && continue
+      [[ -d "$idx_path" ]] || continue
+      found=true
+      _status_item "$idx_id" "$idx_repo" "$idx_path" "$(basename "$idx_repo")"
+    done < "$CROSS_REPO_INDEX"
+  fi
 
   if ! $found; then
     echo "  No active worktrees"
@@ -1140,28 +1420,46 @@ cmd_merged_ids() {
   if [[ ! -d "$WORKTREE_DIR" ]]; then
     return
   fi
-  for wt_dir in "$WORKTREE_DIR"/todo-*/; do
-    [[ -d "$wt_dir" ]] || continue
-    local dir_name
-    dir_name="$(basename "$wt_dir")"
-    local id="${dir_name#todo-}"
+
+  # Helper: check if a single item is merged and print its ID if so.
+  # Args: id, repo_root
+  _check_merged_item() {
+    local id="$1" repo_root="$2"
     local branch="todo/$id"
 
     local is_merged=false
     local ahead_count
-    ahead_count="$(git -C "$PROJECT_ROOT" rev-list --count main.."$branch" 2>/dev/null || echo "0")"
-    if [[ "$ahead_count" -gt 0 ]] && git -C "$PROJECT_ROOT" branch --merged main 2>/dev/null | grep -q "$branch"; then
+    ahead_count="$(git -C "$repo_root" rev-list --count main.."$branch" 2>/dev/null || echo "0")"
+    if [[ "$ahead_count" -gt 0 ]] && git -C "$repo_root" branch --merged main 2>/dev/null | grep -q "$branch"; then
       is_merged=true
     elif command -v gh &>/dev/null; then
       local merged_count
-      merged_count="$(gh pr list --head "$branch" --state merged --json number --jq 'length' 2>/dev/null || echo "0")"
+      merged_count="$(gh_in_repo "$repo_root" pr list --head "$branch" --state merged --json number --jq 'length' 2>/dev/null || echo "0")"
       [[ "$merged_count" -gt 0 ]] && is_merged=true
     fi
 
     if $is_merged; then
       echo "$id"
     fi
+  }
+
+  # Hub-local worktrees
+  for wt_dir in "$WORKTREE_DIR"/todo-*/; do
+    [[ -d "$wt_dir" ]] || continue
+    local dir_name
+    dir_name="$(basename "$wt_dir")"
+    local id="${dir_name#todo-}"
+    _check_merged_item "$id" "$PROJECT_ROOT"
   done
+
+  # Cross-repo worktrees
+  if [[ -f "$CROSS_REPO_INDEX" ]]; then
+    while IFS=$'\t' read -r idx_id idx_repo idx_path; do
+      [[ -z "$idx_id" || "$idx_id" =~ ^# ]] && continue
+      [[ -d "$idx_path" ]] || continue
+      _check_merged_item "$idx_id" "$idx_repo"
+    done < "$CROSS_REPO_INDEX"
+  fi
 }
 
 cmd_close_workspaces() {
@@ -1236,42 +1534,60 @@ cmd_clean() {
 
   local cleaned=0
 
+  # Helper to check if a branch is merged and clean it from a specific repo
+  _clean_worktree_item() {
+    local id="$1" repo_root="$2" wt_dir="$3"
+    local branch="todo/$id"
+
+    # If a specific ID was requested, skip others
+    if [[ -n "$target_id" ]] && [[ "$id" != "$target_id" ]]; then
+      return 1
+    fi
+
+    # Check if merged (in the target repo, not necessarily the hub)
+    local is_merged=false
+    if git -C "$repo_root" branch --merged main 2>/dev/null | grep -q "$branch"; then
+      is_merged=true
+    elif command -v gh &>/dev/null; then
+      local merged_count
+      merged_count="$(gh_in_repo "$repo_root" pr list --head "$branch" --state merged --json number --jq 'length' 2>/dev/null || echo "0")"
+      [[ "$merged_count" -gt 0 ]] && is_merged=true
+    fi
+
+    if $is_merged || [[ -n "$target_id" ]]; then
+      info "Removing worktree for $id from $(basename "$repo_root")"
+      git -C "$repo_root" worktree remove "$wt_dir" --force 2>/dev/null || \
+        rm -rf "$wt_dir"
+      git -C "$repo_root" branch -D "$branch" 2>/dev/null || true
+      git -C "$repo_root" push origin --delete "$branch" 2>/dev/null || true
+      release_partition "$id"
+      remove_cross_repo_index "$id"
+      return 0
+    fi
+    return 1
+  }
+
+  # Clean hub-local worktrees
   for wt_dir in "$WORKTREE_DIR"/todo-*/; do
     [[ -d "$wt_dir" ]] || continue
     local dir_name
     dir_name="$(basename "$wt_dir")"
     local id="${dir_name#todo-}"
-
-    # If a specific ID was requested, skip others
-    if [[ -n "$target_id" ]] && [[ "$id" != "$target_id" ]]; then
-      continue
-    fi
-
-    local branch="todo/$id"
-
-    # Check if merged
-    local is_merged=false
-    local ahead_count
-    ahead_count="$(git -C "$PROJECT_ROOT" rev-list --count main.."$branch" 2>/dev/null || echo "0")"
-    if [[ "$ahead_count" -gt 0 ]] && git -C "$PROJECT_ROOT" branch --merged main 2>/dev/null | grep -q "$branch"; then
-      is_merged=true
-    elif command -v gh &>/dev/null; then
-      local merged_count
-      merged_count="$(gh pr list --head "$branch" --state merged --json number --jq 'length' 2>/dev/null || echo "0")"
-      [[ "$merged_count" -gt 0 ]] && is_merged=true
-    fi
-
-    if $is_merged || [[ -n "$target_id" ]]; then
-      info "Removing worktree for $id"
-      git -C "$PROJECT_ROOT" worktree remove "$wt_dir" --force 2>/dev/null || \
-        rm -rf "$wt_dir"
-      git -C "$PROJECT_ROOT" branch -D "$branch" 2>/dev/null || true
-      # Also delete remote branch
-      git -C "$PROJECT_ROOT" push origin --delete "$branch" 2>/dev/null || true
-      release_partition "$id"
+    if _clean_worktree_item "$id" "$PROJECT_ROOT" "$wt_dir"; then
       cleaned=$((cleaned + 1))
     fi
   done
+
+  # Clean cross-repo worktrees
+  if [[ -f "$CROSS_REPO_INDEX" ]]; then
+    while IFS=$'\t' read -r idx_id idx_repo idx_path; do
+      [[ -z "$idx_id" || "$idx_id" =~ ^# ]] && continue
+      [[ -d "$idx_path" ]] || continue
+      if _clean_worktree_item "$idx_id" "$idx_repo" "$idx_path"; then
+        cleaned=$((cleaned + 1))
+      fi
+    done < "$CROSS_REPO_INDEX"
+  fi
 
   echo -e "${GREEN}Cleaned $cleaned worktree(s)${RESET}"
 }
@@ -1280,16 +1596,28 @@ cmd_clean_single() {
   local target_id="${1:-}"
   [[ -z "$target_id" ]] && die "Usage: batch-todos.sh clean-single <ID>"
 
-  local worktree_path="$WORKTREE_DIR/todo-$target_id"
   local branch="todo/$target_id"
 
+  # Check cross-repo index first, then fall back to hub worktree
+  local wt_info target_repo worktree_path
+  wt_info="$(get_worktree_info "$target_id")"
+  if [[ -n "$wt_info" ]]; then
+    target_repo="$(echo "$wt_info" | cut -f2)"
+    worktree_path="$(echo "$wt_info" | cut -f3)"
+  else
+    # Legacy fallback — check hub worktree directly
+    worktree_path="$WORKTREE_DIR/todo-$target_id"
+    target_repo="$PROJECT_ROOT"
+  fi
+
   if [[ -d "$worktree_path" ]]; then
-    info "Removing worktree for $target_id"
-    git -C "$PROJECT_ROOT" worktree remove "$worktree_path" --force 2>/dev/null || \
+    info "Removing worktree for $target_id from $(basename "$target_repo")"
+    git -C "$target_repo" worktree remove "$worktree_path" --force 2>/dev/null || \
       rm -rf "$worktree_path"
-    git -C "$PROJECT_ROOT" branch -D "$branch" 2>/dev/null || true
-    git -C "$PROJECT_ROOT" push origin --delete "$branch" 2>/dev/null || true
+    git -C "$target_repo" branch -D "$branch" 2>/dev/null || true
+    git -C "$target_repo" push origin --delete "$branch" 2>/dev/null || true
     release_partition "$target_id"
+    remove_cross_repo_index "$target_id"
     echo -e "${GREEN}Cleaned worktree for $target_id${RESET}"
   else
     echo "No worktree found for $target_id"
@@ -1907,6 +2235,7 @@ main() {
     ci-failures)       cmd_ci_failures "$@" ;;
     pr-activity)       cmd_pr_activity "$@" ;;
     version-bump)      cmd_version_bump "$@" ;;
+    repos)             cmd_repos "$@" ;;
     *)                 die "Unknown command: $command" ;;
   esac
 }

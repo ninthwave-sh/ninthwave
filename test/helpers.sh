@@ -37,6 +37,43 @@ setup_temp_repo() {
   echo "$tmp"
 }
 
+# Create a hub repo + target repo pair as sibling directories.
+# Returns the hub repo path. Target is at ../target-repo-a and ../target-repo-b
+setup_temp_repo_pair() {
+  local parent
+  parent="$(mktemp -d)"
+  _TEMP_DIRS+=("$parent")
+
+  local hub="$parent/hub"
+  local target_a="$parent/target-repo-a"
+  local target_b="$parent/target-repo-b"
+
+  # Create hub repo
+  mkdir -p "$hub/core"
+  git -C "$hub" init --quiet
+  git -C "$hub" config user.email "test@test.com"
+  git -C "$hub" config user.name "Test"
+  ln -s "$BATCH_TODOS" "$hub/core/batch-todos.sh"
+
+  # Create target repos
+  for target in "$target_a" "$target_b"; do
+    git -C "$(mkdir -p "$target" && echo "$target")" init --quiet
+    git -C "$target" config user.email "test@test.com"
+    git -C "$target" config user.name "Test"
+    # Need an initial commit for worktree operations
+    touch "$target/.gitkeep"
+    git -C "$target" add .gitkeep
+    git -C "$target" commit -m "Initial commit" --quiet
+  done
+
+  # Hub also needs an initial commit
+  touch "$hub/.gitkeep"
+  git -C "$hub" add .gitkeep
+  git -C "$hub" commit -m "Initial commit" --quiet
+
+  echo "$hub"
+}
+
 # Place a fixture as TODOS.md in the temp repo
 use_fixture() {
   local repo="$1" fixture_name="$2"

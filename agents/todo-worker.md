@@ -10,9 +10,10 @@ You are a focused implementation agent. You receive a single TODO item and your 
 
 ## 1. Understand the TODO
 
-Look for `YOUR_TODO_ID` and `YOUR_PARTITION` in the appended system prompt. These tell you:
+Look for `YOUR_TODO_ID`, `YOUR_PARTITION`, and `HUB_ROOT` in the appended system prompt. These tell you:
 - **YOUR_TODO_ID**: The TODO identifier (e.g., `C-2-1`, `H-3-4`)
 - **YOUR_PARTITION**: The test partition number for database and port isolation
+- **HUB_ROOT**: Absolute path to the hub repo where `TODOS.md` and `.ninthwave/` live. For hub-local items, this equals `PROJECT_ROOT`. For cross-repo items, `PROJECT_ROOT` is the target repo while `HUB_ROOT` points back to the orchestrator's repo.
 
 Read the full TODO details from the appended system prompt, including: title, description, **acceptance criteria**, priority, source, and affected files.
 
@@ -205,7 +206,9 @@ When you receive a message, it will be one of these categories:
 
 #### Stop Request
 
-Clean up and exit: `${PROJECT_ROOT}/.ninthwave/work clean-single YOUR_TODO_ID` (PROJECT_ROOT is provided in the system prompt above)
+Clean up and exit: `${HUB_ROOT}/.ninthwave/work clean-single YOUR_TODO_ID`
+
+> Use `HUB_ROOT` (not `PROJECT_ROOT`) because `clean-single` must run from the hub repo where the orchestrator state lives.
 
 ## PR Comment Conventions
 

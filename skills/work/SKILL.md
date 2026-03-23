@@ -41,7 +41,7 @@ This skill orchestrates batch processing of engineering TODOs through 5 interact
 **Goal:** Help the user choose which TODO items to work on in this batch.
 
 1. Run `.ninthwave/work list --ready` to get all available items.
-2. Parse the output and present a summary table to the user showing: ID, priority, domain, title, and estimated complexity.
+2. Parse the output and present a summary table to the user showing: ID, priority, domain, title, and estimated complexity. Items with a `Repo:` field will indicate which target repo they belong to.
 
 3. AskUserQuestion -- "How do you want to select items?"
    - Detect if any feature-code IDs exist (IDs with alphabetic characters like `BF5`, `UO`, `ST`).
@@ -104,7 +104,7 @@ This skill orchestrates batch processing of engineering TODOs through 5 interact
 
 **Goal:** Create worktrees and launch parallel AI coding sessions.
 
-1. Run `.ninthwave/work start <IDs>`.
+1. Run `.ninthwave/work start <IDs>`. For cross-repo items (those with a `Repo:` field), this creates worktrees in the target repo rather than the hub repo.
 2. Display summary: item ID, title, branch, worktree path, session name.
 3. Tell the user sessions are running. Proceed to Phase 3.
 
@@ -166,7 +166,7 @@ Wait for user to confirm sessions completed, then verify PR status.
 
 1. Run `watch-ready` and `merged-ids` to categorize items
 2. Use MERGE_STRATEGY from Phase 1 (or ask if not set)
-3. Execute merges in order, handling conflicts and retries
+3. Execute merges in order, handling conflicts and retries. For cross-repo items, merges happen in the target repo's context.
 
 ---
 

@@ -56,7 +56,9 @@ This skill decomposes a feature spec into work items sized for individual human-
 
 4. Summarize the feature scope in 3-5 bullet points and confirm with the user.
 
-5. Assign a **feature code** for TODO IDs. Derive from the feature name (e.g., "User Onboarding" -> `UO`, "Search & Filters" -> `SF`). Keep it 2-4 uppercase alphanumeric characters.
+5. If the hub repo has context about other repos (via agent instructions, `.ninthwave/repos.conf`, or project docs), consider which repo each piece of work targets. Features may span multiple repos.
+
+6. Assign a **feature code** for TODO IDs. Derive from the feature name (e.g., "User Onboarding" -> `UO`, "Search & Filters" -> `SF`). Keep it 2-4 uppercase alphanumeric characters.
 
 ---
 
@@ -112,6 +114,10 @@ Work from the bottom of the stack up:
 5. **Frontend hooks** -- data layer
 6. **Frontend components** -- UI
 7. **Integration/polish** -- wiring and final touches
+
+#### Target repo
+
+When a TODO targets a repo other than the hub repo, include the `**Repo:** <alias>` metadata field. Omit the field for items that target the hub repo itself.
 
 #### Dependency mapping
 
