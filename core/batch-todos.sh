@@ -41,6 +41,9 @@ CHANGELOG_FILE="$PROJECT_ROOT/CHANGELOG.md"
 WORKTREE_DIR="$PROJECT_ROOT/.worktrees"
 PARTITION_DIR="$WORKTREE_DIR/.partitions"
 
+# Global array for temp file cleanup (must be global so EXIT trap can access it)
+_prompt_files=()
+
 # Field separator for parse_todos output. Using FS (ASCII 28 / file separator)
 # because pipe chars may appear in TODO text.
 FS=$'\x1c'
@@ -916,8 +919,7 @@ cmd_batch_order() {
 cmd_start() {
   [[ $# -lt 1 ]] && die "Usage: batch-todos.sh start <ID1> [ID2...]"
 
-  # Track temp files for cleanup
-  local _prompt_files=()
+  # Clean up temp files on exit (uses global _prompt_files array)
   trap 'rm -f "${_prompt_files[@]}" 2>/dev/null' EXIT
 
   local ids=("$@")
