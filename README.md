@@ -1,6 +1,6 @@
 # workflow-kit
 
-Workflow orchestration for AI coding tools. Not a framework, not a harness -- bring your own AI tool, your own coding conventions, your own feature specs. workflow-kit handles what comes next: decomposing work into human-reviewable PRs, running parallel AI sessions to implement them, and delivering reviewed code ready to merge.
+Workflow orchestration for AI coding tools. Not a framework, not a harness -- bring your own AI tool, your own coding conventions, your own feature specs. workflow-kit handles what comes next: decomposing work into human-reviewable PRs, running parallel AI sessions to implement them, addressing review feedback automatically, and delivering reviewed code ready to merge.
 
 Each TODO gets its own full interactive session -- not a sub-task or function call, but a complete session with its own context window, tool access, and the full capabilities of whichever harness you use. You can switch into any worker to steer it, give feedback, or iterate on a PR, while the orchestrator manages the pipeline around them.
 
