@@ -907,7 +907,7 @@ cmd_batch_order() {
       done
       $found || new_remaining+=("$id")
     done
-    remaining=("${new_remaining[@]}")
+    remaining=("${new_remaining[@]+"${new_remaining[@]}"}")
   done
 
   echo -e "${DIM}Total: ${#valid_ids[@]} items in $batch_num batch(es)${RESET}"
@@ -1301,22 +1301,33 @@ cmd_mark_done() {
   local temp_file
   temp_file="$(mktemp)"
 
-  # Read TODOS.md and remove completed items
+  # Read TODOS.md and remove completed items.
+  # Strategy: buffer section headers and inter-item lines until we know the
+  # section has at least one kept item, then flush the buffer.
   local in_item=false
   local skip_item=false
-  local current_section=""
   local section_has_items=false
   local pending_section=""
+  local pending_lines=""
+
+  # Flush pending section header and buffered lines to the output file.
+  _flush_section() {
+    if [[ -n "$pending_section" ]]; then
+      echo "$pending_section" >> "$temp_file"
+      echo "" >> "$temp_file"
+      pending_section=""
+    fi
+    if [[ -n "$pending_lines" ]]; then
+      printf '%s' "$pending_lines" >> "$temp_file"
+      pending_lines=""
+    fi
+  }
 
   while IFS= read -r line; do
     # Track section headers
     if [[ "$line" =~ ^##\  ]] && ! [[ "$line" =~ ^###\  ]]; then
-      # Before writing a new section, check if the previous section had items
-      if [[ -n "$pending_section" ]] && ! $section_has_items; then
-        # Skip the empty section (don't write it)
-        :
-      fi
       pending_section="$line"
+      pending_lines=""
       section_has_items=false
       skip_item=false
       in_item=false
@@ -1338,25 +1349,19 @@ cmd_mark_done() {
 
       if ! $skip_item; then
         section_has_items=true
-        # Write pending section header if we haven't yet
-        if [[ -n "$pending_section" ]]; then
-          echo "$pending_section" >> "$temp_file"
-          echo "" >> "$temp_file"
-          pending_section=""
-        fi
+        _flush_section
       fi
     fi
 
     # Write line unless we're skipping this item
     if ! $skip_item; then
-      if [[ -n "$pending_section" ]] && ! [[ "$line" =~ ^###\  ]]; then
-        # Non-item content in a section -- write section header first
-        section_has_items=true
-        echo "$pending_section" >> "$temp_file"
-        echo "" >> "$temp_file"
-        pending_section=""
+      if [[ -n "$pending_section" ]]; then
+        # Buffer lines between section header and first kept item
+        pending_lines="${pending_lines}${line}
+"
+      else
+        echo "$line" >> "$temp_file"
       fi
-      echo "$line" >> "$temp_file"
     fi
   done < "$TODOS_FILE"
 
