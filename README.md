@@ -6,34 +6,27 @@ Ship features through parallel AI sessions. Each work item gets a full interacti
 
 ```mermaid
 graph LR
-    subgraph Plan
-        P1[Context]
-        P2[Specs]
-        P3[PRDs]
+    subgraph Decompose["/decompose"]
+        W["TODOS.md<br/>Linear<br/>ClickUp<br/>GH Issues"]
     end
 
-    subgraph WorkItems[Work items]
-        W1[TODOS.md]
-        W2[Linear]
-        W3[ClickUp]
-        W4[GH Issues]
-    end
-
-    subgraph Deliver
-        D1[Session 1]
-        D2[Session 2]
-        D3[Session N]
+    subgraph Work["/work"]
+        D["Session 1<br/>Session 2<br/>Session N"]
     end
 
     subgraph Ship
-        S1[CI + Review]
-        S2[Autofix]
+        S["PRs<br/>Autofix<br/>Merge"]
     end
 
-    Plan -->|"/decompose"| WorkItems
-    WorkItems -->|"/work"| Deliver
-    Deliver -->|PRs| Ship
-    Ship --> M[main]
+    Decompose --> Work --> Ship
+
+    classDef workNode fill:#fef3c7,stroke:#f59e0b,color:#78350f
+    classDef deliverNode fill:#d1fae5,stroke:#10b981,color:#064e3b
+    classDef shipNode fill:#ede9fe,stroke:#8b5cf6,color:#4c1d95
+
+    class W workNode
+    class D deliverNode
+    class S shipNode
 ```
 
 ## How It Works
