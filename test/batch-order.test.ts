@@ -4,7 +4,11 @@ import { join } from "path";
 import { writeFileSync, mkdirSync } from "fs";
 import { spawnSync } from "child_process";
 import { parseTodos } from "../core/parser.ts";
-import { cmdBatchOrder } from "../core/commands/batch-order.ts";
+import {
+  cmdBatchOrder,
+  computeBatches,
+  CircularDependencyError,
+} from "../core/commands/batch-order.ts";
 
 describe("batch-order", () => {
   afterEach(() => cleanupTempRepos());
@@ -201,5 +205,254 @@ Acceptance: Test fixture only.
     expect(stdout).toContain("Warning");
     expect(stdout).toContain("FAKE-ID-99");
     expect(stdout).toContain("M-CI-1");
+  });
+});
+
+describe("computeBatches", () => {
+  afterEach(() => cleanupTempRepos());
+
+  it("all independent items land in batch 1", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+
+    const result = computeBatches(items, ["M-CI-1", "C-UO-1"]);
+
+    expect(result.batchCount).toBe(1);
+    expect(result.assignments.get("M-CI-1")).toBe(1);
+    expect(result.assignments.get("C-UO-1")).toBe(1);
+    expect(result.assignments.size).toBe(2);
+  });
+
+  it("linear dependency produces two batches", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+
+    const result = computeBatches(items, ["M-CI-1", "H-CI-2"]);
+
+    expect(result.batchCount).toBe(2);
+    expect(result.assignments.get("M-CI-1")).toBe(1);
+    expect(result.assignments.get("H-CI-2")).toBe(2);
+  });
+
+  it("single item returns batch 1", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+
+    const result = computeBatches(items, ["C-UO-1"]);
+
+    expect(result.batchCount).toBe(1);
+    expect(result.assignments.get("C-UO-1")).toBe(1);
+    expect(result.assignments.size).toBe(1);
+  });
+
+  it("unknown IDs are silently skipped", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+
+    const result = computeBatches(items, ["M-CI-1", "FAKE-99"]);
+
+    expect(result.batchCount).toBe(1);
+    expect(result.assignments.get("M-CI-1")).toBe(1);
+    expect(result.assignments.has("FAKE-99")).toBe(false);
+    expect(result.assignments.size).toBe(1);
+  });
+
+  it("circular dependency throws CircularDependencyError", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "circular_deps.md");
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+
+    expect(() =>
+      computeBatches(items, ["H-CC-1", "H-CC-2", "H-CC-3"]),
+    ).toThrow(CircularDependencyError);
+  });
+
+  it("circular dependency error contains all circular item IDs", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "circular_deps.md");
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+
+    try {
+      computeBatches(items, ["H-CC-1", "H-CC-2", "H-CC-3"]);
+      expect.unreachable("Should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CircularDependencyError);
+      const err = e as CircularDependencyError;
+      expect(err.circularItems).toContain("H-CC-1");
+      expect(err.circularItems).toContain("H-CC-2");
+      expect(err.circularItems).toContain("H-CC-3");
+      expect(err.batchCount).toBe(0);
+      expect(err.assignments.size).toBe(0);
+    }
+  });
+
+  it("partial circular: assigns free items then throws for cycle", () => {
+    const repo = setupTempRepo();
+    const todosFile = join(repo, "TODOS.md");
+
+    writeFileSync(
+      todosFile,
+      `# TODOS
+
+## Mixed
+
+### Feat: Free item (H-MX-1)
+
+**Priority:** High
+**Source:** Test
+**Depends on:** None
+
+No dependencies.
+
+Acceptance: Test fixture only.
+
+---
+
+### Feat: Cycle A (H-MX-2)
+
+**Priority:** High
+**Source:** Test
+**Depends on:** H-MX-3
+
+Depends on H-MX-3.
+
+Acceptance: Test fixture only.
+
+---
+
+### Feat: Cycle B (H-MX-3)
+
+**Priority:** High
+**Source:** Test
+**Depends on:** H-MX-2
+
+Depends on H-MX-2.
+
+Acceptance: Test fixture only.
+
+---
+`,
+    );
+
+    const items = parseTodos(todosFile, join(repo, ".worktrees"));
+
+    try {
+      computeBatches(items, ["H-MX-1", "H-MX-2", "H-MX-3"]);
+      expect.unreachable("Should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CircularDependencyError);
+      const err = e as CircularDependencyError;
+      // Free item was assigned to batch 1
+      expect(err.assignments.get("H-MX-1")).toBe(1);
+      expect(err.batchCount).toBe(1);
+      // Circular items identified
+      expect(err.circularItems).toContain("H-MX-2");
+      expect(err.circularItems).toContain("H-MX-3");
+      expect(err.circularItems).not.toContain("H-MX-1");
+    }
+  });
+
+  it("multi-level deps: diamond dependency resolves correctly", () => {
+    const repo = setupTempRepo();
+    const todosFile = join(repo, "TODOS.md");
+
+    // Diamond: A has no deps, B depends on A, C depends on A, D depends on B+C
+    writeFileSync(
+      todosFile,
+      `# TODOS
+
+## Diamond
+
+### Feat: Root (H-DI-1)
+
+**Priority:** High
+**Source:** Test
+**Depends on:** None
+
+Root of diamond.
+
+Acceptance: Test fixture only.
+
+---
+
+### Feat: Left (H-DI-2)
+
+**Priority:** High
+**Source:** Test
+**Depends on:** H-DI-1
+
+Left branch.
+
+Acceptance: Test fixture only.
+
+---
+
+### Feat: Right (H-DI-3)
+
+**Priority:** High
+**Source:** Test
+**Depends on:** H-DI-1
+
+Right branch.
+
+Acceptance: Test fixture only.
+
+---
+
+### Feat: Join (H-DI-4)
+
+**Priority:** High
+**Source:** Test
+**Depends on:** H-DI-2, H-DI-3
+
+Joins left and right.
+
+Acceptance: Test fixture only.
+
+---
+`,
+    );
+
+    const items = parseTodos(todosFile, join(repo, ".worktrees"));
+    const result = computeBatches(items, [
+      "H-DI-1",
+      "H-DI-2",
+      "H-DI-3",
+      "H-DI-4",
+    ]);
+
+    expect(result.batchCount).toBe(3);
+    expect(result.assignments.get("H-DI-1")).toBe(1);
+    expect(result.assignments.get("H-DI-2")).toBe(2);
+    expect(result.assignments.get("H-DI-3")).toBe(2);
+    expect(result.assignments.get("H-DI-4")).toBe(3);
+  });
+
+  it("empty selectedIds returns empty result", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+
+    const result = computeBatches(items, []);
+
+    expect(result.batchCount).toBe(0);
+    expect(result.assignments.size).toBe(0);
+  });
+
+  it("external deps are ignored (only selected set matters)", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+
+    // H-CI-2 depends on M-CI-1, but M-CI-1 is not in the selected set
+    // So H-CI-2 should be batch 1 (its dep is external)
+    const result = computeBatches(items, ["H-CI-2"]);
+
+    expect(result.batchCount).toBe(1);
+    expect(result.assignments.get("H-CI-2")).toBe(1);
   });
 });
