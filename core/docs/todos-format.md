@@ -21,9 +21,9 @@ Level 2 headers group TODOs by domain or feature:
 ```
 
 Examples:
-- `## Bank Feeds Phase 5 (feature decomposition, 2026-03-22)`
+- `## User Onboarding (feature decomposition, 2026-03-22)`
 - `## Cloud Infrastructure`
-- `## Frontend: Portfolio & Budget`
+- `## Frontend: Search & Filters`
 
 The section name is normalised by `batch-todos.sh` into a domain slug for filtering (`--domain`).
 
@@ -97,11 +97,11 @@ Format: `[CHML]-<feature_code>-<seq>`
 
 **Feature code** (2-4 uppercase alphanumeric):
 - Derived from the section/feature name
-- Examples: `BF5` (Bank Feeds Phase 5), `CI` (Cloud Infrastructure), `FPB` (Frontend Portfolio & Budget)
+- Examples: `UO` (User Onboarding), `CI` (Cloud Infrastructure), `SF` (Search & Filters)
 
 **Sequence**: Incrementing integer starting at 1.
 
-Examples: `C-BF5-1`, `H-BF5-3`, `M-CI-1`, `L-FPB-2`
+Examples: `C-UO-1`, `H-UO-3`, `M-CI-1`, `L-SF-2`
 
 ## Sizing Guidelines
 
