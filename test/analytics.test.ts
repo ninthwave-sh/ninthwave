@@ -1123,6 +1123,26 @@ Total duration: 5m 23s
     const result = parseCostSummary(text);
     expect(result.tokensUsed).toBe(1234567);
   });
+
+  it("rejects false positive: CSRF token", () => {
+    const result = parseCostSummary("CSRF token: 12345");
+    expect(result.tokensUsed).toBeNull();
+  });
+
+  it("rejects false positive: auth token", () => {
+    const result = parseCostSummary("auth token: 99999");
+    expect(result.tokensUsed).toBeNull();
+  });
+
+  it("rejects false positive: session token", () => {
+    const result = parseCostSummary("session token: 67890");
+    expect(result.tokensUsed).toBeNull();
+  });
+
+  it("still matches 'Total tokens: 42,567' after tightening", () => {
+    const result = parseCostSummary("Total tokens: 42,567");
+    expect(result.tokensUsed).toBe(42567);
+  });
 });
 
 // ── collectRunMetrics with cost data ─────────────────────────────────

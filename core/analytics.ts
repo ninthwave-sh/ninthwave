@@ -66,8 +66,10 @@ export function parseCostSummary(text: string): CostSummary {
   let tokensUsed: number | null = null;
   let costUsd: number | null = null;
 
-  // Match token count: "tokens: 42,567" or "tokens: 42567"
-  const tokenMatch = text.match(/tokens?\s*[:=]\s*([\d,]+)/i);
+  // Match token count: "Total tokens: 42,567", "Tokens: 42567", "Total token: 100,000"
+  // Requires either "total" prefix or plural "tokens" to avoid false positives
+  // like "CSRF token: 12345".
+  const tokenMatch = text.match(/(?:total\s+tokens?|tokens)\s*[:=]\s*([\d,]+)/i);
   if (tokenMatch) {
     const parsed = parseInt(tokenMatch[1]!.replace(/,/g, ""), 10);
     if (!isNaN(parsed) && parsed > 0) {
