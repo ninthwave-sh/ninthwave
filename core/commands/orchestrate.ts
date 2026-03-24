@@ -633,6 +633,15 @@ export async function cmdOrchestrate(
         frictionLogPath = args[i + 1];
         i += 2;
         break;
+      case "--mux": {
+        const muxValue = args[i + 1];
+        if (muxValue !== "cmux" && muxValue !== "tmux") {
+          die(`Invalid --mux value: "${muxValue ?? ""}". Must be "cmux" or "tmux".`);
+        }
+        process.env.NINTHWAVE_MUX = muxValue;
+        i += 2;
+        break;
+      }
       default:
         die(`Unknown option: ${args[i]}`);
     }
@@ -690,7 +699,8 @@ export async function cmdOrchestrate(
 
   const ctx: ExecutionContext = { projectRoot, worktreeDir, todosFile, aiTool };
   const actionDeps: OrchestratorDeps = {
-    launchSingleItem,
+    launchSingleItem: (item, todosFile, worktreeDir, projectRoot, aiTool) =>
+      launchSingleItem(item, todosFile, worktreeDir, projectRoot, aiTool, mux),
     cleanSingleWorktree,
     prMerge: (repoRoot, prNumber) => prMerge(repoRoot, prNumber),
     prComment: (repoRoot, prNumber, body) => prComment(repoRoot, prNumber, body),
