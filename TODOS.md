@@ -9,6 +9,7 @@
 
 
 
+
 ### Feat: Auto-detect multiplexer and add --mux flag (M-MUX-3)
 
 **Priority:** Medium
@@ -55,6 +56,7 @@ Key files: `README.md`, `core/commands/setup.ts`, `test/setup.test.ts`
 
 
 
+
 ### Feat: Explore vision, scope next iteration, and decompose into TODOs (L-VIS-4)
 
 **Priority:** Low
@@ -70,6 +72,7 @@ Key files: `TODOS.md`, `CLAUDE.md`, `README.md`, `vision.md`
 ---
 
 ## Dogfood Friction Fixes (friction decomposition, 2026-03-24)
+
 
 
 
@@ -133,25 +136,5 @@ Add `lastCommitTime` to the orchestrator's snapshot builder by running `git log 
 Acceptance: Orchestrator snapshot includes `lastCommitTime` per item. Supervisor prompt shows commit freshness alongside state duration. Supervisor can distinguish active workers (recent commits) from stalled ones (no recent commits). No changes to worker code.
 
 Key files: `core/commands/orchestrate.ts`, `core/supervisor.ts`, `test/orchestrate.test.ts`
-
----
-
-### Fix: Truncate long domain slugs to max 40 characters (L-DF-5)
-
-**Priority:** Low
-**Source:** Friction #4 — domain slug from long section headers is unwieldy for --domain filter
-**Depends on:** None
-
-Cap domain slugs at 40 characters in `normalizeDomain()`. If the auto-slugified result exceeds the limit, truncate at the last complete hyphen-separated word that fits within 40 chars (don't cut mid-word). This keeps `--domain` filters usable without requiring custom domain mappings in `.ninthwave/domains.conf`.
-
-**Test plan:**
-- Unit test: short slugs (<= 40 chars) are unchanged
-- Unit test: long slug is truncated at word boundary
-- Unit test: slug of exactly 40 chars is not truncated
-- Unit test: custom domain mappings in domains.conf still take priority over truncation
-
-Acceptance: `normalizeDomain()` returns slugs of at most 40 characters. Truncation happens at hyphen boundaries (no mid-word cuts). Existing short slugs and custom mappings are unaffected.
-
-Key files: `core/parser.ts`, `test/parser.test.ts`
 
 ---
