@@ -199,28 +199,6 @@ Key files: `core/commands/start.ts`, `core/commands/clean.ts`, `test/start.test.
 
 ## Detection Latency & Auto-Rebase (friction #17/#18, 2026-03-24)
 
-
-
-### Feat: Add detection latency timestamps to state transitions (M-DET-2)
-
-**Priority:** Medium
-**Source:** Friction #17 — no measurement of detection latency
-**Depends on:** None
-
-Add `eventTime` and `detectedTime` fields to state transition records. `eventTime` is the timestamp from the external system (e.g., GitHub's `completedAt` for CI checks, `mergedAt` for merges, `updatedAt` for mergeable status changes). `detectedTime` is `Date.now()` when the orchestrator's poll cycle picks up the change. Store these in `OrchestratorItem` alongside `lastTransition`. Calculate `detectionLatencyMs = detectedTime - eventTime` and emit as a structured log event.
-
-**Test plan:**
-- Unit test: state transition records both eventTime and detectedTime
-- Unit test: detectionLatencyMs is calculated correctly
-- Unit test: missing eventTime (not available from API) falls back to detectedTime
-- Verify latency appears in structured log output
-
-Acceptance: State transitions include `eventTime`, `detectedTime`, and `detectionLatencyMs`. The orchestrator logs detection latency on every state change. Fields are optional/backward-compatible with existing state. Tests pass.
-
-Key files: `core/orchestrator.ts`, `core/commands/orchestrate.ts`, `core/commands/watch.ts`, `test/orchestrator.test.ts`
-
----
-
 ### Feat: Surface detection latency in analytics summaries (L-DET-3)
 
 **Priority:** Low
