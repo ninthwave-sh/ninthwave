@@ -1,11 +1,13 @@
 // orchestrate command: event loop for parallel TODO processing.
 // Parses args, reconstructs state from disk/GitHub, runs the poll→transition→execute loop,
-// emits structured JSON logs, and handles graceful SIGINT shutdown.
+// emits structured JSON logs, and handles graceful SIGINT/SIGTERM shutdown.
+// Supports daemon mode (--daemon) for background operation with state persistence.
 // Optionally runs an LLM supervisor tick for anomaly detection and friction logging.
 
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, openSync } from "fs";
 import { join } from "path";
 import { totalmem } from "os";
+import { spawn as nodeSpawn } from "node:child_process";
 import { run } from "../shell.ts";
 import {
   Orchestrator,
@@ -52,6 +54,17 @@ import {
   type AnalyticsCommitDeps,
   type CostSummary,
 } from "../analytics.ts";
+import {
+  writePidFile,
+  cleanPidFile,
+  cleanStateFile,
+  isDaemonRunning,
+  serializeOrchestratorState,
+  writeStateFile,
+  logFilePath,
+  stateFilePath,
+  type DaemonIO,
+} from "../daemon.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
 
@@ -352,6 +365,8 @@ export interface OrchestrateLoopDeps {
   analyticsCommit?: AnalyticsCommitDeps;
   /** Read screen content from a worker workspace for cost/token parsing. */
   readScreen?: (ref: string, lines?: number) => string;
+  /** Called after each poll cycle with current items. Used for daemon state persistence. */
+  onPollComplete?: (items: OrchestratorItem[]) => void;
 }
 
 export interface OrchestrateLoopConfig {
@@ -734,6 +749,9 @@ export async function orchestrateLoop(
       }
     }
 
+    // Persist state for daemon mode (or any caller that wants snapshots)
+    deps.onPollComplete?.(orch.getAllItems());
+
     // Sleep — adaptive or fixed override
     const interval = config.pollIntervalMs ?? adaptivePollInterval(orch);
     await deps.sleep(interval);
@@ -813,6 +831,46 @@ export function computeDefaultWipLimit(getTotalMemory: () => number = totalmem):
 
 // ── CLI command ─────────────────────────────────────────────────────
 
+// ── Daemon fork ─────────────────────────────────────────────────────
+
+/**
+ * Fork the orchestrate command into a detached background process.
+ * Writes PID file, redirects output to log file, and returns immediately.
+ *
+ * @param childArgs - args to pass to the child (original args with --daemon replaced by --_daemon-child)
+ * @param projectRoot - project root for PID/log file paths
+ * @param spawnFn - injectable for testing; defaults to node:child_process spawn
+ * @param openFn - injectable for testing; defaults to fs.openSync
+ * @param daemonIO - injectable I/O for PID file; defaults to real fs
+ */
+export function forkDaemon(
+  childArgs: string[],
+  projectRoot: string,
+  spawnFn: typeof nodeSpawn = nodeSpawn,
+  openFn: typeof openSync = openSync,
+  daemonIO: DaemonIO = { writeFileSync, readFileSync: () => "" as any, unlinkSync: () => {}, existsSync, mkdirSync },
+): { pid: number; logPath: string } {
+  const ninthwaveDir = join(projectRoot, ".ninthwave");
+  if (!daemonIO.existsSync(ninthwaveDir)) {
+    daemonIO.mkdirSync(ninthwaveDir, { recursive: true });
+  }
+
+  const logPath = logFilePath(projectRoot);
+  const logFd = openFn(logPath, "a");
+
+  const child = spawnFn(process.argv[0]!, [process.argv[1]!, "orchestrate", ...childArgs], {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+    cwd: projectRoot,
+  });
+  child.unref();
+
+  const pid = child.pid!;
+  writePidFile(projectRoot, pid, daemonIO);
+
+  return { pid, logPath };
+}
+
 export async function cmdOrchestrate(
   args: string[],
   todosFile: string,
@@ -826,6 +884,8 @@ export async function cmdOrchestrate(
   let supervisorFlag = false;
   let supervisorIntervalSecs: number | undefined;
   let frictionLogPath: string | undefined;
+  let daemonMode = false;
+  let isDaemonChild = false;
 
   // Parse args
   let i = 0;
@@ -834,8 +894,8 @@ export async function cmdOrchestrate(
       case "--items":
         // Support both comma-separated (--items A,B,C) and space-separated (--items A B C)
         i += 1;
-        while (i < args.length && !args[i].startsWith("--")) {
-          itemIds.push(...args[i].split(",").filter(Boolean));
+        while (i < args.length && !args[i]!.startsWith("--")) {
+          itemIds.push(...args[i]!.split(",").filter(Boolean));
           i += 1;
         }
         break;
@@ -876,9 +936,38 @@ export async function cmdOrchestrate(
         i += 2;
         break;
       }
+      case "--daemon":
+        daemonMode = true;
+        i += 1;
+        break;
+      case "--_daemon-child":
+        isDaemonChild = true;
+        i += 1;
+        break;
       default:
         die(`Unknown option: ${args[i]}`);
     }
+  }
+
+  // ── Daemon fork: spawn detached child and return immediately ──
+  if (daemonMode) {
+    // Check if daemon is already running
+    const existingPid = isDaemonRunning(projectRoot);
+    if (existingPid !== null) {
+      die(`Orchestrator daemon is already running (PID ${existingPid}). Use 'ninthwave stop' first.`);
+    }
+
+    // Build child args: replace --daemon with --_daemon-child
+    const childArgs = args.filter((a) => a !== "--daemon");
+    childArgs.push("--_daemon-child");
+
+    const { pid, logPath } = forkDaemon(childArgs, projectRoot);
+
+    console.log(`Orchestrator daemon started (PID ${pid})`);
+    console.log(`  Log:   ${logPath}`);
+    console.log(`  State: ${stateFilePath(projectRoot)}`);
+    console.log(`  Stop:  ninthwave stop`);
+    return;
   }
 
   // Compute memory-aware WIP default, allow --wip-limit to override
@@ -897,7 +986,7 @@ export async function cmdOrchestrate(
 
   if (itemIds.length === 0) {
     die(
-      "Usage: ninthwave orchestrate --items ID1 ID2 ... [--merge-strategy asap|approved|ask] [--wip-limit N] [--poll-interval SECS]",
+      "Usage: ninthwave orchestrate --items ID1 ID2 ... [--merge-strategy asap|approved|ask] [--wip-limit N] [--poll-interval SECS] [--daemon]",
     );
   }
 
@@ -952,6 +1041,13 @@ export async function cmdOrchestrate(
   };
   process.on("SIGINT", sigintHandler);
 
+  // Graceful SIGTERM handling (used by daemon mode for clean shutdown)
+  const sigtermHandler = () => {
+    structuredLog({ ts: new Date().toISOString(), level: "info", event: "sigterm_received" });
+    abortController.abort();
+  };
+  process.on("SIGTERM", sigtermHandler);
+
   // Resolve supervisor configuration
   const supervisorActive = shouldActivateSupervisor(supervisorFlag, projectRoot);
   const supervisorConfig: SupervisorConfig | undefined = supervisorActive
@@ -992,6 +1088,28 @@ export async function cmdOrchestrate(
   // Analytics directory — always enabled, writes to .ninthwave/analytics/
   const analyticsDir = join(projectRoot, ".ninthwave", "analytics");
 
+  // Daemon state persistence: serialize state each poll cycle when running as daemon child
+  const daemonStartedAt = new Date().toISOString();
+  const onPollComplete = isDaemonChild
+    ? (items: OrchestratorItem[]) => {
+        try {
+          const state = serializeOrchestratorState(items, process.pid, daemonStartedAt);
+          writeStateFile(projectRoot, state);
+        } catch {
+          // Non-fatal — state persistence failure shouldn't block the orchestrator
+        }
+      }
+    : undefined;
+
+  if (isDaemonChild) {
+    structuredLog({
+      ts: new Date().toISOString(),
+      level: "info",
+      event: "daemon_child_started",
+      pid: process.pid,
+    });
+  }
+
   const loopDeps: OrchestrateLoopDeps = {
     buildSnapshot: (o, pr, wd) => buildSnapshot(o, pr, wd, mux),
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
@@ -1003,6 +1121,7 @@ export async function cmdOrchestrate(
     analyticsIO: { mkdirSync, writeFileSync },
     analyticsCommit: { hasChanges, gitAdd, getStagedFiles, gitCommit },
     readScreen: (ref, lines) => mux.readScreen(ref, lines),
+    onPollComplete,
   };
 
   // Resolve repo URL for PR URL construction in completion event
@@ -1022,8 +1141,8 @@ export async function cmdOrchestrate(
     aiTool,
   };
 
-  // Launch status pane if running inside a multiplexer
-  const statusPaneRef = launchStatusPane(mux, projectRoot);
+  // Launch status pane if running inside a multiplexer (skip for daemon child — no terminal)
+  const statusPaneRef = isDaemonChild ? null : launchStatusPane(mux, projectRoot);
   if (statusPaneRef) {
     structuredLog({
       ts: new Date().toISOString(),
@@ -1053,6 +1172,20 @@ export async function cmdOrchestrate(
         ref: statusPaneRef,
       });
     }
+
+    // Clean up daemon files when running as daemon child
+    if (isDaemonChild) {
+      cleanPidFile(projectRoot);
+      cleanStateFile(projectRoot);
+      structuredLog({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "daemon_child_exiting",
+        pid: process.pid,
+      });
+    }
+
     process.removeListener("SIGINT", sigintHandler);
+    process.removeListener("SIGTERM", sigtermHandler);
   }
 }

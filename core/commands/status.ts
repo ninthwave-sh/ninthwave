@@ -13,6 +13,12 @@ import {
   RESET,
 } from "../output.ts";
 import { run } from "../shell.ts";
+import {
+  isDaemonRunning,
+  readStateFile,
+  type DaemonState,
+  type DaemonStateItem,
+} from "../daemon.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -230,6 +236,53 @@ export function formatStatusTable(
   return lines.join("\n");
 }
 
+// ─── Daemon state mapping ────────────────────────────────────────────────────
+
+/**
+ * Map orchestrator item state strings to status display ItemState.
+ * Orchestrator uses finer-grained states; status display groups them.
+ */
+export function mapDaemonItemState(orchState: string): ItemState {
+  switch (orchState) {
+    case "merged":
+    case "done":
+      return "merged";
+    case "implementing":
+    case "launching":
+      return "implementing";
+    case "ci-failed":
+    case "stuck":
+      return "ci-failed";
+    case "ci-pending":
+    case "merging":
+      return "ci-pending";
+    case "review-pending":
+    case "ci-passed":
+      return "review";
+    case "pr-open":
+      return "pr-open";
+    case "queued":
+    case "ready":
+    default:
+      return "in-progress";
+  }
+}
+
+/**
+ * Convert daemon state items to StatusItems for display.
+ * Uses the state file data (fast, no GitHub API calls).
+ */
+export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
+  return state.items.map((item) => ({
+    id: item.id,
+    title: item.title,
+    state: mapDaemonItemState(item.state),
+    prNumber: item.prNumber,
+    ageMs: Date.now() - new Date(item.lastTransition).getTime(),
+    repoLabel: "",
+  }));
+}
+
 // ─── Data gathering ──────────────────────────────────────────────────────────
 
 /** Try to read TODO titles from TODOS.md. Returns a map of ID → title. */
@@ -423,6 +476,20 @@ export async function cmdStatusWatch(
 }
 
 export function cmdStatus(worktreeDir: string, projectRoot: string): void {
+  // Fast path: when daemon is running, read state file (no GitHub API calls)
+  const daemonPid = isDaemonRunning(projectRoot);
+  if (daemonPid !== null) {
+    const daemonState = readStateFile(projectRoot);
+    if (daemonState) {
+      const items = daemonStateToStatusItems(daemonState);
+      const termWidth = getTerminalWidth();
+      console.log(formatStatusTable(items, termWidth));
+      console.log(`\n  ${DIM}Daemon running (PID ${daemonPid}), updated ${daemonState.updatedAt}${RESET}`);
+      return;
+    }
+    // State file missing but daemon running — fall through to normal scan
+  }
+
   if (!existsSync(worktreeDir)) {
     const termWidth = getTerminalWidth();
     console.log(formatStatusTable([], termWidth));

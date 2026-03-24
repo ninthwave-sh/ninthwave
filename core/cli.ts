@@ -33,6 +33,7 @@ import { cmdInit } from "./commands/init.ts";
 import { cmdOrchestrate } from "./commands/orchestrate.ts";
 import { cmdReconcile } from "./commands/reconcile.ts";
 import { cmdAnalytics } from "./commands/analytics.ts";
+import { cmdStop } from "./commands/stop.ts";
 
 // Resolve project root via git
 function getProjectRoot(): string {
@@ -162,7 +163,10 @@ if (!command) {
     "  version-bump                                  Bump version + changelog",
   );
   console.log(
-    "  orchestrate --items ID1 ID2 ... [--mux cmux|tmux] Orchestrate parallel processing",
+    "  orchestrate --items ID1 ID2 ... [--daemon]     Orchestrate parallel processing",
+  );
+  console.log(
+    "  stop                                          Stop the orchestrator daemon",
   );
   console.log(
     "  repos                                         List discovered repos",
@@ -182,6 +186,7 @@ const needsTodos = ![
   "repos",
   "partitions",
   "status",
+  "stop",
   "close-workspaces",
   "close-workspace",
   "clean",
@@ -267,6 +272,9 @@ switch (command) {
     break;
   case "orchestrate":
     await cmdOrchestrate(args, todosFile, worktreeDir, projectRoot);
+    break;
+  case "stop":
+    cmdStop(projectRoot);
     break;
   case "reconcile":
     cmdReconcile(todosFile, worktreeDir, projectRoot);

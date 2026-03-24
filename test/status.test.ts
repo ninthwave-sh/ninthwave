@@ -15,9 +15,12 @@ import {
   cmdStatus,
   getTerminalWidth,
   pad,
+  mapDaemonItemState,
+  daemonStateToStatusItems,
   type StatusItem,
   type ItemState,
 } from "../core/commands/status.ts";
+import type { DaemonState } from "../core/daemon.ts";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -593,6 +596,102 @@ describe("cmdStatusWatch", () => {
 
     writeSpy.mockRestore();
     logSpy.mockRestore();
+  });
+});
+
+// ─── Daemon state mapping ────────────────────────────────────────────────────
+
+describe("mapDaemonItemState", () => {
+  it("maps done/merged to merged", () => {
+    expect(mapDaemonItemState("done")).toBe("merged");
+    expect(mapDaemonItemState("merged")).toBe("merged");
+  });
+
+  it("maps implementing/launching to implementing", () => {
+    expect(mapDaemonItemState("implementing")).toBe("implementing");
+    expect(mapDaemonItemState("launching")).toBe("implementing");
+  });
+
+  it("maps ci-failed/stuck to ci-failed", () => {
+    expect(mapDaemonItemState("ci-failed")).toBe("ci-failed");
+    expect(mapDaemonItemState("stuck")).toBe("ci-failed");
+  });
+
+  it("maps ci-pending/merging to ci-pending", () => {
+    expect(mapDaemonItemState("ci-pending")).toBe("ci-pending");
+    expect(mapDaemonItemState("merging")).toBe("ci-pending");
+  });
+
+  it("maps review-pending/ci-passed to review", () => {
+    expect(mapDaemonItemState("review-pending")).toBe("review");
+    expect(mapDaemonItemState("ci-passed")).toBe("review");
+  });
+
+  it("maps pr-open to pr-open", () => {
+    expect(mapDaemonItemState("pr-open")).toBe("pr-open");
+  });
+
+  it("maps queued/ready to in-progress", () => {
+    expect(mapDaemonItemState("queued")).toBe("in-progress");
+    expect(mapDaemonItemState("ready")).toBe("in-progress");
+  });
+
+  it("maps unknown states to in-progress", () => {
+    expect(mapDaemonItemState("some-unknown-state")).toBe("in-progress");
+  });
+});
+
+describe("daemonStateToStatusItems", () => {
+  it("converts daemon state items to status items", () => {
+    const now = Date.now();
+    const state: DaemonState = {
+      pid: 123,
+      startedAt: "2026-03-24T10:00:00.000Z",
+      updatedAt: "2026-03-24T10:05:00.000Z",
+      items: [
+        {
+          id: "T-1-1",
+          state: "implementing",
+          prNumber: null,
+          title: "Add feature",
+          lastTransition: new Date(now - 60000).toISOString(),
+          ciFailCount: 0,
+        },
+        {
+          id: "T-1-2",
+          state: "ci-passed",
+          prNumber: 42,
+          title: "Fix bug",
+          lastTransition: new Date(now - 300000).toISOString(),
+          ciFailCount: 1,
+        },
+      ],
+    };
+
+    const items = daemonStateToStatusItems(state);
+
+    expect(items).toHaveLength(2);
+    expect(items[0]!.id).toBe("T-1-1");
+    expect(items[0]!.state).toBe("implementing");
+    expect(items[0]!.title).toBe("Add feature");
+    expect(items[0]!.prNumber).toBeNull();
+    // Age should be approximately 60000ms (±5000ms for test execution time)
+    expect(items[0]!.ageMs).toBeGreaterThan(50000);
+    expect(items[0]!.ageMs).toBeLessThan(70000);
+
+    expect(items[1]!.id).toBe("T-1-2");
+    expect(items[1]!.state).toBe("review"); // ci-passed maps to review
+    expect(items[1]!.prNumber).toBe(42);
+  });
+
+  it("handles empty items list", () => {
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: "2026-03-24T10:00:00.000Z",
+      updatedAt: "2026-03-24T10:00:00.000Z",
+      items: [],
+    };
+    expect(daemonStateToStatusItems(state)).toEqual([]);
   });
 });
 

@@ -1,5 +1,5 @@
 // Tests for core/commands/orchestrate.ts — Event loop, state reconstruction,
-// adaptive polling, structured logging, and SIGINT handling.
+// adaptive polling, structured logging, SIGINT handling, and daemon mode.
 
 import { describe, it, expect, vi } from "vitest";
 import { join } from "path";
@@ -13,6 +13,7 @@ import {
   launchStatusPane,
   closeStatusPane,
   isInsideWorkspace,
+  forkDaemon,
   STATUS_PANE_NAME,
   type LogEntry,
   type OrchestrateLoopDeps,
@@ -1190,5 +1191,107 @@ describe("closeStatusPane", () => {
 
     closeStatusPane(mux, null);
     expect(closeWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+// ── onPollComplete callback ──────────────────────────────────────────
+
+describe("onPollComplete callback", () => {
+  it("is called each poll cycle with current items", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+
+    let cycle = 0;
+    const pollCompleteCalls: any[] = [];
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot: (): PollSnapshot => {
+        cycle++;
+        if (cycle === 1) return { items: [], readyIds: ["T-1-1"] };
+        if (cycle === 2) return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
+        if (cycle === 3) return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+        return { items: [], readyIds: [] };
+      },
+      sleep: () => Promise.resolve(),
+      log: () => {},
+      actionDeps: mockActionDeps(),
+      onPollComplete: (items) => {
+        pollCompleteCalls.push(items.map((i) => ({ id: i.id, state: i.state })));
+      },
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps);
+
+    // Should have been called multiple times during the loop
+    expect(pollCompleteCalls.length).toBeGreaterThan(0);
+    // Each call should contain the current item states
+    for (const call of pollCompleteCalls) {
+      expect(call.length).toBe(1);
+      expect(call[0].id).toBe("T-1-1");
+    }
+  });
+
+  it("loop works fine without onPollComplete (undefined)", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+
+    let cycle = 0;
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot: (): PollSnapshot => {
+        cycle++;
+        if (cycle === 1) return { items: [], readyIds: ["T-1-1"] };
+        if (cycle === 2) return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
+        if (cycle === 3) return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+        return { items: [], readyIds: [] };
+      },
+      sleep: () => Promise.resolve(),
+      log: () => {},
+      actionDeps: mockActionDeps(),
+      // onPollComplete not set
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps);
+    expect(orch.getItem("T-1-1")!.state).toBe("done");
+  });
+});
+
+// ── forkDaemon ───────────────────────────────────────────────────────
+
+describe("forkDaemon", () => {
+  it("spawns a detached child and writes PID file", () => {
+    const mockChild = { pid: 42, unref: vi.fn() };
+    const spawnFn = vi.fn(() => mockChild) as any;
+    const openFn = vi.fn(() => 3) as any; // fake fd
+
+    const files = new Map<string, string>();
+    const daemonIO = {
+      writeFileSync: vi.fn((p: string, c: string) => files.set(p, c)),
+      readFileSync: vi.fn(),
+      unlinkSync: vi.fn(),
+      existsSync: vi.fn((p: string) => files.has(p)),
+      mkdirSync: vi.fn(),
+    };
+
+    const result = forkDaemon(
+      ["--items", "T-1-1", "--_daemon-child"],
+      "/project",
+      spawnFn,
+      openFn,
+      daemonIO,
+    );
+
+    expect(result.pid).toBe(42);
+    expect(result.logPath).toBe("/project/.ninthwave/orchestrator.log");
+    expect(mockChild.unref).toHaveBeenCalled();
+
+    // PID file was written
+    expect(files.get("/project/.ninthwave/orchestrator.pid")).toBe("42");
+
+    // spawn was called with detached: true
+    expect(spawnFn).toHaveBeenCalled();
+    const spawnOpts = spawnFn.mock.calls[0][2];
+    expect(spawnOpts.detached).toBe(true);
+    expect(spawnOpts.stdio[0]).toBe("ignore");
   });
 });
