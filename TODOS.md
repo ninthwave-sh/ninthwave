@@ -638,6 +638,119 @@ Key files: `.ninthwave/friction.log`, `agents/todo-worker.md`, `core/supervisor.
 
 ---
 
+## Workspace Lifecycle & Daemon Rebase (friction #23, 2026-03-24)
+
+### Fix: Emit clean action when items transition to stuck (M-ORC-3)
+
+**Priority:** Medium
+**Source:** Friction #23 — orphaned workspaces after stuck items
+**Depends on:** None
+
+`stuckOrRetry()` returns `[]` when an item is permanently stuck — no clean action, so the workspace and worktree are never cleaned up. Same gap in the ci-failed → stuck path in `handlePrLifecycle`.
+
+Return `[{ type: "clean", itemId: item.id }]` instead of `[]` in both stuck paths. `executeClean` already handles workspace closure + worktree cleanup correctly.
+
+**Test plan:**
+- Update existing stuck transition tests to expect a `"clean"` action
+- Verify ci-failed → stuck (max retries exceeded) also emits clean action
+- Verify heartbeat timeout → stuck emits clean action
+
+Acceptance: All stuck transitions emit a clean action. Existing tests updated. `bun test test/` passes.
+
+Key files: `core/orchestrator.ts`, `test/orchestrator.test.ts`
+
+---
+
+### Fix: Close workspaces for terminal items in final cleanup sweep and on shutdown (M-ORC-4)
+
+**Priority:** Medium
+**Source:** Friction #23 — orphaned workspaces survive orchestrator exit
+**Depends on:** None
+
+Two gaps in the orchestrate event loop:
+
+1. **Final cleanup sweep**: Calls `cleanSingleWorktree` for terminal items but never closes their workspace first. Add `closeWorkspace(item.workspaceRef)` before worktree cleanup.
+2. **Shutdown**: After the loop exits, close workspaces only for terminal items (done, stuck, merged). Do NOT close workspaces for in-flight items (implementing, ci-pending, etc.) — those workers may still be actively running and should survive orchestrator restarts. On restart, `reconstructState` recovers their workspace refs.
+
+**Test plan:**
+- Verify `closeWorkspace` called for terminal items in final sweep
+- Verify in-flight item workspaces are NOT closed on shutdown
+- Verify signal handler (SIGINT) triggers terminal-only cleanup
+
+Acceptance: Terminal item workspaces are closed on orchestrator exit. In-flight workers survive restarts. `bun test test/` passes.
+
+Key files: `core/commands/orchestrate.ts`, `test/orchestrate.test.ts`
+
+---
+
+### Fix: ci-pending conflict uses daemon-rebase instead of worker rebase (H-ORC-5)
+
+**Priority:** High
+**Source:** Friction #23 — unnecessary CI churn from worker rebases
+**Depends on:** None
+
+The ci-pending conflict detection (line ~504 in `handlePrLifecycle`) sends `type: "rebase"` (worker-side) for PRs with merge conflicts. Change to `type: "daemon-rebase"`. `executeDaemonRebase` already tries daemon resolution first (handles TODOS.md-only conflicts automatically), falling back to worker message if it fails.
+
+One-line change: `type: "rebase"` → `type: "daemon-rebase"`.
+
+**Test plan:**
+- Update ci-pending conflict tests to expect `"daemon-rebase"` action type
+- Verify rebaseRequested dedup flag still works with daemon-rebase
+- Verify flag resets on state change
+
+Acceptance: ci-pending PRs with merge conflicts get daemon-rebase instead of worker rebase. `bun test test/` passes.
+
+Key files: `core/orchestrator.ts`, `test/orchestrator.test.ts`
+
+---
+
+### Feat: Post-merge auto-rebase all sibling PRs via daemon (H-ORC-6)
+
+**Priority:** High
+**Source:** Friction #23 — CI churn from TODOS.md conflicts after merges
+**Depends on:** H-ORC-5
+
+After a PR merges, `executeMerge` checks sibling PRs for conflicts and sends rebase messages to workers. This causes CI churn — every worker rebases and triggers a new CI run. Replace the post-merge conflict detection loop with proactive daemon-rebase of ALL in-flight sibling PRs:
+
+1. After pulling main, iterate all WIP sibling PRs with PR numbers
+2. Try `deps.daemonRebase(worktreePath, branch)` for each
+3. On success: continue (CI re-runs on force-pushed branch automatically)
+4. On failure: check `checkPrMergeable` — if actually conflicting, send worker rebase message as fallback
+5. If not conflicting: skip, no action needed
+
+This eliminates TODOS.md-only conflicts before workers notice, reducing CI runs from N per conflict to 1.
+
+**Test plan:**
+- Update post-merge conflict detection tests for daemon-rebase-all behavior
+- Test: daemon-rebase succeeds for sibling PRs (no worker message sent)
+- Test: daemon-rebase fails, falls back to worker message for conflicting PRs
+- Test: non-conflicting PRs skipped after daemon-rebase failure
+
+Acceptance: After each merge, all sibling PRs are daemon-rebased. Worker rebase messages only sent as fallback. `bun test test/` passes.
+
+Key files: `core/orchestrator.ts`, `test/orchestrator.test.ts`
+
+---
+
+### Fix: Reconcile closes orphaned workspaces (L-ORC-7)
+
+**Priority:** Low
+**Source:** Friction #23 — belt-and-suspenders cleanup
+**Depends on:** M-ORC-3, M-ORC-4
+
+`reconcile` only closes workspaces for merged items. Add `closeOrphanedWorkspaces(worktreeDir, mux)` to `clean.ts` — lists all TODO workspaces, closes any whose worktree directory no longer exists. A workspace with a live worktree is assumed in-flight and left alone. Call from reconcile after existing workspace cleanup.
+
+**Test plan:**
+- Test: workspace closed when worktree directory is missing
+- Test: workspace left open when worktree directory exists
+- Test: non-TODO workspaces are ignored
+
+Acceptance: `ninthwave reconcile` cleans orphaned workspaces. In-flight workspaces preserved. `bun test test/` passes.
+
+Key files: `core/commands/reconcile.ts`, `core/commands/clean.ts`, `test/reconcile.test.ts`, `test/clean.test.ts`
+
+---
+
 ## Distribution & CLI Identity (2026-03-24)
 
 ### Feat: Add `nw` short alias for the CLI binary (M-CLI-1)
