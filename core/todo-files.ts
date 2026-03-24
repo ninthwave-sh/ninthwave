@@ -168,6 +168,21 @@ export function listTodos(todosDir: string, worktreeDir: string): TodoItem[] {
     }
   }
 
+  // Check cross-repo index for in-progress items in other repos
+  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
+  if (existsSync(crossRepoIndex)) {
+    const indexContent = readFileSync(crossRepoIndex, "utf-8");
+    for (const line of indexContent.split("\n")) {
+      if (!line || line.startsWith("#")) continue;
+      const parts = line.split("\t");
+      const idxId = parts[0];
+      const idxPath = parts[2];
+      if (idxId && idxPath && existsSync(idxPath)) {
+        inProgressIds.add(idxId);
+      }
+    }
+  }
+
   const entries = readdirSync(todosDir).filter((f) => f.endsWith(".md"));
   const items: TodoItem[] = [];
 

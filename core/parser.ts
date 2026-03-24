@@ -1,6 +1,8 @@
-// TODOS.md parser for the ninthwave CLI.
+// Directory-based TODO parser for the ninthwave CLI.
+// Delegates to listTodos() from todo-files.ts for actual file reading.
+// Includes a legacy file-based fallback for callers not yet migrated to directory paths.
 
-import { readFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
 import type { TodoItem, Priority } from "./types.ts";
 import {
@@ -8,9 +10,9 @@ import {
   ID_PATTERN_GLOBAL,
   WILDCARD_DEP_PATTERN,
   CODE_EXTENSIONS,
-  CODE_EXTENSIONS_FOR_LINE,
 } from "./types.ts";
 import { loadDomainMappings } from "./config.ts";
+import { listTodos } from "./todo-files.ts";
 
 /**
  * Normalize a section header into a domain slug.
@@ -197,13 +199,42 @@ export function expandWildcardDeps(
 }
 
 /**
- * Parse TODOS.md into a structured list of TodoItem objects.
+ * Parse todo items from either a directory of todo files or a legacy TODOS.md file.
+ *
+ * When given a directory path, delegates to listTodos() from todo-files.ts.
+ * When given a file path (legacy TODOS.md), uses the built-in line-by-line parser.
+ * The file-based path is a temporary fallback during migration to file-per-todo;
+ * callers should migrate to passing a directory path.
  *
  * Options:
  *   warn — called when an item is skipped (e.g. missing ID) with a
  *          descriptive message and the 1-based line number of the item header.
  */
 export function parseTodos(
+  todosPath: string,
+  worktreeDir: string,
+  opts?: { warn?: (message: string, lineNumber: number) => void },
+): TodoItem[] {
+  // Detect whether the path is a directory or a file
+  if (existsSync(todosPath)) {
+    const stat = statSync(todosPath);
+    if (stat.isDirectory()) {
+      return listTodos(todosPath, worktreeDir);
+    }
+    // File path — use legacy parser
+    return parseTodosFromFile(todosPath, worktreeDir, opts);
+  }
+
+  // Path doesn't exist — could be either a missing dir or missing file
+  // Try as directory first (listTodos returns [] for missing dir)
+  return listTodos(todosPath, worktreeDir);
+}
+
+/**
+ * Legacy TODOS.md file parser. Parses a single markdown file line-by-line.
+ * @deprecated Use directory-based parseTodos() with a todos directory instead.
+ */
+function parseTodosFromFile(
   todosFile: string,
   worktreeDir: string,
   opts?: { warn?: (message: string, lineNumber: number) => void },
