@@ -5,26 +5,25 @@
 ## Operational Maturity (vision exploration, 2026-03-24)
 
 
-### Feat: Memory-aware dynamic WIP limits (H-WIP-1)
+### Feat: GitHub Issues adapter — close issues on merge and sync status (M-GHI-2)
 
-**Priority:** High
-**Source:** Vision — prevent OOM on memory-constrained machines
-**Depends on:** None
+**Priority:** Medium
+**Source:** Vision — complete the GitHub Issues lifecycle loop
+**Depends on:** H-GHI-1
 
-The WIP limit is currently a static number (default 5). Each worker consumes ~2.5GB (AI tool + language server + worktree). On a 16GB Mac with other processes, launching 5 workers risks OOM. Use `os.freemem()` and `os.totalmem()` to estimate available capacity at each batch launch. Cap WIP at `floor(availableMemory / 2.5GB)` with a minimum of 1 and a maximum of the configured limit. Log when WIP is reduced due to memory pressure.
+Implement `markDone(id)` on `GitHubIssuesBackend` to close the issue via `gh issue close`. During orchestration lifecycle, add status labels to issues: `status:in-progress` when worker starts, `status:pr-open` when PR is created, remove status labels and close issue on merge. Wire into orchestrator's state transition hooks so status syncs automatically when using the GitHub Issues backend.
 
 **Test plan:**
-- Unit test: WIP calculation returns correct values for various memory scenarios
-- Unit test: WIP never drops below 1
-- Unit test: WIP respects configured maximum even when memory allows more
-- Edge case: system reports 0 free memory (should still allow 1 worker)
+- Unit test: markDone calls `gh issue close` with correct issue number
+- Unit test: status labels are added/removed at correct state transitions
+- Edge case: issue already closed (markDone is idempotent)
+- Edge case: status label doesn't exist on the repo (skip gracefully, don't error)
 
-Acceptance: WIP limit is dynamically calculated based on available memory. Workers are queued when memory is constrained instead of launching immediately. Structured log emitted when WIP is reduced. Tests pass. No regression in orchestrator tests.
+Acceptance: Issues are automatically closed when their PRs merge. Status labels reflect orchestrator state during processing. Label operations are idempotent and skip gracefully on missing labels. Tests pass.
 
-Key files: `core/commands/orchestrate.ts`, `core/orchestrator.ts`
+Key files: `core/backends/github-issues.ts`, `core/commands/orchestrate.ts`
 
 ---
-
 
 ### Feat: Automatic worker retry on crash or OOM (M-RET-1)
 
