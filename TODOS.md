@@ -44,26 +44,6 @@ Key files: `core/backends/github-issues.ts`, `core/types.ts`, `core/commands/lis
 
 ---
 
-### Feat: Orchestrator daemon mode with state persistence (H-DAE-1)
-
-**Priority:** High
-**Source:** Friction log #2 — orchestrator blocks conversation session
-**Depends on:** None
-
-Add `--daemon` flag to `ninthwave orchestrate` that forks the process to background. Write PID to `.ninthwave/orchestrator.pid`. Serialize orchestrator state to `.ninthwave/orchestrator.state.json` each poll cycle (item states, PR numbers, timestamps). `ninthwave status` reads from state file when the orchestrator is running as daemon (detect via PID file). Add `ninthwave stop` command that sends SIGTERM to the daemon PID. Clean up PID file on graceful exit. Detect and clean up stale PID files from crashed daemons.
-
-**Test plan:**
-- Unit test: state serialization/deserialization roundtrips correctly
-- Unit test: PID file is written on daemon start and cleaned on exit
-- Unit test: `ninthwave stop` sends signal to correct PID
-- Edge case: stale PID file from crashed daemon (detect via process existence check and clean up)
-
-Acceptance: `ninthwave orchestrate --daemon` starts the orchestrator in background and returns immediately. PID file is written and cleaned up on exit. State file is updated each poll cycle. `ninthwave status` reads daemon state when available. `ninthwave stop` terminates the daemon gracefully. Tests pass.
-
-Key files: `core/commands/orchestrate.ts`, `core/commands/status.ts`, `core/cli.ts`
-
----
-
 ### Feat: GitHub Issues adapter — close issues on merge and sync status (M-GHI-2)
 
 **Priority:** Medium
