@@ -4,24 +4,6 @@
 
 ## Multiplexer Abstraction (vision L-VIS-3, 2026-03-24)
 
-### Refactor: Extract multiplexer interface from cmux module (H-MUX-1)
-
-**Priority:** High
-**Source:** L-VIS-3 vision review
-**Depends on:** None
-
-Create a `Multiplexer` interface in `core/mux.ts` with 4 operations: `launchWorkspace(cwd, command) → string | null`, `sendMessage(ref, message) → boolean`, `listWorkspaces() → string`, `closeWorkspace(ref) → boolean`. Wrap the existing `core/cmux.ts` functions as a `CmuxAdapter` implementing this interface. Export a `getMux()` factory that returns the active adapter. Update `core/commands/start.ts`, `core/commands/orchestrate.ts`, and `core/commands/clean.ts` to accept a `Multiplexer` via dependency injection instead of importing `* as cmux` directly. All existing tests should pass without modification.
-
-**Test plan:**
-- Unit test: `CmuxAdapter` delegates each method to the corresponding cmux function
-- Verify existing tests pass unchanged (no behavioral changes)
-- Edge case: `getMux()` returns CmuxAdapter by default
-
-Acceptance: A `Multiplexer` interface exists with the 4 operations. A `CmuxAdapter` implements it. All call sites use the interface, not the concrete cmux module. Existing tests pass. No behavioral changes.
-
-Key files: `core/mux.ts`, `core/cmux.ts`, `core/commands/start.ts`, `core/commands/orchestrate.ts`, `core/commands/clean.ts`
-
----
 
 ### Feat: Add tmux multiplexer adapter (H-MUX-2)
 
@@ -85,6 +67,7 @@ Key files: `README.md`, `core/commands/setup.ts`, `test/setup.test.ts`
 
 ## Communication Reliability (friction log, 2026-03-24)
 
+
 ### Fix: cmux send should reliably submit messages to worker sessions (H-COM-1)
 
 **Priority:** High
@@ -114,6 +97,7 @@ Key files: `core/commands/reconcile.ts`, `test/reconcile.test.ts`
 ---
 
 ## Vision (recurring, 2026-03-24)
+
 
 ### Feat: Explore vision, scope next iteration, and decompose into TODOs (L-VIS-4)
 
