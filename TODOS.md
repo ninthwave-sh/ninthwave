@@ -2,55 +2,8 @@
 
 <!-- Format guide: see $(cat .ninthwave/dir)/core/docs/todos-format.md -->
 
-## Multiplexer Abstraction (vision L-VIS-3, 2026-03-24)
-
-
-
-
-
-
-
-
-### Feat: Auto-detect multiplexer and add --mux flag (M-MUX-3)
-
-**Priority:** Medium
-**Source:** L-VIS-3 vision review
-**Depends on:** H-MUX-2
-
-Add multiplexer auto-detection to `getMux()`: (1) check `NINTHWAVE_MUX` env var for explicit override, (2) check if inside a cmux session (cmux-specific env vars), (3) check if inside a tmux session (`TMUX` env var), (4) check if cmux binary is available, (5) fall back to tmux. Add `--mux cmux|tmux` flag to `orchestrate` and `start` commands that sets `NINTHWAVE_MUX` before resolving the adapter. Thread the selected `Multiplexer` instance through the dependency chain via the existing `OrchestratorDeps` / `ExecutionContext` patterns.
-
-**Test plan:**
-- Unit test: auto-detection picks cmux when cmux env var is present
-- Unit test: auto-detection picks tmux when TMUX env var is present
-- Unit test: `NINTHWAVE_MUX=tmux` override works
-- Unit test: `--mux` CLI flag is parsed and threaded through
-
-Acceptance: Auto-detection picks the correct multiplexer based on environment. `--mux` flag overrides detection in `start` and `orchestrate`. `NINTHWAVE_MUX` env var works. Clear error message if no multiplexer is available.
-
-Key files: `core/mux.ts`, `core/commands/start.ts`, `core/commands/orchestrate.ts`, `test/mux.test.ts`
-
----
-
-### Docs: Update README and setup for tmux support (M-MUX-4)
-
-**Priority:** Medium
-**Source:** L-VIS-3 vision review
-**Depends on:** M-MUX-3
-
-Update README.md prerequisites table to list cmux or tmux as alternatives (cmux recommended for visual sidebar, tmux for headless/existing setups). Update the "How It Works" section to mention multiplexer flexibility. Update `ninthwave setup` to detect which multiplexer is available and include it in the post-setup summary. Add a brief "Using with tmux" section in the README explaining the difference.
-
-**Test plan:**
-- Review: README prerequisites section lists both multiplexers
-- Review: Setup output mentions detected multiplexer
-- Unit test: setup detects tmux availability when cmux is not available
-
-Acceptance: README prerequisites show cmux and tmux as alternatives. Setup detects and reports available multiplexer. A user with only tmux installed sees clear guidance on how to proceed.
-
-Key files: `README.md`, `core/commands/setup.ts`, `test/setup.test.ts`
-
----
-
 ## Wildcard Dependencies (2026-03-24)
+
 
 
 
@@ -78,6 +31,7 @@ Key files: `core/parser.ts`, `core/types.ts`, `test/parser.test.ts`
 ---
 
 ## Zero-Config Onboarding (short-term, 2026-03-24)
+
 
 
 
@@ -129,6 +83,7 @@ Key files: `core/commands/init.ts`, `test/init.test.ts`
 
 
 
+
 ### Feat: Rewrite status command with structured real-time display (H-STU-1)
 
 **Priority:** High
@@ -176,6 +131,7 @@ Key files: `core/commands/orchestrate.ts`, `core/commands/status.ts`, `test/orch
 
 
 
+
 ### Feat: Fire webhooks on orchestrator lifecycle events (M-WHK-1)
 
 **Priority:** Medium
@@ -202,6 +158,7 @@ Key files: `core/commands/orchestrate.ts`, `core/webhooks.ts` (new), `test/webho
 
 
 
+
 ### Feat: Add decomposition template library for common patterns (M-TPL-1)
 
 **Priority:** Medium
@@ -223,6 +180,7 @@ Key files: `templates/` (new directory), `skills/decompose/SKILL.md`, `core/temp
 ---
 
 ## Time-to-Ship Analytics (mid-term, 2026-03-24)
+
 
 
 
@@ -270,6 +228,7 @@ Key files: `core/commands/analytics.ts` (new), `core/cli.ts`, `test/analytics.te
 ---
 
 ## Vision (recurring, 2026-03-24)
+
 
 
 
