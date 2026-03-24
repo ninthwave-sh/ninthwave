@@ -2,182 +2,9 @@
 
 <!-- Format guide: see $(cat .ninthwave/dir)/core/docs/todos-format.md -->
 
-## Data Pipeline Hardening (eng review M-ENG-3, 2026-03-24)
-
-
-
-### Fix: Title regex stripping is too greedy after ID pattern (L-DP-4)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 1.4
-**Depends on:** None
-
-The title-cleaning regex `/ \([A-Z]*-[A-Za-z0-9]*-[0-9]*.*/` uses `.*` after the ID pattern, which strips everything after the first ID-like parenthetical. For example, `### Feat: Migration (M-DB-1) (phase 2)` produces `Feat: Migration` instead of `Feat: Migration (phase 2)`. Make the regex match only the ID parenthetical and known suffixes.
-
-**Test plan:**
-- Unit test: title with ID followed by extra parentheticals preserves the extras
-- Unit test: existing title extraction still works for standard format
-
-Acceptance: Title extraction preserves non-ID parenthetical content. Existing title tests continue to pass. New test covers the edge case.
-
-Key files: `core/parser.ts`, `test/parser.test.ts`
-
----
-
-### Fix: Parser should strip UTF-8 BOM from TODOS.md (L-DP-5)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 1.5
-**Depends on:** None
-
-If TODOS.md starts with a UTF-8 BOM (`\uFEFF`), the first `## ` header check fails because the BOM character precedes it. Strip BOM from content at the start of `parseTodos`.
-
-**Test plan:**
-- Unit test: TODOS.md with BOM prefix parses correctly
-- Unit test: TODOS.md without BOM is unaffected
-
-Acceptance: BOM is stripped before parsing. Tests pass with both BOM and non-BOM input.
-
-Key files: `core/parser.ts`, `test/parser.test.ts`
-
----
-
-### Fix: commitAnalyticsFiles should unstage on dirty_index (L-DP-7)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 2.2
-**Depends on:** None
-
-When `commitAnalyticsFiles` detects non-analytics staged files and returns `dirty_index`, it leaves the analytics files staged. Add an unstage step (via an injectable `gitReset` dep) before returning `dirty_index`.
-
-**Test plan:**
-- Unit test: analytics files are unstaged when dirty_index is returned
-- Unit test: existing commit behavior unchanged for clean index
-
-Acceptance: Analytics files are unstaged when returning `dirty_index`. Existing tests pass. New test verifies the unstage behavior.
-
-Key files: `core/analytics.ts`, `test/analytics.test.ts`
-
----
-
-### Feat: Config key validation with unknown key warnings (L-DP-16)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 7.2
-**Depends on:** None
-
-Unknown config keys (e.g., typos) are silently accepted. Add a known-keys list and warn when unrecognized keys are found in `.ninthwave/config`.
-
-**Test plan:**
-- Unit test: known keys are accepted without warning
-- Unit test: unknown keys trigger a warning
-- Unit test: existing config loading behavior is preserved
-
-Acceptance: Unrecognized config keys produce a diagnostic warning. Known keys work as before. Tests cover both cases.
-
-Key files: `core/config.ts`, `test/config.test.ts`
-
----
-
-### Refactor: Consolidate domain file parsing — normalizeDomain should accept a Map (L-DP-17)
-
-**Priority:** Low
-**Source:** Eng review M-ENG-3 finding 7.3
-**Depends on:** None
-
-`normalizeDomain` reads and parses `domains.conf` directly from disk, duplicating the logic in `loadDomainMappings()`. Refactor `normalizeDomain` to accept a `Map<string, string>` parameter instead of a file path, and have `parseTodos` call `loadDomainMappings` once and pass the result.
-
-**Test plan:**
-- Unit test: normalizeDomain with Map produces same results as with file path
-- Unit test: parseTodos loads domain mappings once and passes them through
-- Integration: existing domain mapping tests pass
-
-Acceptance: Domain file is read once per parse call. `normalizeDomain` accepts a Map. `loadDomainMappings` is the single source of file-parsing logic. All existing tests pass.
-
-Key files: `core/parser.ts`, `core/config.ts`, `test/parser.test.ts`, `test/config.test.ts`
-
----
-
 ## Worker Reliability (eng-review-workers, 2026-03-24)
 
 
-### Fix: Add delivery verification and retry to TmuxAdapter sendMessage (H-WRK-3)
-
-**Priority:** High
-**Source:** Eng review W-25 — `docs/reviews/eng-review-workers.md`
-**Depends on:** None
-
-The tmux `sendMessage` uses `send-keys -l` without delivery verification or retry, while cmux has paste-buffer + verify + exponential backoff. Extract the verification logic from `send-message.ts` into a shared utility and wire it into `TmuxAdapter.sendMessage`. Alternatively, have `TmuxAdapter` use tmux's `load-buffer` + `paste-buffer` approach (analogous to cmux's atomic paste) with verification.
-
-**Test plan:**
-- Unit test: TmuxAdapter sendMessage verifies delivery via readScreen
-- Unit test: TmuxAdapter retries on failed delivery
-- Unit test: TmuxAdapter falls back gracefully when verification fails
-- Integration: message delivery works end-to-end on tmux
-
-Acceptance: `TmuxAdapter.sendMessage` includes delivery verification and retry with exponential backoff. Tmux and cmux paths have equivalent delivery guarantees. Tests cover retry and verification scenarios. No regression.
-
-Key files: `core/mux.ts`, `core/send-message.ts`, `test/mux.test.ts`
-
----
-
-### Fix: Log warnings on fetch/merge failures during worktree creation (M-WRK-4)
-
-**Priority:** Medium
-**Source:** Eng review W-3 — `docs/reviews/eng-review-workers.md`
-**Depends on:** None
-
-`launchSingleItem` in `core/commands/start.ts` (lines 200-208) silently catches `fetchOrigin` and `ffMerge` failures. A network failure means the worktree is created from stale local `main`, leading to merge conflicts later. Replace bare `catch {}` with `catch { warn(...) }` so users see that the worktree may be based on outdated code.
-
-**Test plan:**
-- Unit test: fetch failure logs a warning but continues
-- Unit test: ff-merge failure logs a warning but continues
-- Verify warning message includes actionable context
-
-Acceptance: `fetchOrigin` and `ffMerge` failures log warnings with `warn()`. Worktree creation still proceeds. Tests verify warnings are emitted. No regression.
-
-Key files: `core/commands/start.ts`, `test/start.test.ts`
-
----
-
-### Fix: TmuxAdapter splitPane returns correct pane ID (M-WRK-5)
-
-**Priority:** Medium
-**Source:** Eng review W-9 — `docs/reviews/eng-review-workers.md`
-**Depends on:** None
-
-`TmuxAdapter.splitPane` (mux.ts lines 92-108) runs `tmux split-window` then `tmux display-message -p '#{pane_id}'` to get the new pane's ID. But `display-message` returns the active pane's ID, which may not be the newly created pane. Fix by using `tmux split-window -P -F '#{pane_id}'` which prints the new pane's ID as output.
-
-**Test plan:**
-- Unit test: splitPane returns the pane ID from split-window output
-- Unit test: splitPane returns fallback when -P flag output is empty
-- Verify via injected ShellRunner mock
-
-Acceptance: `TmuxAdapter.splitPane` uses `split-window -P -F '#{pane_id}'` and returns the correct pane ID. Tests verify correct pane ID is returned. No regression.
-
-Key files: `core/mux.ts`, `test/mux.test.ts`
-
----
-
-### Fix: Log cleanup failures instead of silently swallowing (M-WRK-6)
-
-**Priority:** Medium
-**Source:** Eng review W-19 — `docs/reviews/eng-review-workers.md`
-**Depends on:** None
-
-`cleanItem` in `core/commands/clean.ts` (lines 157-175) has multiple `try/catch` blocks that silently ignore errors from `removeWorktree`, `deleteBranch`, and `deleteRemoteBranch`. Replace bare `catch {}` with `catch (e) { warn(...) }` so cleanup failures are visible. The cleanup should still continue on error (resilient), but should not be silent.
-
-**Test plan:**
-- Unit test: removeWorktree failure logs warning and continues
-- Unit test: deleteBranch failure logs warning and continues
-- Unit test: deleteRemoteBranch failure logs warning and continues
-- Verify cleanup completes even when all operations fail
-
-Acceptance: All `catch {}` blocks in `cleanItem` and `cleanSingleWorktree` log warnings. Cleanup still completes on failure (resilient behavior preserved). Tests verify warnings. No regression.
-
-Key files: `core/commands/clean.ts`, `test/clean.test.ts`
-
----
 
 ### Fix: Scope cmdClean workspace closing to merged items only (M-WRK-7)
 
@@ -238,6 +65,7 @@ Key files: `core/commands/orchestrate.ts`, `test/orchestrator.test.ts`
 ---
 
 ## Orchestrator Review Findings (eng-review H-ENG-1, 2026-03-24)
+
 
 
 
@@ -540,6 +368,7 @@ Key files: `core/commands/orchestrate.ts`, `test/orchestrate.test.ts`
 ## Detection Latency & Auto-Rebase (friction #17/#18, 2026-03-24)
 
 
+
 ### Feat: Add detection latency timestamps to state transitions (M-DET-2)
 
 **Priority:** Medium
@@ -639,6 +468,7 @@ Key files: `.ninthwave/friction.log`, `agents/todo-worker.md`, `core/supervisor.
 ---
 
 ## Workspace Lifecycle & Daemon Rebase (friction #23, 2026-03-24)
+
 
 ### Fix: Emit clean action when items transition to stuck (M-ORC-3)
 
@@ -753,6 +583,7 @@ Key files: `core/commands/reconcile.ts`, `core/commands/clean.ts`, `test/reconci
 
 ## Distribution & CLI Identity (2026-03-24)
 
+
 ### Feat: Add `nw` short alias for the CLI binary (M-CLI-1)
 
 **Priority:** Medium
@@ -775,6 +606,7 @@ Key files: `core/cli.ts`, `core/commands/setup.ts`, `homebrew/ninthwave.rb` (new
 ---
 
 ## Vision (recurring, 2026-03-24)
+
 
 
 
