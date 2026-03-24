@@ -40,7 +40,7 @@ export interface WebhookPayload {
 /** Injectable fetch signature matching globalThis.fetch. */
 export type WebhookFetchFn = (
   url: string,
-  init: { method: string; headers: Record<string, string>; body: string },
+  init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
 ) => Promise<{ ok: boolean; status: number }>;
 
 /** Callback signature for the notifier returned by createWebhookNotifier. */
@@ -126,11 +126,14 @@ export async function fireWebhook(
   fetchFn: WebhookFetchFn = globalThis.fetch,
   logError?: (msg: string) => void,
 ): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
     const response = await fetchFn(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     });
     if (!response.ok) {
       logError?.(`Webhook returned HTTP ${response.status}`);
@@ -138,6 +141,8 @@ export async function fireWebhook(
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     logError?.(`Webhook delivery failed: ${msg}`);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

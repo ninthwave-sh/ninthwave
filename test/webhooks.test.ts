@@ -195,6 +195,7 @@ describe("fireWebhook", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -218,6 +219,68 @@ describe("fireWebhook", () => {
       timestamp: "2026-03-24T12:00:00Z",
     }, fetchFn, logError);
     expect(logError).toHaveBeenCalledWith(expect.stringContaining("500"));
+  });
+
+  it("passes an AbortSignal to the fetch function", async () => {
+    const fetchFn = vi.fn((_url: string, init: { signal?: AbortSignal }) => {
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      return Promise.resolve({ ok: true, status: 200 });
+    }) as unknown as WebhookFetchFn;
+    await fireWebhook("https://hooks.example.com", {
+      text: "test",
+      event: "pr_merged",
+      timestamp: "2026-03-24T12:00:00Z",
+    }, fetchFn);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts fetch that exceeds timeout and logs an error", async () => {
+    const logError = vi.fn();
+    // Create a fetch that waits until aborted by the signal
+    const slowFetch: WebhookFetchFn = (_url, init) => {
+      return new Promise((_, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          reject(new Error("The operation was aborted"));
+        });
+      });
+    };
+
+    // Monkey-patch setTimeout to make the 10_000ms timeout fire instantly for this test
+    const origSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((fn: () => void, _ms: number) => {
+      return origSetTimeout(fn, 0); // fire immediately
+    }) as typeof globalThis.setTimeout;
+
+    try {
+      await fireWebhook("https://hooks.example.com", {
+        text: "test",
+        event: "ci_failed",
+        timestamp: "2026-03-24T12:00:00Z",
+      }, slowFetch, logError);
+    } finally {
+      globalThis.setTimeout = origSetTimeout;
+    }
+
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining("abort"),
+    );
+  });
+
+  it("does not abort fast responses and clears timeout", async () => {
+    const fetchFn = vi.fn((_url: string, init: { signal?: AbortSignal }) => {
+      // Verify signal is not aborted for fast responses
+      expect(init.signal?.aborted).toBe(false);
+      return Promise.resolve({ ok: true, status: 200 });
+    }) as unknown as WebhookFetchFn;
+    const logError = vi.fn();
+    await fireWebhook("https://hooks.example.com", {
+      text: "test",
+      event: "pr_merged",
+      timestamp: "2026-03-24T12:00:00Z",
+    }, fetchFn, logError);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(logError).not.toHaveBeenCalled();
   });
 });
 
