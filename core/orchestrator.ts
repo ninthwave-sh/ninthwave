@@ -42,6 +42,8 @@ export interface OrchestratorItem {
   retryCount: number;
   /** ISO timestamp of the most recent commit on the worktree branch, or null if none. */
   lastCommitTime?: string | null;
+  /** Whether a rebase request has been sent and is awaiting resolution. */
+  rebaseRequested?: boolean;
 }
 
 export interface OrchestratorConfig {
@@ -317,6 +319,8 @@ export class Orchestrator {
   private transition(item: OrchestratorItem, state: OrchestratorItemState): void {
     item.state = state;
     item.lastTransition = new Date().toISOString();
+    // Clear rebase flag on any state change — the worker pushed or CI restarted
+    item.rebaseRequested = false;
   }
 
   /** Transition a single item based on its snapshot. Returns actions. */
@@ -490,6 +494,19 @@ export class Orchestrator {
     if (ciStatus === "pending" && item.state !== "ci-pending") {
       this.transition(item, "ci-pending");
       return [];
+    }
+
+    // Detect merge conflicts on PRs stuck in ci-pending — a CONFLICTING
+    // PR will never get CI results, so waiting is pointless. Send a rebase
+    // request (once) so the worker can resolve and re-push.
+    if (item.state === "ci-pending" && snap?.isMergeable === false && !item.rebaseRequested) {
+      item.rebaseRequested = true;
+      actions.push({
+        type: "rebase",
+        itemId: item.id,
+        message: "[ORCHESTRATOR] Rebase Request: PR has merge conflicts with main. Please rebase onto latest main.",
+      });
+      return actions;
     }
 
     if (ciStatus === "pass") {

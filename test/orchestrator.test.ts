@@ -364,6 +364,63 @@ describe("Orchestrator", () => {
     expect(actions.some((a) => a.type === "rebase")).toBe(false);
   });
 
+  // ── 7c. ci-pending with merge conflict → rebase action ──
+
+  it("ci-pending with merge conflict sends rebase action", () => {
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", prState: "open", isMergeable: false }]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("ci-pending");
+    const rebaseActions = actions.filter((a) => a.type === "rebase");
+    expect(rebaseActions).toHaveLength(1);
+    expect(rebaseActions[0]!.message).toContain("merge conflicts");
+  });
+
+  it("ci-pending with merge conflict sends rebase only once", () => {
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    // First poll — sends rebase
+    const actions1 = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", prState: "open", isMergeable: false }]),
+    );
+    expect(actions1.filter((a) => a.type === "rebase")).toHaveLength(1);
+
+    // Second poll — same conflict, no duplicate rebase
+    const actions2 = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", prState: "open", isMergeable: false }]),
+    );
+    expect(actions2.filter((a) => a.type === "rebase")).toHaveLength(0);
+  });
+
+  it("ci-pending rebase flag resets on state change", () => {
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    // Send first rebase
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", prState: "open", isMergeable: false }]),
+    );
+    expect(orch.getItem("H-1-1")!.rebaseRequested).toBe(true);
+
+    // Worker rebases, CI starts → state changes to ci-pending again (via transition)
+    // Simulate by transitioning through ci-passed and back
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open", isMergeable: true }]),
+    );
+    expect(orch.getItem("H-1-1")!.rebaseRequested).toBe(false);
+  });
+
   // ── 8. CI fail recovery ────────────────────────────────────────
 
   it("ci-failed recovers when CI passes (chains to merge evaluation)", () => {

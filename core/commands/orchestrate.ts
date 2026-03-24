@@ -283,12 +283,15 @@ export function reconstructState(
       case "ready":
       case "ci-passed":
         orch.setState(item.id, "ci-passed");
+        recoverWorkspaceRef(orch, item.id, workspaceList);
         break;
       case "failing":
         orch.setState(item.id, "ci-failed");
+        recoverWorkspaceRef(orch, item.id, workspaceList);
         break;
       case "pending":
         orch.setState(item.id, "ci-pending");
+        recoverWorkspaceRef(orch, item.id, workspaceList);
         break;
       case "no-pr":
       default:
