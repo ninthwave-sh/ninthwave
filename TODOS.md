@@ -140,26 +140,6 @@ Key files: `core/mux.ts`, `core/send-message.ts`, `test/mux.test.ts`
 
 ---
 
-### Fix: Log cleanup failures instead of silently swallowing (M-WRK-6)
-
-**Priority:** Medium
-**Source:** Eng review W-19 — `docs/reviews/eng-review-workers.md`
-**Depends on:** None
-
-`cleanItem` in `core/commands/clean.ts` (lines 157-175) has multiple `try/catch` blocks that silently ignore errors from `removeWorktree`, `deleteBranch`, and `deleteRemoteBranch`. Replace bare `catch {}` with `catch (e) { warn(...) }` so cleanup failures are visible. The cleanup should still continue on error (resilient), but should not be silent.
-
-**Test plan:**
-- Unit test: removeWorktree failure logs warning and continues
-- Unit test: deleteBranch failure logs warning and continues
-- Unit test: deleteRemoteBranch failure logs warning and continues
-- Verify cleanup completes even when all operations fail
-
-Acceptance: All `catch {}` blocks in `cleanItem` and `cleanSingleWorktree` log warnings. Cleanup still completes on failure (resilient behavior preserved). Tests verify warnings. No regression.
-
-Key files: `core/commands/clean.ts`, `test/clean.test.ts`
-
----
-
 ### Fix: Scope cmdClean workspace closing to merged items only (M-WRK-7)
 
 **Priority:** Medium
