@@ -1682,4 +1682,30 @@ describe("isWorkerAlive", () => {
     const itemMissing = makeItem("T-99-1", "workspace:99");
     expect(isWorkerAlive(itemMissing, mux)).toBe(false);
   });
+
+  // ── tmux session name format (L-WRK-10) ──────────────────────────
+
+  it("returns true when tmux session name contains the TODO ID", () => {
+    const mux = mockMux("nw-H-WRK-1-1");
+    const item = makeItem("H-WRK-1", "nw-H-WRK-1-1");
+    expect(isWorkerAlive(item, mux)).toBe(true);
+  });
+
+  it("matches tmux session by workspace ref", () => {
+    const mux = mockMux("nw-M-CI-2-3\nnw-H-WRK-1-1");
+    const item = makeItem("H-WRK-1", "nw-H-WRK-1-1");
+    expect(isWorkerAlive(item, mux)).toBe(true);
+  });
+
+  it("matches tmux session by TODO ID in session name", () => {
+    const mux = mockMux("nw-H-WRK-1-1\nnw-M-CI-2-2");
+    const item = makeItem("H-WRK-1", "nw-H-WRK-1-1");
+    expect(isWorkerAlive(item, mux)).toBe(true);
+  });
+
+  it("returns false for tmux session not in listing", () => {
+    const mux = mockMux("nw-M-CI-2-1");
+    const item = makeItem("H-WRK-1", "nw-H-WRK-1-1");
+    expect(isWorkerAlive(item, mux)).toBe(false);
+  });
 });

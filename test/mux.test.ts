@@ -221,6 +221,56 @@ describe("TmuxAdapter", () => {
         "claude --resume",
       ]);
     });
+
+    it("includes TODO ID in session name when provided", () => {
+      const runner = mockRunner({
+        "new-session": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.launchWorkspace("/tmp/project", "claude", "H-WRK-1");
+      expect(result).toBe("nw-H-WRK-1-1");
+    });
+
+    it("generates incrementing names with TODO ID", () => {
+      const runner = mockRunner({
+        "new-session": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+
+      const first = adapter.launchWorkspace("/tmp/a", "cmd1", "H-WRK-1");
+      const second = adapter.launchWorkspace("/tmp/b", "cmd2", "M-CI-2");
+
+      expect(first).toBe("nw-H-WRK-1-1");
+      expect(second).toBe("nw-M-CI-2-2");
+    });
+
+    it("passes TODO-ID-based name to tmux new-session", () => {
+      const { runner, calls } = trackingRunner({
+        "new-session": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      adapter.launchWorkspace("/home/user/code", "claude --resume", "H-WRK-1");
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args).toEqual([
+        "new-session",
+        "-d",
+        "-s",
+        "nw-H-WRK-1-1",
+        "-c",
+        "/home/user/code",
+        "claude --resume",
+      ]);
+    });
+
+    it("falls back to nw-N when no TODO ID is provided", () => {
+      const runner = mockRunner({
+        "new-session": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.launchWorkspace("/tmp/project", "claude");
+      expect(result).toBe("nw-1");
+    });
   });
 
   // ── readScreen ──────────────────────────────────────────────────
