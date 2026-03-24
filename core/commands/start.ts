@@ -140,7 +140,7 @@ function launchAiSession(
 /**
  * Extract full TODO text for an item from TODOS.md.
  */
-function extractTodoText(todosFile: string, targetId: string): string {
+export function extractTodoText(todosFile: string, targetId: string): string {
   const content = readFileSync(todosFile, "utf-8");
   const lines = content.split("\n");
   let inItem = false;

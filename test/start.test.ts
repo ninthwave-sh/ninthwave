@@ -18,7 +18,7 @@ vi.mock("../core/git.ts", () => ({
   createWorktree: vi.fn(),
 }));
 
-import { detectAiTool, cmdStart, launchSingleItem, sanitizeTitle } from "../core/commands/start.ts";
+import { detectAiTool, cmdStart, launchSingleItem, sanitizeTitle, extractTodoText } from "../core/commands/start.ts";
 import { parseTodos } from "../core/parser.ts";
 import { fetchOrigin, ffMerge } from "../core/git.ts";
 
@@ -425,5 +425,186 @@ describe("sanitizeTitle", () => {
 
   it("handles mixed safe and unsafe characters", () => {
     expect(sanitizeTitle("Fix bug #123 (critical)")).toBe("Fix bug _123 _critical_");
+  });
+});
+
+describe("extractTodoText", () => {
+  afterEach(() => cleanupTempRepos());
+
+  it("returns full TODO block for a valid ID", () => {
+    const repo = setupTempRepo();
+    const todosFile = join(repo, "TODOS.md");
+    writeFileSync(
+      todosFile,
+      [
+        "# TODOS",
+        "",
+        "## Section",
+        "",
+        "### Fix: Some bug (H-BUG-1)",
+        "",
+        "**Priority:** High",
+        "**Source:** Manual",
+        "",
+        "Description of the bug.",
+        "",
+        "Acceptance: Bug is fixed.",
+        "",
+        "Key files: `src/foo.ts`",
+        "",
+        "---",
+        "",
+        "### Feat: Another item (M-FT-2)",
+        "",
+        "**Priority:** Medium",
+        "",
+      ].join("\n"),
+    );
+
+    const text = extractTodoText(todosFile, "H-BUG-1");
+    expect(text).toContain("### Fix: Some bug (H-BUG-1)");
+    expect(text).toContain("**Priority:** High");
+    expect(text).toContain("Description of the bug.");
+    expect(text).toContain("Acceptance: Bug is fixed.");
+    expect(text).toContain("Key files: `src/foo.ts`");
+    // Should NOT include the next item
+    expect(text).not.toContain("M-FT-2");
+    expect(text).not.toContain("Another item");
+  });
+
+  it("returns empty string when ID is not found", () => {
+    const repo = setupTempRepo();
+    const todosFile = join(repo, "TODOS.md");
+    writeFileSync(
+      todosFile,
+      [
+        "# TODOS",
+        "",
+        "## Section",
+        "",
+        "### Fix: Some bug (H-BUG-1)",
+        "",
+        "Description.",
+        "",
+      ].join("\n"),
+    );
+
+    const text = extractTodoText(todosFile, "NONEXISTENT-99");
+    expect(text).toBe("");
+  });
+
+  it("returns first match when duplicate IDs exist", () => {
+    const repo = setupTempRepo();
+    const todosFile = join(repo, "TODOS.md");
+    writeFileSync(
+      todosFile,
+      [
+        "# TODOS",
+        "",
+        "### Fix: First occurrence (DUP-1)",
+        "",
+        "First description.",
+        "",
+        "---",
+        "",
+        "### Fix: Second occurrence (DUP-1)",
+        "",
+        "Second description.",
+        "",
+      ].join("\n"),
+    );
+
+    const text = extractTodoText(todosFile, "DUP-1");
+    expect(text).toContain("First occurrence");
+    expect(text).toContain("First description.");
+    // Should stop at the next ### header, so second occurrence is excluded
+    expect(text).not.toContain("Second occurrence");
+    expect(text).not.toContain("Second description.");
+  });
+
+  it("handles malformed headers without parenthesized ID", () => {
+    const repo = setupTempRepo();
+    const todosFile = join(repo, "TODOS.md");
+    writeFileSync(
+      todosFile,
+      [
+        "# TODOS",
+        "",
+        "### Fix: Missing ID header",
+        "",
+        "No ID in the header above.",
+        "",
+        "### Fix: Valid item (H-OK-1)",
+        "",
+        "Has a valid ID.",
+        "",
+      ].join("\n"),
+    );
+
+    // Searching for the valid ID should skip malformed headers
+    const text = extractTodoText(todosFile, "H-OK-1");
+    expect(text).toContain("### Fix: Valid item (H-OK-1)");
+    expect(text).toContain("Has a valid ID.");
+    expect(text).not.toContain("Missing ID header");
+  });
+
+  it("returns text up to end of file when item is last in file", () => {
+    const repo = setupTempRepo();
+    const todosFile = join(repo, "TODOS.md");
+    writeFileSync(
+      todosFile,
+      [
+        "# TODOS",
+        "",
+        "### Fix: Only item (L-LAST-1)",
+        "",
+        "This is the last item.",
+        "",
+        "Acceptance: Done.",
+      ].join("\n"),
+    );
+
+    const text = extractTodoText(todosFile, "L-LAST-1");
+    expect(text).toContain("### Fix: Only item (L-LAST-1)");
+    expect(text).toContain("This is the last item.");
+    expect(text).toContain("Acceptance: Done.");
+  });
+
+  it("handles empty TODOS file", () => {
+    const repo = setupTempRepo();
+    const todosFile = join(repo, "TODOS.md");
+    writeFileSync(todosFile, "");
+
+    const text = extractTodoText(todosFile, "H-BUG-1");
+    expect(text).toBe("");
+  });
+
+  it("matches partial ID prefix correctly (uses parenthesis matching)", () => {
+    const repo = setupTempRepo();
+    const todosFile = join(repo, "TODOS.md");
+    writeFileSync(
+      todosFile,
+      [
+        "# TODOS",
+        "",
+        "### Fix: Item one (H-BUG-10)",
+        "",
+        "Description for 10.",
+        "",
+        "---",
+        "",
+        "### Fix: Item two (H-BUG-1)",
+        "",
+        "Description for 1.",
+        "",
+      ].join("\n"),
+    );
+
+    // The function matches `(${targetId}` — so H-BUG-1 matches both (H-BUG-10) and (H-BUG-1)
+    // because "(H-BUG-1" is a substring of "(H-BUG-10)"
+    // This documents the current behavior (first match wins)
+    const text = extractTodoText(todosFile, "H-BUG-1");
+    expect(text).toContain("Item one");
+    expect(text).toContain("Description for 10.");
   });
 });

@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { join } from "path";
-import { mkdirSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 import type { Multiplexer } from "../core/mux.ts";
 
@@ -492,5 +492,140 @@ describe("cmdClean", () => {
     expect(output).toContain("Failed to remove worktree");
     expect(output).toContain("Failed to delete local branch");
     expect(output).toContain("Failed to delete remote branch");
+  });
+
+  it("cleans cross-repo worktrees from index file", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    // Create a fake cross-repo worktree directory at a different location
+    const crossRepoPath = join(repo, "external-repo", ".worktrees", "todo-X-CR-1");
+    mkdirSync(crossRepoPath, { recursive: true });
+    const crossRepoRoot = join(repo, "external-repo");
+    mkdirSync(join(crossRepoRoot, ".git"), { recursive: true });
+
+    // Write a cross-repo index entry
+    const indexPath = join(worktreeDir, ".cross-repo-index");
+    writeFileSync(indexPath, `X-CR-1\t${crossRepoRoot}\t${crossRepoPath}\n`);
+
+    // Mark the branch as merged so cmdClean will clean it
+    (git.isBranchMerged as Mock).mockReturnValue(true);
+
+    const output = captureOutput(() =>
+      cmdClean([], worktreeDir, repo, mockMux),
+    );
+
+    expect(output).toContain("Cleaned 1 worktree(s)");
+    expect(git.removeWorktree as Mock).toHaveBeenCalledWith(
+      crossRepoRoot,
+      crossRepoPath,
+      true,
+    );
+    expect(git.deleteBranch as Mock).toHaveBeenCalledWith(
+      crossRepoRoot,
+      "todo/X-CR-1",
+    );
+    expect(git.deleteRemoteBranch as Mock).toHaveBeenCalledWith(
+      crossRepoRoot,
+      "todo/X-CR-1",
+    );
+  });
+
+  it("skips malformed cross-repo index entries", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    // Write a cross-repo index with malformed entries
+    const indexPath = join(worktreeDir, ".cross-repo-index");
+    writeFileSync(
+      indexPath,
+      [
+        "",                           // empty line
+        "# comment line",             // comment
+        "only-id-no-tabs",            // missing repo and path fields
+        "X-BAD-1\t/some/repo",        // missing worktree path (only 2 fields)
+        `X-BAD-2\t\t/some/path`,      // empty repo field
+      ].join("\n"),
+    );
+
+    (git.isBranchMerged as Mock).mockReturnValue(true);
+
+    const output = captureOutput(() =>
+      cmdClean([], worktreeDir, repo, mockMux),
+    );
+
+    // None of the malformed entries should be cleaned
+    expect(output).toContain("Cleaned 0 worktree(s)");
+    expect(git.removeWorktree as Mock).not.toHaveBeenCalled();
+  });
+
+  it("skips cross-repo index entries where worktree path does not exist", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    // Write an index entry pointing to a nonexistent path
+    const indexPath = join(worktreeDir, ".cross-repo-index");
+    writeFileSync(
+      indexPath,
+      `X-GONE-1\t/nonexistent/repo\t/nonexistent/worktree\n`,
+    );
+
+    (git.isBranchMerged as Mock).mockReturnValue(true);
+
+    const output = captureOutput(() =>
+      cmdClean([], worktreeDir, repo, mockMux),
+    );
+
+    // The entry should be skipped because the worktree path doesn't exist
+    expect(output).toContain("Cleaned 0 worktree(s)");
+    expect(git.removeWorktree as Mock).not.toHaveBeenCalled();
+  });
+
+  it("cleans specific cross-repo worktree by target ID", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    // Create two cross-repo entries, only target one
+    const crossRepoPath1 = join(repo, "ext1", ".worktrees", "todo-X-CR-1");
+    const crossRepoPath2 = join(repo, "ext2", ".worktrees", "todo-X-CR-2");
+    const crossRepoRoot1 = join(repo, "ext1");
+    const crossRepoRoot2 = join(repo, "ext2");
+    mkdirSync(crossRepoPath1, { recursive: true });
+    mkdirSync(crossRepoPath2, { recursive: true });
+    mkdirSync(join(crossRepoRoot1, ".git"), { recursive: true });
+    mkdirSync(join(crossRepoRoot2, ".git"), { recursive: true });
+
+    const indexPath = join(worktreeDir, ".cross-repo-index");
+    writeFileSync(
+      indexPath,
+      [
+        `X-CR-1\t${crossRepoRoot1}\t${crossRepoPath1}`,
+        `X-CR-2\t${crossRepoRoot2}\t${crossRepoPath2}`,
+      ].join("\n"),
+    );
+
+    // Target only X-CR-1 — should clean regardless of merge status
+    (git.isBranchMerged as Mock).mockReturnValue(false);
+
+    const output = captureOutput(() =>
+      cmdClean(["X-CR-1"], worktreeDir, repo, mockMux),
+    );
+
+    expect(output).toContain("Cleaned 1 worktree(s)");
+    expect(git.removeWorktree as Mock).toHaveBeenCalledWith(
+      crossRepoRoot1,
+      crossRepoPath1,
+      true,
+    );
+    // Should NOT have cleaned X-CR-2
+    expect(git.removeWorktree as Mock).toHaveBeenCalledTimes(1);
   });
 });
