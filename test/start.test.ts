@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import { join } from "path";
 import { writeFileSync } from "fs";
 import { setupTempRepo, useFixture, cleanupTempRepos } from "./helpers.ts";
+import type { Multiplexer } from "../core/mux.ts";
 
 // Only mock modules that don't have their own test files and aren't
 // transitive dependencies of other tested modules.
@@ -17,18 +18,21 @@ vi.mock("../core/git.ts", () => ({
   createWorktree: vi.fn(),
 }));
 
-vi.mock("../core/cmux.ts", () => ({
-  launchWorkspace: vi.fn(() => "workspace:1"),
-  splitPane: vi.fn(() => "pane:1"),
-  sendMessage: vi.fn(() => true),
-  readScreen: vi.fn(() => "line1\nline2\nline3\nline4\n"),
-}));
-
-// Import mocked modules for assertions
-import * as cmux from "../core/cmux.ts";
 import { detectAiTool, cmdStart, launchSingleItem } from "../core/commands/start.ts";
 import { parseTodos } from "../core/parser.ts";
 
+/** Create a mock Multiplexer for dependency injection (avoids vi.mock leaking). */
+function createMockMux(): Multiplexer & Record<string, Mock> {
+  return {
+    isAvailable: vi.fn(() => true),
+    launchWorkspace: vi.fn(() => "workspace:1"),
+    splitPane: vi.fn(() => "pane:1"),
+    sendMessage: vi.fn(() => true),
+    readScreen: vi.fn(() => "line1\nline2\nline3\nline4\n"),
+    listWorkspaces: vi.fn(() => ""),
+    closeWorkspace: vi.fn(() => true),
+  };
+}
 
 function captureOutput(fn: () => void): string {
   const lines: string[] = [];
@@ -112,8 +116,6 @@ describe("cmdStart", () => {
     vi.clearAllMocks();
     // Ensure AI tool is detectable
     process.env.NINTHWAVE_AI_TOOL = "claude";
-    // Force CmuxAdapter so mocked cmux.ts is used (CI has tmux but not cmux)
-    process.env.NINTHWAVE_MUX = "cmux";
   });
 
   afterEach(() => {
@@ -149,29 +151,31 @@ describe("cmdStart", () => {
   });
 
   it("launches session for a valid item", () => {
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
     const todosFile = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdStart(["M-CI-1"], todosFile, worktreeDir, repo),
+      cmdStart(["M-CI-1"], todosFile, worktreeDir, repo, mockMux),
     );
 
     expect(output).toContain("Launched 1 session");
-    expect(cmux.launchWorkspace as Mock).toHaveBeenCalled();
+    expect(mockMux.launchWorkspace).toHaveBeenCalled();
   });
 
   it("reports detected AI tool", () => {
     process.env.NINTHWAVE_AI_TOOL = "opencode";
 
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
     const todosFile = join(repo, "TODOS.md");
     const worktreeDir = join(repo, ".worktrees");
 
     const output = captureOutput(() =>
-      cmdStart(["M-CI-1"], todosFile, worktreeDir, repo),
+      cmdStart(["M-CI-1"], todosFile, worktreeDir, repo, mockMux),
     );
 
     expect(output).toContain("Detected AI tool: opencode");
@@ -184,8 +188,6 @@ describe("launchSingleItem", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.NINTHWAVE_AI_TOOL = "claude";
-    // Force CmuxAdapter so mocked cmux.ts is used (CI has tmux but not cmux)
-    process.env.NINTHWAVE_MUX = "cmux";
   });
 
   afterEach(() => {
@@ -194,6 +196,7 @@ describe("launchSingleItem", () => {
   });
 
   it("creates worktree and launches session for a single item", () => {
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
     const todosFile = join(repo, "TODOS.md");
@@ -202,18 +205,19 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const result = captureOutput(() => {
-      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("todo-M-CI-1");
       expect(res!.workspaceRef).toBe("workspace:1");
     });
 
-    expect(cmux.launchWorkspace as Mock).toHaveBeenCalled();
+    expect(mockMux.launchWorkspace).toHaveBeenCalled();
     expect(result).toContain("Creating worktree for M-CI-1");
   });
 
-  it("returns null when cmux launch fails", () => {
-    (cmux.launchWorkspace as Mock).mockReturnValueOnce(null);
+  it("returns null when mux launch fails", () => {
+    const mockMux = createMockMux();
+    mockMux.launchWorkspace.mockReturnValueOnce(null);
 
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
@@ -223,7 +227,7 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const result = captureOutput(() => {
-      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
       expect(res).toBeNull();
     });
 
@@ -231,6 +235,7 @@ describe("launchSingleItem", () => {
   });
 
   it("allocates a partition for the item", () => {
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
     const todosFile = join(repo, "TODOS.md");
@@ -239,7 +244,7 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     const result = captureOutput(() => {
-      launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+      launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
     });
 
     // Partition 1 should be allocated (first available)
@@ -247,6 +252,7 @@ describe("launchSingleItem", () => {
   });
 
   it("ensures worktree directory is created", () => {
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
     const todosFile = join(repo, "TODOS.md");
@@ -256,7 +262,7 @@ describe("launchSingleItem", () => {
 
     // worktreeDir doesn't exist yet — launchSingleItem should create it
     captureOutput(() => {
-      launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+      launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
     });
 
     const { existsSync } = require("fs");
@@ -264,6 +270,7 @@ describe("launchSingleItem", () => {
   });
 
   it("returns correct worktreePath for hub repo items", () => {
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
     const todosFile = join(repo, "TODOS.md");
@@ -272,7 +279,7 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     captureOutput(() => {
-      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toBe(join(worktreeDir, "todo-M-CI-1"));
     });

@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import { join } from "path";
 import { mkdirSync } from "fs";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
+import type { Multiplexer } from "../core/mux.ts";
 
 // Only mock modules that don't have their own test files.
 vi.mock("../core/git.ts", () => ({
@@ -17,14 +18,7 @@ vi.mock("../core/gh.ts", () => ({
   prList: vi.fn(() => []),
 }));
 
-vi.mock("../core/cmux.ts", () => ({
-  isAvailable: vi.fn(() => true),
-  listWorkspaces: vi.fn(() => ""),
-  closeWorkspace: vi.fn(() => true),
-}));
-
 // Import mocked modules for assertions
-import * as cmux from "../core/cmux.ts";
 import * as git from "../core/git.ts";
 
 // Import after mocks
@@ -35,6 +29,19 @@ import {
   cmdCloseWorkspace,
   cmdCloseWorkspaces,
 } from "../core/commands/clean.ts";
+
+/** Create a mock Multiplexer for dependency injection (avoids vi.mock leaking). */
+function createMockMux(): Multiplexer & Record<string, Mock> {
+  return {
+    isAvailable: vi.fn(() => true),
+    launchWorkspace: vi.fn(() => "workspace:1"),
+    splitPane: vi.fn(() => "pane:1"),
+    sendMessage: vi.fn(() => true),
+    readScreen: vi.fn(() => ""),
+    listWorkspaces: vi.fn(() => ""),
+    closeWorkspace: vi.fn(() => true),
+  };
+}
 
 function captureOutput(fn: () => void): string {
   const lines: string[] = [];
@@ -62,55 +69,40 @@ function captureOutput(fn: () => void): string {
 }
 
 describe("cmdCloseWorkspaces", () => {
-  const originalEnv = { ...process.env };
-  beforeEach(() => {
-    vi.clearAllMocks();
-    // Force CmuxAdapter so mocked cmux.ts is used (CI has tmux but not cmux)
-    process.env.NINTHWAVE_MUX = "cmux";
-  });
-  afterEach(() => {
-    process.env = { ...originalEnv };
-    cleanupTempRepos();
-  });
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanupTempRepos());
 
   it("warns when cmux is not available", () => {
-    (cmux.isAvailable as Mock).mockReturnValue(false);
+    const mockMux = createMockMux();
+    mockMux.isAvailable.mockReturnValue(false);
 
-    const output = captureOutput(() => cmdCloseWorkspaces());
+    const output = captureOutput(() => cmdCloseWorkspaces(mockMux));
     expect(output).toContain("cmux not available");
   });
 
   it("reports no workspaces when list is empty", () => {
-    (cmux.isAvailable as Mock).mockReturnValue(true);
-    (cmux.listWorkspaces as Mock).mockReturnValue("");
+    const mockMux = createMockMux();
+    mockMux.listWorkspaces.mockReturnValue("");
 
-    const output = captureOutput(() => cmdCloseWorkspaces());
+    const output = captureOutput(() => cmdCloseWorkspaces(mockMux));
     expect(output).toContain("No cmux workspaces");
   });
 
   it("closes matching todo workspaces", () => {
-    (cmux.isAvailable as Mock).mockReturnValue(true);
-    (cmux.listWorkspaces as Mock).mockReturnValue(
+    const mockMux = createMockMux();
+    mockMux.listWorkspaces.mockReturnValue(
       "workspace:1 TODO H-CI-2 some title\nworkspace:2 TODO M-CI-1 another title",
     );
-    (cmux.closeWorkspace as Mock).mockReturnValue(true);
 
-    const output = captureOutput(() => cmdCloseWorkspaces());
+    const output = captureOutput(() => cmdCloseWorkspaces(mockMux));
     expect(output).toContain("Closed 2 todo workspace(s)");
-    expect(cmux.closeWorkspace as Mock).toHaveBeenCalledTimes(2);
+    expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("cmdCloseWorkspace", () => {
-  const originalEnv = { ...process.env };
-  beforeEach(() => {
-    vi.clearAllMocks();
-    process.env.NINTHWAVE_MUX = "cmux";
-  });
-  afterEach(() => {
-    process.env = { ...originalEnv };
-    cleanupTempRepos();
-  });
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanupTempRepos());
 
   it("dies with no target ID", () => {
     const output = captureOutput(() => cmdCloseWorkspace(""));
@@ -118,22 +110,22 @@ describe("cmdCloseWorkspace", () => {
   });
 
   it("warns when cmux is not available", () => {
-    (cmux.isAvailable as Mock).mockReturnValue(false);
+    const mockMux = createMockMux();
+    mockMux.isAvailable.mockReturnValue(false);
 
-    const output = captureOutput(() => cmdCloseWorkspace("H-CI-2"));
+    const output = captureOutput(() => cmdCloseWorkspace("H-CI-2", mockMux));
     expect(output).toContain("cmux not available");
   });
 
   it("closes the matching workspace", () => {
-    (cmux.isAvailable as Mock).mockReturnValue(true);
-    (cmux.listWorkspaces as Mock).mockReturnValue(
+    const mockMux = createMockMux();
+    mockMux.listWorkspaces.mockReturnValue(
       "workspace:1 TODO H-CI-2 some title\nworkspace:2 TODO M-CI-1 another",
     );
-    (cmux.closeWorkspace as Mock).mockReturnValue(true);
 
-    captureOutput(() => cmdCloseWorkspace("H-CI-2"));
-    expect(cmux.closeWorkspace as Mock).toHaveBeenCalledWith("workspace:1");
-    expect(cmux.closeWorkspace as Mock).toHaveBeenCalledTimes(1);
+    captureOutput(() => cmdCloseWorkspace("H-CI-2", mockMux));
+    expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
+    expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -237,41 +229,32 @@ describe("cmdCleanSingle", () => {
 });
 
 describe("cmdClean", () => {
-  const originalEnv = { ...process.env };
-  beforeEach(() => {
-    vi.clearAllMocks();
-    process.env.NINTHWAVE_MUX = "cmux";
-  });
-  afterEach(() => {
-    process.env = { ...originalEnv };
-    cleanupTempRepos();
-  });
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanupTempRepos());
 
   it("reports no worktrees when directory doesn't exist", () => {
+    const mockMux = createMockMux();
+
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
 
-    (cmux.isAvailable as Mock).mockReturnValue(true);
-    (cmux.listWorkspaces as Mock).mockReturnValue("");
-
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo),
+      cmdClean([], worktreeDir, repo, mockMux),
     );
 
     expect(output).toContain("No worktrees to clean");
   });
 
   it("cleans merged worktrees", () => {
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "todo-H-CI-2"), { recursive: true });
 
-    (cmux.isAvailable as Mock).mockReturnValue(true);
-    (cmux.listWorkspaces as Mock).mockReturnValue("");
     (git.isBranchMerged as Mock).mockReturnValue(true);
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo),
+      cmdClean([], worktreeDir, repo, mockMux),
     );
 
     expect(output).toContain("Cleaned 1 worktree(s)");
@@ -279,16 +262,15 @@ describe("cmdClean", () => {
   });
 
   it("does not clean unmerged worktrees without target ID", () => {
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "todo-H-CI-2"), { recursive: true });
 
-    (cmux.isAvailable as Mock).mockReturnValue(true);
-    (cmux.listWorkspaces as Mock).mockReturnValue("");
     (git.isBranchMerged as Mock).mockReturnValue(false);
 
     const output = captureOutput(() =>
-      cmdClean([], worktreeDir, repo),
+      cmdClean([], worktreeDir, repo, mockMux),
     );
 
     expect(output).toContain("Cleaned 0 worktree(s)");
@@ -296,6 +278,7 @@ describe("cmdClean", () => {
   });
 
   it("only closes the targeted workspace when cleaning a specific ID", () => {
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     // Create worktrees for H-1 (target), H-2, and H-3
@@ -303,36 +286,33 @@ describe("cmdClean", () => {
     mkdirSync(join(worktreeDir, "todo-H-2"), { recursive: true });
     mkdirSync(join(worktreeDir, "todo-H-3"), { recursive: true });
 
-    (cmux.isAvailable as Mock).mockReturnValue(true);
-    (cmux.listWorkspaces as Mock).mockReturnValue(
+    mockMux.listWorkspaces.mockReturnValue(
       "workspace:1 TODO H-1 first task\nworkspace:2 TODO H-2 second task\nworkspace:3 TODO H-3 third task",
     );
-    (cmux.closeWorkspace as Mock).mockReturnValue(true);
     (git.isBranchMerged as Mock).mockReturnValue(false);
 
-    captureOutput(() => cmdClean(["H-1"], worktreeDir, repo));
+    captureOutput(() => cmdClean(["H-1"], worktreeDir, repo, mockMux));
 
     // Should only close workspace:1 (H-1), not workspace:2 or workspace:3
-    expect(cmux.closeWorkspace as Mock).toHaveBeenCalledTimes(1);
-    expect(cmux.closeWorkspace as Mock).toHaveBeenCalledWith("workspace:1");
+    expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(1);
+    expect(mockMux.closeWorkspace).toHaveBeenCalledWith("workspace:1");
   });
 
   it("closes all workspaces when no target ID is specified", () => {
+    const mockMux = createMockMux();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "todo-H-1"), { recursive: true });
     mkdirSync(join(worktreeDir, "todo-H-2"), { recursive: true });
 
-    (cmux.isAvailable as Mock).mockReturnValue(true);
-    (cmux.listWorkspaces as Mock).mockReturnValue(
+    mockMux.listWorkspaces.mockReturnValue(
       "workspace:1 TODO H-CI-1 first\nworkspace:2 TODO H-CI-2 second",
     );
-    (cmux.closeWorkspace as Mock).mockReturnValue(true);
     (git.isBranchMerged as Mock).mockReturnValue(true);
 
-    captureOutput(() => cmdClean([], worktreeDir, repo));
+    captureOutput(() => cmdClean([], worktreeDir, repo, mockMux));
 
     // Should close all todo workspaces when no target is specified
-    expect(cmux.closeWorkspace as Mock).toHaveBeenCalledTimes(2);
+    expect(mockMux.closeWorkspace).toHaveBeenCalledTimes(2);
   });
 });

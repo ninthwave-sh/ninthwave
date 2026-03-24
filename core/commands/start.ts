@@ -283,6 +283,7 @@ export function cmdStart(
   todosFile: string,
   worktreeDir: string,
   projectRoot: string,
+  muxOverride?: Multiplexer,
 ): void {
   // Parse --mux flag before treating remaining args as IDs
   const ids: string[] = [];
@@ -375,7 +376,7 @@ export function cmdStart(
     getWorktreeInfo(todoId, crossRepoIndex, worktreeDir),
   );
 
-  const mux = getMux();
+  const mux = muxOverride ?? getMux();
   const launched: string[] = [];
 
   for (const id of ids) {
