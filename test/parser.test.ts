@@ -124,14 +124,12 @@ describe("parseTodos — valid fixture", () => {
     expect(byId.get("M-CI-1")!.rawText).toContain("**Priority:** Medium");
   });
 
-  it("records line numbers", () => {
+  it("sets empty filePath for TODOS.md-parsed items", () => {
     const repo = setupTempRepo();
     useFixture(repo, "valid.md");
     const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
 
-    // First item starts at line 5 (### header)
-    expect(items[0]!.lineNumber).toBe(5);
-    expect(items[0]!.lineEndNumber).toBeGreaterThan(items[0]!.lineNumber);
+    expect(items[0]!.filePath).toBe("");
   });
 });
 
@@ -1004,8 +1002,7 @@ function fakeItem(rawText: string) {
     dependencies: [],
     bundleWith: [],
     status: "open" as const,
-    lineNumber: 1,
-    lineEndNumber: 1,
+    filePath: "",
     repoAlias: "",
     rawText,
     filePaths: [],
