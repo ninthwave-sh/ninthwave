@@ -6,6 +6,7 @@
 
 
 
+
 ### Feat: Add Phase 3 continuous delivery loop to /work skill (H-CDL-1)
 
 **Priority:** High
@@ -27,6 +28,7 @@ Key files: `skills/work/SKILL.md`
 ---
 
 ## Test Confidence (L-VIS-2 iteration, 2026-03-24)
+
 
 
 
@@ -71,31 +73,8 @@ Key files: `skills/decompose/SKILL.md`
 
 ---
 
-## Developer Experience (L-VIS-2 iteration, 2026-03-24)
-
-
-
-### Feat: First-run experience validation and polish (L-FRE-1)
-
-**Priority:** Low
-**Source:** L-VIS-2 vision review — VISION.md Section A
-**Depends on:** None
-
-The target is `brew install` → `ninthwave setup` → first `/work` run in under 10 minutes. Currently, the setup command doesn't validate prerequisites (cmux, gh, AI tool) or provide helpful error messages when they're missing. Add prerequisite checking to `ninthwave setup` that detects missing dependencies and prints actionable install instructions. Also verify the README quick-start instructions are accurate and complete by walking through them on a clean environment.
-
-**Test plan:**
-- Unit test: `setup` detects missing `cmux` and prints install instructions
-- Unit test: `setup` detects missing `gh` and prints install instructions
-- Manual test: follow README quick-start from scratch, note any gaps
-- Edge case: `gh` installed but not authenticated — should warn
-
-Acceptance: `ninthwave setup` checks for required prerequisites (cmux, gh) and prints clear error messages with install commands when missing. The README quick-start path is validated as accurate. Setup completes successfully when all prerequisites are met.
-
-Key files: `core/commands/setup.ts`, `test/setup.test.ts`, `README.md`
-
----
-
 ## Vision (recurring, 2026-03-24)
+
 
 
 
