@@ -10,6 +10,7 @@
 
 
 
+
 ### Feat: Add binary compilation and release pipeline (H-BREW-3)
 
 **Priority:** High
@@ -75,19 +76,6 @@ Key files: `README.md`, `CONTRIBUTING.md`, `setup` (delete), `remote-install.sh`
 
 
 
-### Feat: Define orchestrator types and state machine (H-ORCH-6)
-
-**Priority:** High
-**Source:** Orchestrator pivot
-**Depends on:** H-ORCH-1
-
-Create `core/orchestrator.ts` with the `OrchestratorItemState` type (queued, ready, launching, implementing, pr-open, ci-pending, ci-passed, ci-failed, review-pending, merging, merged, done, stuck), `OrchestratorItem` interface, `OrchestratorConfig` interface, and the `Orchestrator` class with state management methods. The class's `processTransitions(currentState)` method is pure — it takes a poll snapshot, compares against internal state, and returns an array of `Action` objects describing what to do. No side effects. This makes the state machine fully testable without mocks.
-
-Acceptance: `Orchestrator` class correctly tracks item states. `processTransitions` returns correct actions for all state transitions (CI pass → merge action, CI fail → notify action, PR merged → clean action, batch complete → launch next). WIP limit is respected. Merge strategy (`asap`/`approved`/`ask`) gates merge actions correctly. Fully unit-tested with at least 15 test cases.
-
-Key files: `core/orchestrator.ts` (new), `core/types.ts`, `test/orchestrator.test.ts` (new)
-
----
 
 ### Feat: Implement orchestrator action execution (H-ORCH-7)
 
@@ -146,6 +134,7 @@ Key files: `agents/todo-worker.md`
 ---
 
 ## Vision (recurring, 2026-03-23)
+
 
 
 
