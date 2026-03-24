@@ -156,22 +156,23 @@ export function cmdClean(
       info(`Removing worktree for ${id} from ${basename(repoRoot)}`);
       try {
         removeWorktree(repoRoot, wtDir, true);
-      } catch {
+      } catch (e) {
+        warn(`Failed to remove worktree for ${id}: ${e instanceof Error ? e.message : e}`);
         try {
           rmSync(wtDir, { recursive: true, force: true });
-        } catch {
-          // ignore
+        } catch (e2) {
+          warn(`Failed to force-remove worktree directory for ${id}: ${e2 instanceof Error ? e2.message : e2}`);
         }
       }
       try {
         deleteBranch(repoRoot, branch);
-      } catch {
-        // ignore
+      } catch (e) {
+        warn(`Failed to delete local branch ${branch}: ${e instanceof Error ? e.message : e}`);
       }
       try {
         deleteRemoteBranch(repoRoot, branch);
-      } catch {
-        // ignore
+      } catch (e) {
+        warn(`Failed to delete remote branch ${branch}: ${e instanceof Error ? e.message : e}`);
       }
       releasePartition(partitionDir, id);
       removeCrossRepoIndex(crossRepoIndex, id);
@@ -249,22 +250,23 @@ export function cleanSingleWorktree(
   info(`Removing worktree for ${id} from ${basename(targetRepo)}`);
   try {
     removeWorktree(targetRepo, worktreePath, true);
-  } catch {
+  } catch (e) {
+    warn(`Failed to remove worktree for ${id}: ${e instanceof Error ? e.message : e}`);
     try {
       rmSync(worktreePath, { recursive: true, force: true });
-    } catch {
-      // ignore
+    } catch (e2) {
+      warn(`Failed to force-remove worktree directory for ${id}: ${e2 instanceof Error ? e2.message : e2}`);
     }
   }
   try {
     deleteBranch(targetRepo, branch);
-  } catch {
-    // ignore
+  } catch (e) {
+    warn(`Failed to delete local branch ${branch}: ${e instanceof Error ? e.message : e}`);
   }
   try {
     deleteRemoteBranch(targetRepo, branch);
-  } catch {
-    // ignore
+  } catch (e) {
+    warn(`Failed to delete remote branch ${branch}: ${e instanceof Error ? e.message : e}`);
   }
   releasePartition(partitionDir, id);
   removeCrossRepoIndex(crossRepoIndex, id);
