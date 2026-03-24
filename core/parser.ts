@@ -18,7 +18,7 @@ import { loadDomainMappings } from "./config.ts";
  */
 export function normalizeDomain(
   section: string,
-  domainsFile?: string,
+  domainMappings?: Map<string, string>,
 ): string {
   // Strip all parenthetical annotations before normalizing
   // e.g. "CLI Migration (TypeScript migration completion, 2026-03-23)" → "CLI Migration"
@@ -26,19 +26,10 @@ export function normalizeDomain(
   const lower = stripped.toLowerCase();
 
   // Check domain mappings if provided
-  if (domainsFile) {
-    // Load raw from file
-    if (existsSync(domainsFile)) {
-      const content = readFileSync(domainsFile, "utf-8");
-      for (const rawLine of content.split("\n")) {
-        const eqIdx = rawLine.indexOf("=");
-        if (eqIdx === -1) continue;
-        const pattern = rawLine.slice(0, eqIdx).trim();
-        if (!pattern || pattern.startsWith("#")) continue;
-        const domainKey = rawLine.slice(eqIdx + 1).trim();
-        if (lower.includes(pattern)) {
-          return domainKey;
-        }
+  if (domainMappings) {
+    for (const [pattern, domainKey] of domainMappings) {
+      if (lower.includes(pattern)) {
+        return domainKey;
       }
     }
   }
@@ -254,13 +245,9 @@ export function parseTodos(
     }
   }
 
-  // Derive domainsFile path from todosFile location
-  const domainsFile = join(
-    todosFile,
-    "..",
-    ".ninthwave",
-    "domains.conf",
-  );
+  // Load domain mappings once for the entire parse
+  const projectRoot = join(todosFile, "..");
+  const domainMappings = loadDomainMappings(projectRoot);
 
   const items: TodoItem[] = [];
   const seenIds = new Set<string>();
@@ -365,7 +352,7 @@ export function parseTodos(
       if (line.includes("In Progress")) {
         currentDomain = "in-progress-section";
       } else {
-        currentDomain = normalizeDomain(sectionName, domainsFile);
+        currentDomain = normalizeDomain(sectionName, domainMappings);
       }
       continue;
     }

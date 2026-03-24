@@ -181,30 +181,14 @@ describe("loadDomainMappings", () => {
 describe("normalizeDomain with custom mappings", () => {
   it("uses domain mapping when pattern matches", () => {
     const { normalizeDomain } = require("../core/parser.ts");
-    const repo = setupTempRepo();
-    const configDir = join(repo, ".ninthwave");
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(
-      join(configDir, "domains.conf"),
-      "infrastructure=infra\n",
-    );
-
-    const domainsFile = join(configDir, "domains.conf");
-    expect(normalizeDomain("Cloud Infrastructure", domainsFile)).toBe("infra");
+    const mappings = new Map([["infrastructure", "infra"]]);
+    expect(normalizeDomain("Cloud Infrastructure", mappings)).toBe("infra");
   });
 
   it("falls back to auto-slugify when no mapping matches", () => {
     const { normalizeDomain } = require("../core/parser.ts");
-    const repo = setupTempRepo();
-    const configDir = join(repo, ".ninthwave");
-    mkdirSync(configDir, { recursive: true });
-    writeFileSync(
-      join(configDir, "domains.conf"),
-      "auth=auth\n",
-    );
-
-    const domainsFile = join(configDir, "domains.conf");
-    expect(normalizeDomain("User Onboarding", domainsFile)).toBe(
+    const mappings = new Map([["auth", "auth"]]);
+    expect(normalizeDomain("User Onboarding", mappings)).toBe(
       "user-onboarding",
     );
   });

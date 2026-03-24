@@ -554,23 +554,31 @@ describe("normalizeDomain", () => {
   });
 
   it("custom domain mappings take priority over truncation", () => {
-    // Create a temp domains.conf that maps a long header to a short domain
-    const { writeFileSync, mkdirSync } = require("fs");
-    const { join } = require("path");
-    const tmpDir = join(require("os").tmpdir(), `nw-test-domains-${Date.now()}`);
-    mkdirSync(tmpDir, { recursive: true });
-    const domainsFile = join(tmpDir, "domains.conf");
-    writeFileSync(
-      domainsFile,
-      "architecture design review=arch-review\n",
-    );
+    const mappings = new Map([["architecture design review", "arch-review"]]);
 
     const long = "Architecture Design Review And Implementation Planning Session Notes";
-    const result = normalizeDomain(long, domainsFile);
+    const result = normalizeDomain(long, mappings);
     expect(result).toBe("arch-review");
+  });
 
-    // Cleanup
-    require("fs").rmSync(tmpDir, { recursive: true });
+  it("accepts a Map and matches patterns", () => {
+    const mappings = new Map([
+      ["infrastructure", "infra"],
+      ["auth", "auth"],
+    ]);
+    expect(normalizeDomain("Cloud Infrastructure", mappings)).toBe("infra");
+    expect(normalizeDomain("Authentication Service", mappings)).toBe("auth");
+    expect(normalizeDomain("User Onboarding", mappings)).toBe("user-onboarding");
+  });
+
+  it("returns auto-slug when Map is empty", () => {
+    const mappings = new Map<string, string>();
+    expect(normalizeDomain("Cloud Infrastructure", mappings)).toBe("cloud-infrastructure");
+  });
+
+  it("returns auto-slug when no Map is provided", () => {
+    expect(normalizeDomain("Cloud Infrastructure")).toBe("cloud-infrastructure");
+    expect(normalizeDomain("Cloud Infrastructure", undefined)).toBe("cloud-infrastructure");
   });
 });
 
@@ -899,6 +907,60 @@ describe("parseTodos — wildcard dependencies", () => {
     expect(mga1.dependencies).toContain("H-AL-1"); // literal
     expect(mga1.dependencies).toContain("H-BE-1"); // wildcard expanded
     expect(mga1.dependencies).not.toContain("M-AL-2"); // not matched
+  });
+});
+
+describe("parseTodos — domain mappings loaded once via loadDomainMappings", () => {
+  it("applies domain mappings from domains.conf to section headers", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "domains.conf"),
+      "infrastructure=infra\nonboarding=onboard\n",
+    );
+
+    const content = [
+      "## Cloud Infrastructure",
+      "",
+      "### Feat: Setup CI (H-CI-1)",
+      "**Priority:** High",
+      "**Depends on:** None",
+      "",
+      "---",
+      "",
+      "## User Onboarding",
+      "",
+      "### Feat: Welcome flow (M-UO-1)",
+      "**Priority:** Medium",
+      "**Depends on:** None",
+      "",
+      "---",
+    ].join("\n");
+    writeFileSync(join(repo, "TODOS.md"), content);
+
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+    const byId = new Map(items.map((i) => [i.id, i]));
+
+    expect(byId.get("H-CI-1")!.domain).toBe("infra");
+    expect(byId.get("M-UO-1")!.domain).toBe("onboard");
+  });
+
+  it("falls back to auto-slugify when no domains.conf exists", () => {
+    const repo = setupTempRepo();
+    const content = [
+      "## Cloud Infrastructure",
+      "",
+      "### Feat: Setup CI (H-CI-1)",
+      "**Priority:** High",
+      "**Depends on:** None",
+      "",
+      "---",
+    ].join("\n");
+    writeFileSync(join(repo, "TODOS.md"), content);
+
+    const items = parseTodos(join(repo, "TODOS.md"), join(repo, ".worktrees"));
+    expect(items[0]!.domain).toBe("cloud-infrastructure");
   });
 });
 
