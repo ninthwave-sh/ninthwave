@@ -112,6 +112,8 @@ describe("cmdStart", () => {
     vi.clearAllMocks();
     // Ensure AI tool is detectable
     process.env.NINTHWAVE_AI_TOOL = "claude";
+    // Force CmuxAdapter so mocked cmux.ts is used (CI has tmux but not cmux)
+    process.env.NINTHWAVE_MUX = "cmux";
   });
 
   afterEach(() => {
@@ -182,6 +184,8 @@ describe("launchSingleItem", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.NINTHWAVE_AI_TOOL = "claude";
+    // Force CmuxAdapter so mocked cmux.ts is used (CI has tmux but not cmux)
+    process.env.NINTHWAVE_MUX = "cmux";
   });
 
   afterEach(() => {

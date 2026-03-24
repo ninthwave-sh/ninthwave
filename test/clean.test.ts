@@ -62,8 +62,16 @@ function captureOutput(fn: () => void): string {
 }
 
 describe("cmdCloseWorkspaces", () => {
-  beforeEach(() => vi.clearAllMocks());
-  afterEach(() => cleanupTempRepos());
+  const originalEnv = { ...process.env };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Force CmuxAdapter so mocked cmux.ts is used (CI has tmux but not cmux)
+    process.env.NINTHWAVE_MUX = "cmux";
+  });
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    cleanupTempRepos();
+  });
 
   it("warns when cmux is not available", () => {
     (cmux.isAvailable as Mock).mockReturnValue(false);
@@ -94,8 +102,15 @@ describe("cmdCloseWorkspaces", () => {
 });
 
 describe("cmdCloseWorkspace", () => {
-  beforeEach(() => vi.clearAllMocks());
-  afterEach(() => cleanupTempRepos());
+  const originalEnv = { ...process.env };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINTHWAVE_MUX = "cmux";
+  });
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    cleanupTempRepos();
+  });
 
   it("dies with no target ID", () => {
     const output = captureOutput(() => cmdCloseWorkspace(""));
@@ -222,8 +237,15 @@ describe("cmdCleanSingle", () => {
 });
 
 describe("cmdClean", () => {
-  beforeEach(() => vi.clearAllMocks());
-  afterEach(() => cleanupTempRepos());
+  const originalEnv = { ...process.env };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINTHWAVE_MUX = "cmux";
+  });
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    cleanupTempRepos();
+  });
 
   it("reports no worktrees when directory doesn't exist", () => {
     const repo = setupTempRepo();
