@@ -158,24 +158,20 @@ Key files: `core/shell.ts`, `test/shell.test.ts`
 
 ---
 
-### Test: Add unit tests for git.ts error handling (L-TST-6)
+### Test: Add test for buildSnapshot "ready" status mapping (L-TST-7)
 
 **Priority:** Low
-**Source:** Eng review H-ENG-1 — finding F17
+**Source:** Eng review H-ENG-1 — finding F18
 **Depends on:** None
 
-All 17 git functions in `git.ts` are tested only indirectly. Add direct tests for error handling paths: non-zero exit codes throw with descriptive messages, helper functions return correct defaults on failure.
+When `checkPrStatus` returns "ready" (CI pass + review approved), `buildSnapshot` sets `ciStatus: "pass"`, `reviewDecision: "APPROVED"`, and `isMergeable: true`. This compound mapping is untested. Add a test.
 
 **Test plan:**
-- Unit test: git helper throws Error with command name and stderr on failure
-- Unit test: branchExists returns false on non-zero exit
-- Unit test: commitCount returns 0 on failure
-- Unit test: diffStat returns {0, 0} on failure
-- Unit test: getStagedFiles returns [] on failure
+- Unit test: buildSnapshot with checkPr returning "ready" status sets ciStatus pass, reviewDecision APPROVED, isMergeable true
 
-Acceptance: Error handling paths in git.ts are directly tested. Tests pass.
+Acceptance: The "ready" status mapping in buildSnapshot is tested. Tests pass.
 
-Key files: `core/git.ts`, `test/git.test.ts`
+Key files: `core/commands/orchestrate.ts`, `test/orchestrate.test.ts`
 
 ---
 
