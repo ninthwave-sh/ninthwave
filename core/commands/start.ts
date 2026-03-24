@@ -28,6 +28,12 @@ import {
 import { cmdConflicts } from "./conflicts.ts";
 import type { TodoItem } from "../types.ts";
 
+/** Result of launching a single TODO item. */
+export interface LaunchResult {
+  worktreePath: string;
+  workspaceRef: string;
+}
+
 /**
  * Detect which AI coding tool is running the orchestrator session.
  * The same tool is used to launch worker sessions.
@@ -82,7 +88,7 @@ function launchAiSession(
   id: string,
   safeTitle: string,
   promptFile: string,
-): void {
+): string | null {
   let cmd = "";
   let initialPrompt = "Start";
 
@@ -107,7 +113,7 @@ function launchAiSession(
   const wsRef = cmux.launchWorkspace(worktreePath, cmd);
   if (!wsRef) {
     warn(`cmux launch failed for ${id} -- is cmux running?`);
-    return;
+    return null;
   }
 
   // Give the workspace a moment to initialize, then send initial prompt
@@ -115,6 +121,8 @@ function launchAiSession(
   if (!cmux.sendMessage(wsRef, initialPrompt + "\n")) {
     warn(`Failed to send initial prompt to ${wsRef} for ${id}`);
   }
+
+  return wsRef;
 }
 
 /**
@@ -143,6 +151,125 @@ function extractTodoText(todosFile: string, targetId: string): string {
   }
 
   return textLines.join("\n");
+}
+
+/**
+ * Launch a single TODO item: create worktree, allocate partition, start AI session.
+ * Used by the orchestrator to launch items one at a time as WIP slots open.
+ */
+export function launchSingleItem(
+  item: TodoItem,
+  todosFile: string,
+  worktreeDir: string,
+  projectRoot: string,
+  aiTool: string,
+): LaunchResult | null {
+  const targetRepo = resolveRepo(item.repoAlias, projectRoot);
+  const branchName = `todo/${item.id}`;
+
+  // Ensure worktree directory exists
+  mkdirSync(worktreeDir, { recursive: true });
+
+  // Determine worktree path based on target repo
+  let worktreePath: string;
+  if (targetRepo === projectRoot) {
+    worktreePath = join(worktreeDir, `todo-${item.id}`);
+  } else {
+    worktreePath = join(targetRepo, ".worktrees", `todo-${item.id}`);
+  }
+
+  // Create worktree
+  if (existsSync(worktreePath)) {
+    warn(`Worktree already exists for ${item.id} at ${worktreePath}, reusing`);
+  } else {
+    // Ensure target worktree dir exists for cross-repo items
+    if (targetRepo !== projectRoot) {
+      mkdirSync(join(targetRepo, ".worktrees"), { recursive: true });
+      ensureWorktreeExcluded(targetRepo);
+    }
+
+    info(
+      `Fetching latest main in ${basename(targetRepo)} before creating worktree for ${item.id}`,
+    );
+    try {
+      fetchOrigin(targetRepo, "main");
+    } catch {
+      // fetch may fail if no remote
+    }
+    try {
+      ffMerge(targetRepo, "main");
+    } catch {
+      // ff-merge may fail
+    }
+
+    // Handle branch collision
+    if (branchExists(targetRepo, branchName)) {
+      warn(
+        `Branch ${branchName} already exists in ${basename(targetRepo)}. Deleting stale branch.`,
+      );
+      try {
+        deleteBranch(targetRepo, branchName);
+      } catch {
+        // ignore
+      }
+    }
+
+    info(
+      `Creating worktree for ${item.id} on branch ${branchName} in ${basename(targetRepo)}`,
+    );
+    createWorktree(targetRepo, worktreePath, branchName);
+  }
+
+  // Track cross-repo items in the index
+  if (targetRepo !== projectRoot) {
+    const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
+    writeCrossRepoIndex(crossRepoIndex, item.id, targetRepo, worktreePath);
+  }
+
+  // Allocate partition
+  const partitionDir = join(worktreeDir, ".partitions");
+  let partition = getPartitionFor(partitionDir, item.id);
+  if (partition === null) {
+    partition = allocatePartition(partitionDir, item.id);
+  }
+
+  // Sanitize title for shell safety
+  const safeTitle = item.title.replace(/[`$']/g, "_");
+  info(
+    `Launching ${aiTool} session for ${item.id}: ${safeTitle} (partition ${partition})`,
+  );
+
+  // Build system prompt
+  const todoText = extractTodoText(todosFile, item.id);
+  const systemPrompt = `YOUR_TODO_ID: ${item.id}
+YOUR_PARTITION: ${partition}
+PROJECT_ROOT: ${targetRepo}
+HUB_ROOT: ${projectRoot}
+
+${todoText}`;
+
+  // Write system prompt to a temp file
+  const promptFile = join(tmpdir(), `nw-prompt-${item.id}-${Date.now()}`);
+  writeFileSync(promptFile, systemPrompt);
+
+  try {
+    const workspaceRef = launchAiSession(
+      aiTool,
+      worktreePath,
+      item.id,
+      safeTitle,
+      promptFile,
+    );
+    if (!workspaceRef) return null;
+    return { worktreePath, workspaceRef };
+  } finally {
+    // Clean up temp prompt file
+    try {
+      unlinkSync(promptFile);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export function cmdStart(
@@ -229,125 +356,25 @@ export function cmdStart(
     getWorktreeInfo(todoId, crossRepoIndex, worktreeDir),
   );
 
-  const promptFiles: string[] = [];
   const launched: string[] = [];
 
-  try {
-    for (const id of ids) {
-      const item = itemMap.get(id)!;
-      const targetRepo = resolvedRepos.get(id)!;
+  for (const id of ids) {
+    const item = itemMap.get(id)!;
+    launchSingleItem(item, todosFile, worktreeDir, projectRoot, aiTool);
+    launched.push(id);
+  }
 
-      // Determine worktree path based on target repo
-      const branchName = `todo/${id}`;
-      let worktreePath: string;
-      if (targetRepo === projectRoot) {
-        worktreePath = join(worktreeDir, `todo-${id}`);
-      } else {
-        worktreePath = join(targetRepo, ".worktrees", `todo-${id}`);
-      }
-
-      // Create worktree
-      if (existsSync(worktreePath)) {
-        warn(`Worktree already exists for ${id} at ${worktreePath}, reusing`);
-      } else {
-        // Ensure target worktree dir exists for cross-repo items
-        if (targetRepo !== projectRoot) {
-          mkdirSync(join(targetRepo, ".worktrees"), { recursive: true });
-          ensureWorktreeExcluded(targetRepo);
-        }
-
-        info(
-          `Fetching latest main in ${basename(targetRepo)} before creating worktree for ${id}`,
-        );
-        try {
-          fetchOrigin(targetRepo, "main");
-        } catch {
-          // fetch may fail if no remote
-        }
-        try {
-          ffMerge(targetRepo, "main");
-        } catch {
-          // ff-merge may fail
-        }
-
-        // Handle branch collision
-        if (branchExists(targetRepo, branchName)) {
-          warn(
-            `Branch ${branchName} already exists in ${basename(targetRepo)}. Deleting stale branch.`,
-          );
-          try {
-            deleteBranch(targetRepo, branchName);
-          } catch {
-            // ignore
-          }
-        }
-
-        info(
-          `Creating worktree for ${id} on branch ${branchName} in ${basename(targetRepo)}`,
-        );
-        createWorktree(targetRepo, worktreePath, branchName);
-      }
-
-      // Track cross-repo items in the index
-      if (targetRepo !== projectRoot) {
-        writeCrossRepoIndex(crossRepoIndex, id, targetRepo, worktreePath);
-      }
-
-      // Allocate partition
-      let partition = getPartitionFor(partitionDir, id);
-      if (partition === null) {
-        partition = allocatePartition(partitionDir, id);
-      }
-
-      // Sanitize title for shell safety
-      const safeTitle = item.title.replace(/[`$']/g, "_");
-      info(
-        `Launching ${aiTool} session for ${id}: ${safeTitle} (partition ${partition})`,
-      );
-
-      // Build system prompt
-      const todoText = extractTodoText(todosFile, id);
-      const systemPrompt = `YOUR_TODO_ID: ${id}
-YOUR_PARTITION: ${partition}
-PROJECT_ROOT: ${targetRepo}
-HUB_ROOT: ${projectRoot}
-
-${todoText}`;
-
-      // Write system prompt to a temp file
-      const promptFile = join(
-        tmpdir(),
-        `nw-prompt-${id}-${Date.now()}`,
-      );
-      promptFiles.push(promptFile);
-      writeFileSync(promptFile, systemPrompt);
-
-      // Launch
-      launchAiSession(aiTool, worktreePath, id, safeTitle, promptFile);
-      launched.push(id);
-    }
-
-    console.log();
-    console.log(
-      `${GREEN}Launched ${launched.length} session(s) via ${aiTool}:${RESET}`,
-    );
-    for (const id of launched) {
-      const item = itemMap.get(id)!;
-      const targetRepo = resolvedRepos.get(id)!;
-      if (targetRepo === projectRoot) {
-        console.log(`  - ${id}: ${item.title}`);
-      } else {
-        console.log(`  - ${id}: ${item.title} [${basename(targetRepo)}]`);
-      }
-    }
-  } finally {
-    // Clean up temp prompt files
-    for (const f of promptFiles) {
-      try {
-        unlinkSync(f);
-      } catch {
-        // ignore
-      }
+  console.log();
+  console.log(
+    `${GREEN}Launched ${launched.length} session(s) via ${aiTool}:${RESET}`,
+  );
+  for (const id of launched) {
+    const item = itemMap.get(id)!;
+    const targetRepo = resolvedRepos.get(id)!;
+    if (targetRepo === projectRoot) {
+      console.log(`  - ${id}: ${item.title}`);
+    } else {
+      console.log(`  - ${id}: ${item.title} [${basename(targetRepo)}]`);
     }
   }
 }

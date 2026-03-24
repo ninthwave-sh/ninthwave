@@ -24,7 +24,8 @@ vi.mock("../core/cmux.ts", () => ({
 
 // Import mocked modules for assertions
 import * as cmux from "../core/cmux.ts";
-import { detectAiTool, cmdStart } from "../core/commands/start.ts";
+import { detectAiTool, cmdStart, launchSingleItem } from "../core/commands/start.ts";
+import { parseTodos } from "../core/parser.ts";
 
 function captureOutput(fn: () => void): string {
   const lines: string[] = [];
@@ -169,5 +170,104 @@ describe("cmdStart", () => {
     );
 
     expect(output).toContain("Detected AI tool: opencode");
+  });
+});
+
+describe("launchSingleItem", () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINTHWAVE_AI_TOOL = "claude";
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    cleanupTempRepos();
+  });
+
+  it("creates worktree and launches session for a single item", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const todosFile = join(repo, "TODOS.md");
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosFile, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    const result = captureOutput(() => {
+      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+      expect(res).not.toBeNull();
+      expect(res!.worktreePath).toContain("todo-M-CI-1");
+      expect(res!.workspaceRef).toBe("workspace:1");
+    });
+
+    expect(cmux.launchWorkspace as Mock).toHaveBeenCalled();
+    expect(result).toContain("Creating worktree for M-CI-1");
+  });
+
+  it("returns null when cmux launch fails", () => {
+    (cmux.launchWorkspace as Mock).mockReturnValueOnce(null);
+
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const todosFile = join(repo, "TODOS.md");
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosFile, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    const result = captureOutput(() => {
+      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+      expect(res).toBeNull();
+    });
+
+    expect(result).toContain("cmux launch failed");
+  });
+
+  it("allocates a partition for the item", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const todosFile = join(repo, "TODOS.md");
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosFile, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    const result = captureOutput(() => {
+      launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+    });
+
+    // Partition 1 should be allocated (first available)
+    expect(result).toContain("partition 1");
+  });
+
+  it("ensures worktree directory is created", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const todosFile = join(repo, "TODOS.md");
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosFile, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    // worktreeDir doesn't exist yet — launchSingleItem should create it
+    captureOutput(() => {
+      launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+    });
+
+    const { existsSync } = require("fs");
+    expect(existsSync(worktreeDir)).toBe(true);
+  });
+
+  it("returns correct worktreePath for hub repo items", () => {
+    const repo = setupTempRepo();
+    useFixture(repo, "valid.md");
+    const todosFile = join(repo, "TODOS.md");
+    const worktreeDir = join(repo, ".worktrees");
+    const items = parseTodos(todosFile, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    captureOutput(() => {
+      const res = launchSingleItem(item, todosFile, worktreeDir, repo, "claude");
+      expect(res).not.toBeNull();
+      expect(res!.worktreePath).toBe(join(worktreeDir, "todo-M-CI-1"));
+    });
   });
 });
