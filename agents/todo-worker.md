@@ -58,6 +58,53 @@ cmux set-status "todo-YOUR_TODO_ID" "Implementing" --icon "hammer.fill" --color 
 - Keep changes tightly scoped to files mentioned in the TODO
 - If you discover related issues, note them in the PR body but do NOT fix them
 
+### No-Op Path: When No Code Change Is Needed
+
+Sometimes a TODO requires no code change. Valid reasons include:
+
+- **Already fixed**: The issue was resolved by another PR or a prior change on main
+- **Not applicable**: The described problem doesn't exist (e.g., the code path was removed)
+- **Findings-only**: The TODO was investigative and the finding is that no change is needed
+- **Superseded**: Another TODO already covers the same change
+
+**"No code change needed" is a valid outcome.** When you determine this is the case:
+
+1. **Verify thoroughly** — read the affected files, run relevant tests, and confirm the TODO's acceptance criteria are already met or not applicable. Document your reasoning.
+2. **Skip Phases 5–6** (no code to commit or test).
+3. **Skip Phase 7** quality review (no diff to review).
+4. **Proceed to Phase 8** — remove your TODO from TODOS.md as usual.
+5. **Create a no-op PR in Phase 9** using the adjusted template below.
+
+The no-op PR template (replace the standard Phase 9 template):
+
+```bash
+gh pr create --title "chore: close TODO YOUR_TODO_ID — no code change needed" --body "$(cat <<'EOF'
+## Summary
+Closes TODO YOUR_TODO_ID: <title>
+
+**No code change needed.** This PR only removes the TODO entry from TODOS.md.
+
+### Rationale
+<Explain why no code change is needed. Be specific:>
+- <What you investigated>
+- <What you found>
+- <Why the acceptance criteria are already met or not applicable>
+
+## Acceptance Criteria
+- [x] <criterion — explain how it's already met or why it's N/A>
+- [x] <criterion>
+
+## TODO Reference
+Priority: <priority>
+Source: <source>
+EOF
+)"
+```
+
+This keeps the orchestrator's PR-based lifecycle working (the orchestrator handles TODOS.md-only PRs the same as any other PR) and provides an audit trail for why the TODO was closed without a code change.
+
+> **Important:** Do not silently skip a TODO. Every TODO must result in a PR — either with code changes or as a no-op with an explanation.
+
 ## 5. Commit Your Changes
 
 Create well-structured commits with one logical change per commit. Use conventional commit prefixes:
