@@ -1,9 +1,9 @@
 // Tests for project config loading.
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
-import { loadConfig, loadDomainMappings } from "../core/config.ts";
+import { loadConfig, loadDomainMappings, KNOWN_CONFIG_KEYS } from "../core/config.ts";
 import { DEFAULT_LOC_EXTENSIONS } from "../core/types.ts";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 
@@ -72,6 +72,73 @@ describe("loadConfig", () => {
     expect(config["A"]).toBe("single");
     expect(config["B"]).toBe("double");
     expect(config["C"]).toBe("none");
+  });
+
+  it("does not warn for known config keys", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config"),
+      "LOC_EXTENSIONS=*.ts\nwebhook_url=https://example.com\n",
+    );
+
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const config = loadConfig(repo);
+      expect(config["LOC_EXTENSIONS"]).toBe("*.ts");
+      expect(config["webhook_url"]).toBe("https://example.com");
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("warns on unknown config keys", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config"),
+      "LOC_EXTENSIONS=*.ts\nTYPO_KEY=oops\n",
+    );
+
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      loadConfig(repo);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]![0]).toContain("TYPO_KEY");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("warns on each unknown key individually", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config"),
+      "UNKNOWN_A=1\nUNKNOWN_B=2\nLOC_EXTENSIONS=*.ts\n",
+    );
+
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      loadConfig(repo);
+      expect(spy).toHaveBeenCalledTimes(2);
+      const messages = spy.mock.calls.map((c) => c[0]);
+      expect(messages.some((m: string) => m.includes("UNKNOWN_A"))).toBe(true);
+      expect(messages.some((m: string) => m.includes("UNKNOWN_B"))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("KNOWN_CONFIG_KEYS", () => {
+  it("includes LOC_EXTENSIONS and webhook_url", () => {
+    expect(KNOWN_CONFIG_KEYS.has("LOC_EXTENSIONS")).toBe(true);
+    expect(KNOWN_CONFIG_KEYS.has("webhook_url")).toBe(true);
   });
 });
 
