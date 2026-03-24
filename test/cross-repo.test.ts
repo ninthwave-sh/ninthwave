@@ -8,6 +8,11 @@ import {
 import { join, dirname, basename } from "path";
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { parseTodos } from "../core/parser.ts";
+import {
+  writeCrossRepoIndex,
+  removeCrossRepoIndex,
+  getWorktreeInfo,
+} from "../core/cross-repo.ts";
 
 describe("cross-repo", () => {
   afterEach(() => cleanupTempRepos());
@@ -133,7 +138,59 @@ describe("cross-repo", () => {
     });
   });
 
-  // Group 4: Hub fallback behavior
+  // Group 4: writeCrossRepoIndex deduplication
+  describe("writeCrossRepoIndex deduplication", () => {
+    it("writing same ID twice results in one entry", () => {
+      const repo = setupTempRepo();
+      const indexFile = join(repo, ".worktrees", ".cross-repo-index");
+
+      writeCrossRepoIndex(indexFile, "T-1", "/repo-a", "/repo-a/.worktrees/todo-T-1");
+      writeCrossRepoIndex(indexFile, "T-1", "/repo-a", "/repo-a/.worktrees/todo-T-1-v2");
+
+      const content = readFileSync(indexFile, "utf-8");
+      const lines = content.split("\n").filter((l) => l.trim());
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("todo-T-1-v2");
+    });
+
+    it("writing different IDs produces separate entries", () => {
+      const repo = setupTempRepo();
+      const indexFile = join(repo, ".worktrees", ".cross-repo-index");
+
+      writeCrossRepoIndex(indexFile, "T-1", "/repo-a", "/repo-a/.worktrees/todo-T-1");
+      writeCrossRepoIndex(indexFile, "T-2", "/repo-b", "/repo-b/.worktrees/todo-T-2");
+
+      const content = readFileSync(indexFile, "utf-8");
+      const lines = content.split("\n").filter((l) => l.trim());
+      expect(lines).toHaveLength(2);
+      expect(content).toContain("T-1");
+      expect(content).toContain("T-2");
+    });
+
+    it("existing index operations still work after dedup write", () => {
+      const repo = setupTempRepo();
+      const indexFile = join(repo, ".worktrees", ".cross-repo-index");
+      mkdirSync(join(repo, ".worktrees"), { recursive: true });
+
+      // Write two entries
+      writeCrossRepoIndex(indexFile, "T-1", "/repo-a", "/repo-a/.worktrees/todo-T-1");
+      writeCrossRepoIndex(indexFile, "T-2", "/repo-b", "/repo-b/.worktrees/todo-T-2");
+
+      // getWorktreeInfo should find them
+      const info1 = getWorktreeInfo("T-1", indexFile, join(repo, ".worktrees"));
+      expect(info1).not.toBeNull();
+      expect(info1!.todoId).toBe("T-1");
+      expect(info1!.repoRoot).toBe("/repo-a");
+
+      // Remove one
+      removeCrossRepoIndex(indexFile, "T-1");
+      const content = readFileSync(indexFile, "utf-8");
+      expect(content).not.toContain("T-1");
+      expect(content).toContain("T-2");
+    });
+  });
+
+  // Group 5: Hub fallback behavior
   describe("hub fallback", () => {
     it("items without Repo field default to empty alias", () => {
       const repo = setupTempRepo();

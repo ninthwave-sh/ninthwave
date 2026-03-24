@@ -79,7 +79,21 @@ export function writeCrossRepoIndex(
   const lockPath = `${indexPath}.lock`;
   acquireLock(lockPath);
   try {
-    appendFileSync(indexPath, `${todoId}\t${targetRepo}\t${worktreePath}\n`);
+    const newLine = `${todoId}\t${targetRepo}\t${worktreePath}`;
+    if (existsSync(indexPath)) {
+      const content = readFileSync(indexPath, "utf-8");
+      const lines = content.split("\n");
+      const idx = lines.findIndex((l) => l.startsWith(`${todoId}\t`));
+      if (idx >= 0) {
+        // Update existing entry
+        lines[idx] = newLine;
+        writeFileSync(indexPath, lines.join("\n"));
+      } else {
+        appendFileSync(indexPath, `${newLine}\n`);
+      }
+    } else {
+      writeFileSync(indexPath, `${newLine}\n`);
+    }
   } finally {
     releaseLock(lockPath);
   }
