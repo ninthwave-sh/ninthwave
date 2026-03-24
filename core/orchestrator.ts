@@ -1,7 +1,14 @@
 // Orchestrator state machine for parallel TODO processing.
-// Pure — processTransitions takes a snapshot and returns actions, no side effects.
+// processTransitions is pure — takes a snapshot and returns actions, no side effects.
+// executeAction bridges the pure state machine to external dependencies.
 
 import type { TodoItem } from "./types.ts";
+import { launchSingleItem } from "./commands/start.ts";
+import { cleanSingleWorktree } from "./commands/clean.ts";
+import { cmdMarkDone } from "./commands/mark-done.ts";
+import { prMerge, prComment } from "./gh.ts";
+import * as cmux from "./cmux.ts";
+import { fetchOrigin, ffMerge } from "./git.ts";
 
 // ── State types ──────────────────────────────────────────────────────
 
@@ -30,6 +37,8 @@ export interface OrchestratorItem {
   state: OrchestratorItemState;
   prNumber?: number;
   partition?: number;
+  /** cmux workspace reference (e.g., "workspace:1"). */
+  workspaceRef?: string;
   /** Timestamp of last state change (ISO string). */
   lastTransition: string;
   /** Number of times CI has failed for this item. */
@@ -71,7 +80,14 @@ export interface PollSnapshot {
 
 // ── Actions ──────────────────────────────────────────────────────────
 
-export type ActionType = "launch" | "merge" | "notify" | "clean" | "rebase";
+export type ActionType =
+  | "launch"
+  | "merge"
+  | "notify-ci-failure"
+  | "notify-review"
+  | "clean"
+  | "mark-done"
+  | "rebase";
 
 export interface Action {
   type: ActionType;
@@ -80,6 +96,22 @@ export interface Action {
   prNumber?: number;
   /** For notify actions, the message to send. */
   message?: string;
+}
+
+// ── Execution context ────────────────────────────────────────────
+
+/** Configuration for executing actions against external systems. */
+export interface ExecutionContext {
+  projectRoot: string;
+  worktreeDir: string;
+  todosFile: string;
+  aiTool: string;
+}
+
+/** Result of executing a single action. */
+export interface ActionResult {
+  success: boolean;
+  error?: string;
 }
 
 // ── Default config ───────────────────────────────────────────────────
@@ -305,7 +337,7 @@ export class Orchestrator {
       this.transition(item, "ci-failed");
       item.ciFailCount++;
       actions.push({
-        type: "notify",
+        type: "notify-ci-failure",
         itemId: item.id,
         prNumber: item.prNumber,
         message: "CI failed — please investigate and fix.",
@@ -415,6 +447,194 @@ export class Orchestrator {
     }
 
     return actions;
+  }
+
+  // ── Action execution ─────────────────────────────────────────
+
+  /**
+   * Execute a single action against external systems (gh, cmux, git, etc.).
+   * Updates internal state on success. Returns result indicating success/failure.
+   */
+  executeAction(action: Action, ctx: ExecutionContext): ActionResult {
+    const item = this.items.get(action.itemId);
+    if (!item) {
+      return { success: false, error: `Item ${action.itemId} not found` };
+    }
+
+    switch (action.type) {
+      case "launch":
+        return this.executeLaunch(item, ctx);
+      case "merge":
+        return this.executeMerge(item, action, ctx);
+      case "notify-ci-failure":
+        return this.executeNotifyCiFailure(item, action, ctx);
+      case "notify-review":
+        return this.executeNotifyReview(item, action);
+      case "clean":
+        return this.executeClean(item, ctx);
+      case "mark-done":
+        return this.executeMarkDone(item, ctx);
+      case "rebase":
+        return this.executeRebase(item, action);
+    }
+  }
+
+  /** Launch a worker for an item. Stores workspaceRef on success, marks stuck on failure. */
+  private executeLaunch(item: OrchestratorItem, ctx: ExecutionContext): ActionResult {
+    try {
+      const result = launchSingleItem(
+        item.todo,
+        ctx.todosFile,
+        ctx.worktreeDir,
+        ctx.projectRoot,
+        ctx.aiTool,
+      );
+      if (!result) {
+        this.transition(item, "stuck");
+        return { success: false, error: `Launch failed for ${item.id}` };
+      }
+      item.workspaceRef = result.workspaceRef;
+      return { success: true };
+    } catch (e: unknown) {
+      this.transition(item, "stuck");
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, error: msg };
+    }
+  }
+
+  /** Merge a PR, pull main, and send rebase requests to dependent workers. */
+  private executeMerge(
+    item: OrchestratorItem,
+    action: Action,
+    ctx: ExecutionContext,
+  ): ActionResult {
+    const prNum = action.prNumber ?? item.prNumber;
+    if (!prNum) {
+      return { success: false, error: `No PR number for ${item.id}` };
+    }
+
+    const merged = prMerge(ctx.projectRoot, prNum);
+    if (!merged) {
+      this.transition(item, "ci-passed");
+      return { success: false, error: `Merge failed for PR #${prNum}` };
+    }
+
+    // Audit trail
+    prComment(
+      ctx.projectRoot,
+      prNum,
+      `**[Orchestrator]** Auto-merged PR #${prNum} for ${item.id}.`,
+    );
+
+    this.transition(item, "merged");
+
+    // Pull latest main
+    try {
+      fetchOrigin(ctx.projectRoot, "main");
+      ffMerge(ctx.projectRoot, "main");
+    } catch {
+      // Non-fatal — main will be pulled on next cycle
+    }
+
+    // Send rebase requests to dependent items in WIP states
+    for (const other of this.getAllItems()) {
+      if (other.id === item.id) continue;
+      if (!other.todo.dependencies.includes(item.id)) continue;
+      if (!WIP_STATES.has(other.state)) continue;
+      if (other.workspaceRef) {
+        cmux.sendMessage(
+          other.workspaceRef,
+          `Dependency ${item.id} merged. Please rebase onto latest main.`,
+        );
+      }
+    }
+
+    return { success: true };
+  }
+
+  /** Notify worker of CI failure and post audit trail on PR. */
+  private executeNotifyCiFailure(
+    item: OrchestratorItem,
+    action: Action,
+    ctx: ExecutionContext,
+  ): ActionResult {
+    const message = action.message || "CI failed — please investigate and fix.";
+
+    if (item.workspaceRef) {
+      cmux.sendMessage(item.workspaceRef, message);
+    }
+
+    if (item.prNumber) {
+      prComment(
+        ctx.projectRoot,
+        item.prNumber,
+        `**[Orchestrator]** CI failure detected for ${item.id}. Worker notified.`,
+      );
+    }
+
+    return { success: true };
+  }
+
+  /** Notify worker of review feedback. */
+  private executeNotifyReview(
+    item: OrchestratorItem,
+    action: Action,
+  ): ActionResult {
+    const message = action.message || "Review feedback received — please address.";
+
+    if (item.workspaceRef) {
+      cmux.sendMessage(item.workspaceRef, message);
+    }
+
+    return { success: true };
+  }
+
+  /** Close workspace and clean worktree for an item. */
+  private executeClean(
+    item: OrchestratorItem,
+    ctx: ExecutionContext,
+  ): ActionResult {
+    if (item.workspaceRef) {
+      cmux.closeWorkspace(item.workspaceRef);
+    }
+
+    cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
+
+    return { success: true };
+  }
+
+  /** Mark an item as done in TODOS.md and transition to done state. */
+  private executeMarkDone(
+    item: OrchestratorItem,
+    ctx: ExecutionContext,
+  ): ActionResult {
+    try {
+      cmdMarkDone([item.id], ctx.todosFile);
+      this.transition(item, "done");
+      return { success: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, error: msg };
+    }
+  }
+
+  /** Send rebase request to a worker. */
+  private executeRebase(
+    item: OrchestratorItem,
+    action: Action,
+  ): ActionResult {
+    const message = action.message || "Please rebase onto latest main.";
+
+    if (!item.workspaceRef) {
+      return { success: false, error: `No workspace reference for ${item.id}` };
+    }
+
+    const sent = cmux.sendMessage(item.workspaceRef, message);
+    if (!sent) {
+      return { success: false, error: `Failed to send rebase message to ${item.id}` };
+    }
+
+    return { success: true };
   }
 
   /** Launch ready items up to WIP limit. Returns launch actions. */
