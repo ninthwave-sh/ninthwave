@@ -103,6 +103,361 @@ describe("TmuxAdapter", () => {
     };
   }
 
+  /**
+   * Helper: build a call-tracking ShellRunner that records every call and
+   * returns canned responses keyed by subcommand. When multiple calls use
+   * the same subcommand, responses can be provided as an array (consumed
+   * in order).
+   */
+  function trackingRunner(
+    responses: Record<
+      string,
+      | { exitCode: number; stdout: string; stderr: string }
+      | Array<{ exitCode: number; stdout: string; stderr: string }>
+    >,
+  ) {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const counters: Record<string, number> = {};
+
+    const runner = (cmd: string, args: string[]) => {
+      calls.push({ cmd, args });
+      const subcommand = args[0] ?? cmd;
+      const resp = responses[subcommand];
+      if (Array.isArray(resp)) {
+        const idx = counters[subcommand] ?? 0;
+        counters[subcommand] = idx + 1;
+        return resp[idx] ?? { exitCode: 1, stdout: "", stderr: "exhausted" };
+      }
+      return resp ?? { exitCode: 1, stdout: "", stderr: "unknown" };
+    };
+
+    return { runner, calls };
+  }
+
+  // ── isAvailable ─────────────────────────────────────────────────
+
+  describe("isAvailable", () => {
+    it("returns true when tmux -V succeeds", () => {
+      const runner = mockRunner({
+        "-V": { exitCode: 0, stdout: "tmux 3.4", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      expect(adapter.isAvailable()).toBe(true);
+    });
+
+    it("returns false when tmux -V fails", () => {
+      const runner = mockRunner({
+        "-V": { exitCode: 1, stdout: "", stderr: "not found" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      expect(adapter.isAvailable()).toBe(false);
+    });
+
+    it("calls tmux with -V flag", () => {
+      const { runner, calls } = trackingRunner({
+        "-V": { exitCode: 0, stdout: "tmux 3.4", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      adapter.isAvailable();
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].cmd).toBe("tmux");
+      expect(calls[0].args).toEqual(["-V"]);
+    });
+  });
+
+  // ── launchWorkspace ─────────────────────────────────────────────
+
+  describe("launchWorkspace", () => {
+    it("returns session name on success", () => {
+      const runner = mockRunner({
+        "new-session": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.launchWorkspace("/tmp/project", "claude --name test");
+      expect(result).toBe("nw-1");
+    });
+
+    it("generates incrementing nw-N session names", () => {
+      const runner = mockRunner({
+        "new-session": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+
+      const first = adapter.launchWorkspace("/tmp/a", "cmd1");
+      const second = adapter.launchWorkspace("/tmp/b", "cmd2");
+      const third = adapter.launchWorkspace("/tmp/c", "cmd3");
+
+      expect(first).toBe("nw-1");
+      expect(second).toBe("nw-2");
+      expect(third).toBe("nw-3");
+    });
+
+    it("returns null when new-session fails", () => {
+      const runner = mockRunner({
+        "new-session": { exitCode: 1, stdout: "", stderr: "duplicate session" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.launchWorkspace("/tmp/project", "claude");
+      expect(result).toBeNull();
+    });
+
+    it("passes correct args to tmux new-session", () => {
+      const { runner, calls } = trackingRunner({
+        "new-session": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      adapter.launchWorkspace("/home/user/code", "claude --resume");
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].cmd).toBe("tmux");
+      expect(calls[0].args).toEqual([
+        "new-session",
+        "-d",
+        "-s",
+        "nw-1",
+        "-c",
+        "/home/user/code",
+        "claude --resume",
+      ]);
+    });
+  });
+
+  // ── readScreen ──────────────────────────────────────────────────
+
+  describe("readScreen", () => {
+    it("returns stdout on success", () => {
+      const runner = mockRunner({
+        "capture-pane": { exitCode: 0, stdout: "line1\nline2\nline3", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.readScreen("nw-1");
+      expect(result).toBe("line1\nline2\nline3");
+    });
+
+    it("returns empty string on failure", () => {
+      const runner = mockRunner({
+        "capture-pane": { exitCode: 1, stdout: "", stderr: "no session" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.readScreen("nw-1");
+      expect(result).toBe("");
+    });
+
+    it("passes -S flag when lines parameter is provided", () => {
+      const { runner, calls } = trackingRunner({
+        "capture-pane": { exitCode: 0, stdout: "content", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      adapter.readScreen("nw-1", 5);
+
+      expect(calls[0].args).toEqual(["capture-pane", "-t", "nw-1", "-p", "-S", "-5"]);
+    });
+
+    it("omits -S flag when lines parameter is not provided", () => {
+      const { runner, calls } = trackingRunner({
+        "capture-pane": { exitCode: 0, stdout: "content", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      adapter.readScreen("nw-1");
+
+      expect(calls[0].args).toEqual(["capture-pane", "-t", "nw-1", "-p"]);
+    });
+  });
+
+  // ── listWorkspaces ──────────────────────────────────────────────
+
+  describe("listWorkspaces", () => {
+    it("returns only nw- prefixed sessions", () => {
+      const runner = mockRunner({
+        "list-sessions": {
+          exitCode: 0,
+          stdout: "nw-1\nuser-session\nnw-2\nmy-project\nnw-3",
+          stderr: "",
+        },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.listWorkspaces();
+      expect(result).toBe("nw-1\nnw-2\nnw-3");
+    });
+
+    it("returns empty string when list-sessions fails", () => {
+      const runner = mockRunner({
+        "list-sessions": { exitCode: 1, stdout: "", stderr: "no server running" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.listWorkspaces();
+      expect(result).toBe("");
+    });
+
+    it("filters out all non-nw- sessions", () => {
+      const runner = mockRunner({
+        "list-sessions": {
+          exitCode: 0,
+          stdout: "personal\nwork\ndefault",
+          stderr: "",
+        },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.listWorkspaces();
+      expect(result).toBe("");
+    });
+
+    it("handles empty session list", () => {
+      const runner = mockRunner({
+        "list-sessions": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      const result = adapter.listWorkspaces();
+      expect(result).toBe("");
+    });
+
+    it("passes correct format flag to list-sessions", () => {
+      const { runner, calls } = trackingRunner({
+        "list-sessions": { exitCode: 0, stdout: "nw-1", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      adapter.listWorkspaces();
+
+      expect(calls[0].args).toEqual(["list-sessions", "-F", "#{session_name}"]);
+    });
+  });
+
+  // ── closeWorkspace ──────────────────────────────────────────────
+
+  describe("closeWorkspace", () => {
+    it("returns true when kill-session succeeds", () => {
+      const runner = mockRunner({
+        "kill-session": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      expect(adapter.closeWorkspace("nw-1")).toBe(true);
+    });
+
+    it("returns false when kill-session fails", () => {
+      const runner = mockRunner({
+        "kill-session": { exitCode: 1, stdout: "", stderr: "no session: nw-99" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      expect(adapter.closeWorkspace("nw-99")).toBe(false);
+    });
+
+    it("passes correct args to kill-session", () => {
+      const { runner, calls } = trackingRunner({
+        "kill-session": { exitCode: 0, stdout: "", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner);
+      adapter.closeWorkspace("nw-5");
+
+      expect(calls[0].cmd).toBe("tmux");
+      expect(calls[0].args).toEqual(["kill-session", "-t", "nw-5"]);
+    });
+  });
+
+  // ── sendMessage ─────────────────────────────────────────────────
+
+  describe("sendMessage", () => {
+    it("sends via atomic paste (set-buffer + paste-buffer + Enter) on success", () => {
+      const ok = { exitCode: 0, stdout: "", stderr: "" };
+      const { runner, calls } = trackingRunner({
+        "set-buffer": ok,
+        "paste-buffer": ok,
+        "send-keys": ok,
+        // readScreen for verification — return content that doesn't contain the message
+        "capture-pane": { exitCode: 0, stdout: "$ \n\n", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner, { sleep: () => {} });
+      const result = adapter.sendMessage("nw-1", "hello world");
+
+      expect(result).toBe(true);
+      // Should have called: set-buffer, paste-buffer, send-keys (Enter), capture-pane (verify)
+      const subcommands = calls.map((c) => c.args[0]);
+      expect(subcommands).toContain("set-buffer");
+      expect(subcommands).toContain("paste-buffer");
+      expect(subcommands).toContain("send-keys");
+      expect(subcommands).toContain("capture-pane");
+    });
+
+    it("falls back to send-keys -l when set-buffer fails", () => {
+      const ok = { exitCode: 0, stdout: "", stderr: "" };
+      const { runner, calls } = trackingRunner({
+        "set-buffer": { exitCode: 1, stdout: "", stderr: "error" },
+        "send-keys": [ok, ok], // first for literal text, second for Enter
+        "capture-pane": { exitCode: 0, stdout: "$ \n\n", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner, { sleep: () => {} });
+      const result = adapter.sendMessage("nw-1", "hello");
+
+      expect(result).toBe(true);
+      // Should have: set-buffer (failed), send-keys -l, send-keys Enter, capture-pane
+      const sendKeysCalls = calls.filter((c) => c.args[0] === "send-keys");
+      expect(sendKeysCalls.length).toBeGreaterThanOrEqual(2);
+      // First send-keys should have -l flag (literal text)
+      expect(sendKeysCalls[0].args).toContain("-l");
+      // Second send-keys should have "Enter"
+      expect(sendKeysCalls[1].args).toContain("Enter");
+    });
+
+    it("falls back to send-keys -l when paste-buffer fails", () => {
+      const ok = { exitCode: 0, stdout: "", stderr: "" };
+      const { runner, calls } = trackingRunner({
+        "set-buffer": ok,
+        "paste-buffer": { exitCode: 1, stdout: "", stderr: "no session" },
+        "send-keys": [ok, ok],
+        "capture-pane": { exitCode: 0, stdout: "$ \n\n", stderr: "" },
+      });
+      const adapter = new TmuxAdapter(runner, { sleep: () => {} });
+      const result = adapter.sendMessage("nw-1", "test message");
+
+      expect(result).toBe(true);
+      // Fallback path: send-keys -l + send-keys Enter
+      const sendKeysCalls = calls.filter((c) => c.args[0] === "send-keys");
+      expect(sendKeysCalls[0].args).toContain("-l");
+    });
+
+    it("returns false when all send attempts fail", () => {
+      const fail = { exitCode: 1, stdout: "", stderr: "error" };
+      const runner = (_cmd: string, _args: string[]) => fail;
+      const adapter = new TmuxAdapter(runner, {
+        sleep: () => {},
+        maxRetries: 0,
+      });
+      const result = adapter.sendMessage("nw-1", "hello");
+      expect(result).toBe(false);
+    });
+
+    it("retries on delivery verification failure", () => {
+      let attemptCount = 0;
+      const ok = { exitCode: 0, stdout: "", stderr: "" };
+      // Alternate: first attempt verification fails (message stuck on screen),
+      // second attempt succeeds
+      const runner = (cmd: string, args: string[]) => {
+        const sub = args[0] ?? cmd;
+        if (sub === "set-buffer") return ok;
+        if (sub === "paste-buffer") return ok;
+        if (sub === "send-keys") return ok;
+        if (sub === "capture-pane") {
+          attemptCount++;
+          // First verify: message still in input line -> delivery failed
+          if (attemptCount <= 2) return { exitCode: 0, stdout: "hello world", stderr: "" };
+          // Subsequent: message submitted -> delivery succeeded
+          return { exitCode: 0, stdout: "$ \n\n", stderr: "" };
+        }
+        return { exitCode: 1, stdout: "", stderr: "" };
+      };
+      const adapter = new TmuxAdapter(runner, {
+        sleep: () => {},
+        maxRetries: 3,
+      });
+      const result = adapter.sendMessage("nw-1", "hello world");
+      expect(result).toBe(true);
+      // Should have attempted more than once
+      expect(attemptCount).toBeGreaterThan(2);
+    });
+  });
+
+  // ── splitPane (existing tests) ──────────────────────────────────
+
   describe("splitPane", () => {
     it("returns the pane ID from split-window -P -F output", () => {
       const runner = mockRunner({
