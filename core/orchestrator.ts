@@ -3,7 +3,16 @@
 // executeAction bridges the pure state machine to external dependencies via injected deps.
 
 import { join } from "path";
-import type { TodoItem } from "./types.ts";
+import type { TodoItem, Priority } from "./types.ts";
+
+// ── Priority rank for merge queue ordering (lower = higher priority) ─
+
+const PRIORITY_RANK: Record<Priority, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
 
 // ── State types ──────────────────────────────────────────────────────
 
@@ -310,7 +319,11 @@ export class Orchestrator {
     const launchActions = this.launchReadyItems();
     actions.push(...launchActions);
 
-    return actions;
+    // Priority-ordered merge queue: when multiple items are ready to merge,
+    // only merge the highest-priority one per cycle. The execution layer will
+    // check remaining PRs for conflicts after the merge completes, preventing
+    // cascade conflicts when all PRs try to merge simultaneously.
+    return this.prioritizeMergeActions(actions);
   }
 
   // ── Private helpers ────────────────────────────────────────────
@@ -920,6 +933,39 @@ export class Orchestrator {
     deps.cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
 
     return { success: true };
+  }
+
+  /**
+   * Priority-ordered merge queue: if multiple merge actions are pending,
+   * keep only the highest-priority one. Revert deferred items from "merging"
+   * back to "ci-passed" so they'll be reconsidered next cycle (after the
+   * merged PR's conflicts are checked against remaining PRs).
+   * Priority order: critical > high > medium > low, with ID as tiebreaker.
+   */
+  private prioritizeMergeActions(actions: Action[]): Action[] {
+    const mergeActions = actions.filter((a) => a.type === "merge");
+    if (mergeActions.length <= 1) return actions;
+
+    // Sort merge candidates by priority (lower rank = higher priority), then ID
+    const sorted = mergeActions
+      .map((a) => ({ action: a, item: this.items.get(a.itemId)! }))
+      .filter((entry) => entry.item != null)
+      .sort((a, b) => {
+        const aRank = PRIORITY_RANK[a.item.todo.priority as Priority] ?? 999;
+        const bRank = PRIORITY_RANK[b.item.todo.priority as Priority] ?? 999;
+        if (aRank !== bRank) return aRank - bRank;
+        return a.item.id.localeCompare(b.item.id);
+      });
+
+    const keepId = sorted[0]!.action.itemId;
+
+    // Revert deferred items back to ci-passed — they'll be merged next cycle
+    for (const { item } of sorted.slice(1)) {
+      this.transition(item, "ci-passed");
+    }
+
+    // Return non-merge actions plus the single prioritized merge action
+    return actions.filter((a) => a.type !== "merge" || a.itemId === keepId);
   }
 
   /** Launch ready items up to WIP limit. Returns launch actions. */

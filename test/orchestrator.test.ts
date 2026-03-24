@@ -16,14 +16,14 @@ import {
   type ActionResult,
   type OrchestratorDeps,
 } from "../core/orchestrator.ts";
-import type { TodoItem } from "../core/types.ts";
+import type { TodoItem, Priority } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function makeTodo(id: string, deps: string[] = []): TodoItem {
+function makeTodo(id: string, deps: string[] = [], priority: Priority = "high"): TodoItem {
   return {
     id,
-    priority: "high",
+    priority,
     title: `TODO ${id}`,
     domain: "test",
     dependencies: deps,
@@ -2922,10 +2922,13 @@ describe("Orchestrator", () => {
       );
 
       // A-1-1: implementing → pr-open → ci-passed → merging (chained in one tick)
+      // Priority merge queue: both are "high" priority, A-1-1 < B-1-1 lexicographically,
+      // so only A-1-1 merges this cycle. B-1-1 reverts to ci-passed for next cycle.
       expect(orch2.getItem("A-1-1")!.state).toBe("merging");
-      expect(orch2.getItem("B-1-1")!.state).toBe("merging");
+      expect(orch2.getItem("B-1-1")!.state).toBe("ci-passed");
       expect(orch2.getItem("C-1-1")!.state).toBe("queued");
-      expect(actions.filter((a) => a.type === "merge")).toHaveLength(2);
+      expect(actions.filter((a) => a.type === "merge")).toHaveLength(1);
+      expect(actions.filter((a) => a.type === "merge")[0]!.itemId).toBe("A-1-1");
     });
 
     it("reconstructed state preserves ciFailCount", () => {
@@ -3441,6 +3444,211 @@ describe("Orchestrator", () => {
     it("default config has launchTimeoutMs and activityTimeoutMs", () => {
       expect(DEFAULT_CONFIG.launchTimeoutMs).toBe(30 * 60 * 1000);
       expect(DEFAULT_CONFIG.activityTimeoutMs).toBe(60 * 60 * 1000);
+    });
+  });
+
+  // ── Priority-ordered merge queue ──────────────────────────────────
+
+  describe("priority-ordered merge queue", () => {
+    it("merges multiple ci-passed items in priority order (highest first)", () => {
+      orch = new Orchestrator({ wipLimit: 5, mergeStrategy: "asap" });
+
+      // Add items with different priorities
+      orch.addItem(makeTodo("L-1-1", [], "low"));
+      orch.addItem(makeTodo("H-1-1", [], "high"));
+      orch.addItem(makeTodo("C-1-1", [], "critical"));
+
+      // Move all to ci-passed with PR numbers
+      for (const id of ["L-1-1", "H-1-1", "C-1-1"]) {
+        orch.setState(id, "ci-passed");
+        orch.getItem(id)!.prNumber = 100;
+      }
+
+      const actions = orch.processTransitions(
+        snapshotWith([
+          { id: "L-1-1", prNumber: 101, prState: "open", ciStatus: "pass" },
+          { id: "H-1-1", prNumber: 102, prState: "open", ciStatus: "pass" },
+          { id: "C-1-1", prNumber: 103, prState: "open", ciStatus: "pass" },
+        ]),
+      );
+
+      // Only the critical-priority item should get a merge action
+      const mergeActions = actions.filter((a) => a.type === "merge");
+      expect(mergeActions).toHaveLength(1);
+      expect(mergeActions[0]!.itemId).toBe("C-1-1");
+
+      // Critical item is in merging state
+      expect(orch.getItem("C-1-1")!.state).toBe("merging");
+      // Others should be reverted to ci-passed
+      expect(orch.getItem("H-1-1")!.state).toBe("ci-passed");
+      expect(orch.getItem("L-1-1")!.state).toBe("ci-passed");
+    });
+
+    it("merges equal-priority items by ID order (lexicographic)", () => {
+      orch = new Orchestrator({ wipLimit: 5, mergeStrategy: "asap" });
+
+      // All medium priority
+      orch.addItem(makeTodo("M-1-3", [], "medium"));
+      orch.addItem(makeTodo("M-1-1", [], "medium"));
+      orch.addItem(makeTodo("M-1-2", [], "medium"));
+
+      for (const id of ["M-1-3", "M-1-1", "M-1-2"]) {
+        orch.setState(id, "ci-passed");
+        orch.getItem(id)!.prNumber = 100;
+      }
+
+      const actions = orch.processTransitions(
+        snapshotWith([
+          { id: "M-1-3", prNumber: 103, prState: "open", ciStatus: "pass" },
+          { id: "M-1-1", prNumber: 101, prState: "open", ciStatus: "pass" },
+          { id: "M-1-2", prNumber: 102, prState: "open", ciStatus: "pass" },
+        ]),
+      );
+
+      const mergeActions = actions.filter((a) => a.type === "merge");
+      expect(mergeActions).toHaveLength(1);
+      // M-1-1 comes first lexicographically
+      expect(mergeActions[0]!.itemId).toBe("M-1-1");
+
+      expect(orch.getItem("M-1-1")!.state).toBe("merging");
+      expect(orch.getItem("M-1-2")!.state).toBe("ci-passed");
+      expect(orch.getItem("M-1-3")!.state).toBe("ci-passed");
+    });
+
+    it("single ci-passed item skips queue logic and merges normally", () => {
+      orch = new Orchestrator({ wipLimit: 5, mergeStrategy: "asap" });
+
+      orch.addItem(makeTodo("H-1-1", [], "high"));
+      orch.setState("H-1-1", "ci-passed");
+      orch.getItem("H-1-1")!.prNumber = 42;
+
+      const actions = orch.processTransitions(
+        snapshotWith([
+          { id: "H-1-1", prNumber: 42, prState: "open", ciStatus: "pass" },
+        ]),
+      );
+
+      const mergeActions = actions.filter((a) => a.type === "merge");
+      expect(mergeActions).toHaveLength(1);
+      expect(mergeActions[0]!.itemId).toBe("H-1-1");
+      expect(orch.getItem("H-1-1")!.state).toBe("merging");
+    });
+
+    it("after merge execution, remaining ci-passed items get conflict checked next cycle", () => {
+      orch = new Orchestrator({ wipLimit: 5, mergeStrategy: "asap" });
+
+      orch.addItem(makeTodo("C-1-1", [], "critical"));
+      orch.addItem(makeTodo("M-1-1", [], "medium"));
+      orch.addItem(makeTodo("L-1-1", [], "low"));
+
+      for (const id of ["C-1-1", "M-1-1", "L-1-1"]) {
+        orch.setState(id, "ci-passed");
+        orch.getItem(id)!.prNumber = 100;
+      }
+
+      // Cycle 1: only critical item merges
+      const actions1 = orch.processTransitions(
+        snapshotWith([
+          { id: "C-1-1", prNumber: 101, prState: "open", ciStatus: "pass" },
+          { id: "M-1-1", prNumber: 102, prState: "open", ciStatus: "pass" },
+          { id: "L-1-1", prNumber: 103, prState: "open", ciStatus: "pass" },
+        ]),
+      );
+
+      const mergeActions1 = actions1.filter((a) => a.type === "merge");
+      expect(mergeActions1).toHaveLength(1);
+      expect(mergeActions1[0]!.itemId).toBe("C-1-1");
+
+      // Execute merge for C-1-1 (simulated)
+      const deps = mockDeps({
+        checkPrMergeable: vi.fn(() => true),
+      });
+      orch.executeAction(mergeActions1[0]!, defaultCtx, deps);
+
+      // C-1-1 is now merged
+      expect(orch.getItem("C-1-1")!.state).toBe("merged");
+
+      // Verify checkPrMergeable was called for the sibling PRs
+      expect(deps.checkPrMergeable).toHaveBeenCalled();
+
+      // Cycle 2: medium item gets the merge action next
+      const actions2 = orch.processTransitions(
+        snapshotWith([
+          { id: "C-1-1", prNumber: 101, prState: "merged" },
+          { id: "M-1-1", prNumber: 102, prState: "open", ciStatus: "pass" },
+          { id: "L-1-1", prNumber: 103, prState: "open", ciStatus: "pass" },
+        ]),
+      );
+
+      const mergeActions2 = actions2.filter((a) => a.type === "merge");
+      expect(mergeActions2).toHaveLength(1);
+      expect(mergeActions2[0]!.itemId).toBe("M-1-1");
+      expect(orch.getItem("M-1-1")!.state).toBe("merging");
+      expect(orch.getItem("L-1-1")!.state).toBe("ci-passed");
+    });
+
+    it("non-merge actions are preserved alongside the prioritized merge", () => {
+      orch = new Orchestrator({ wipLimit: 5, mergeStrategy: "asap" });
+
+      // Two items in ci-passed, one in ci-pending that will fail
+      orch.addItem(makeTodo("H-1-1", [], "high"));
+      orch.addItem(makeTodo("M-1-1", [], "medium"));
+      orch.addItem(makeTodo("L-1-1", [], "low"));
+
+      orch.setState("H-1-1", "ci-passed");
+      orch.getItem("H-1-1")!.prNumber = 101;
+      orch.setState("M-1-1", "ci-passed");
+      orch.getItem("M-1-1")!.prNumber = 102;
+      // ci-pending → will transition to ci-failed when it sees ciStatus: "fail"
+      orch.setState("L-1-1", "ci-pending");
+      orch.getItem("L-1-1")!.prNumber = 103;
+
+      const actions = orch.processTransitions(
+        snapshotWith([
+          { id: "H-1-1", prNumber: 101, prState: "open", ciStatus: "pass" },
+          { id: "M-1-1", prNumber: 102, prState: "open", ciStatus: "pass" },
+          { id: "L-1-1", prNumber: 103, prState: "open", ciStatus: "fail", isMergeable: true },
+        ]),
+      );
+
+      // Merge action only for highest priority
+      const mergeActions = actions.filter((a) => a.type === "merge");
+      expect(mergeActions).toHaveLength(1);
+      expect(mergeActions[0]!.itemId).toBe("H-1-1");
+
+      // CI failure notification should still be present for L-1-1
+      const ciActions = actions.filter((a) => a.type === "notify-ci-failure");
+      expect(ciActions).toHaveLength(1);
+      expect(ciActions[0]!.itemId).toBe("L-1-1");
+    });
+
+    it("priority order: critical > high > medium > low", () => {
+      orch = new Orchestrator({ wipLimit: 10, mergeStrategy: "asap" });
+
+      const priorities: Priority[] = ["low", "medium", "high", "critical"];
+      for (const p of priorities) {
+        const id = `${p.charAt(0).toUpperCase()}-1-1`;
+        orch.addItem(makeTodo(id, [], p));
+        orch.setState(id, "ci-passed");
+        orch.getItem(id)!.prNumber = 100;
+      }
+
+      const actions = orch.processTransitions(
+        snapshotWith(
+          priorities.map((p) => ({
+            id: `${p.charAt(0).toUpperCase()}-1-1`,
+            prNumber: 100,
+            prState: "open" as const,
+            ciStatus: "pass" as const,
+          })),
+        ),
+      );
+
+      const mergeActions = actions.filter((a) => a.type === "merge");
+      expect(mergeActions).toHaveLength(1);
+      // "critical" has lowercase 'c', so the ID would be C-1-1
+      // But "critical".charAt(0).toUpperCase() = "C"
+      expect(mergeActions[0]!.itemId).toBe("C-1-1");
     });
   });
 });
