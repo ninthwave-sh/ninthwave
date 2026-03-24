@@ -43,6 +43,11 @@ import {
   createWebhookNotifier,
   type WebhookNotifyFn,
 } from "../webhooks.ts";
+import {
+  collectRunMetrics,
+  writeRunMetrics,
+  type MetricsWriterDeps,
+} from "../analytics.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
 
@@ -327,6 +332,8 @@ export interface OrchestrateLoopDeps {
   supervisorDeps?: SupervisorDeps;
   /** Webhook notifier for lifecycle events (fire-and-forget). No-op when absent. */
   notify?: WebhookNotifyFn;
+  /** Metrics writer dependencies (injectable for testing). */
+  metricsWriterDeps?: MetricsWriterDeps;
 }
 
 export interface OrchestrateLoopConfig {
@@ -336,6 +343,10 @@ export interface OrchestrateLoopConfig {
   supervisor?: SupervisorConfig;
   /** GitHub repo URL (e.g., "https://github.com/owner/repo") for constructing PR URLs. */
   repoUrl?: string;
+  /** AI tool used for this run (e.g., "claude", "opencode"). */
+  aiTool?: string;
+  /** Project root path — needed for writing analytics metrics. */
+  projectRoot?: string;
 }
 
 /**
@@ -351,6 +362,9 @@ export async function orchestrateLoop(
   signal?: AbortSignal,
 ): Promise<void> {
   const { log } = deps;
+
+  // Record run start time for metrics
+  const runStartTime = new Date().toISOString();
 
   // Initialize supervisor state if supervisor is active
   let supervisorState: SupervisorState | undefined;
@@ -445,6 +459,39 @@ export async function orchestrateLoop(
         items: allItems.map((i) => ({ id: i.id, state: i.state, prNumber: i.prNumber })),
         summary: { done: doneCount, stuck: stuckCount, total: allItems.length },
       });
+
+      // Write structured metrics file
+      if (config.projectRoot) {
+        try {
+          const metrics = collectRunMetrics({
+            startTime: runStartTime,
+            items: allItems,
+            mergeStrategy: orch.config.mergeStrategy,
+            wipLimit: orch.config.wipLimit,
+            aiTool: config.aiTool ?? "unknown",
+          });
+          const metricsPath = writeRunMetrics(
+            config.projectRoot,
+            metrics,
+            deps.metricsWriterDeps,
+          );
+          wrappedLog({
+            ts: new Date().toISOString(),
+            level: "info",
+            event: "metrics_written",
+            path: metricsPath,
+          });
+        } catch (e: unknown) {
+          // Non-fatal — metrics failure shouldn't block orchestration
+          const msg = e instanceof Error ? e.message : String(e);
+          wrappedLog({
+            ts: new Date().toISOString(),
+            level: "warn",
+            event: "metrics_write_error",
+            error: msg,
+          });
+        }
+      }
 
       break;
     }
@@ -863,6 +910,8 @@ export async function cmdOrchestrate(
     ...(pollIntervalOverride ? { pollIntervalMs: pollIntervalOverride } : {}),
     ...(supervisorConfig ? { supervisor: supervisorConfig } : {}),
     ...(repoUrl ? { repoUrl } : {}),
+    aiTool,
+    projectRoot,
   };
 
   // Launch status pane if running inside a multiplexer

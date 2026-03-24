@@ -654,6 +654,95 @@ describe("orchestrateLoop", () => {
       expect(s.states).toBeDefined();
     }
   });
+
+  it("writes metrics file on orchestrate_complete when projectRoot is configured", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("M-1-1"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+    const writtenFiles: Array<{ path: string; data: string }> = [];
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      if (cycle === 1) return { items: [], readyIds: ["M-1-1"] };
+      if (cycle === 2) return { items: [{ id: "M-1-1", workerAlive: true }], readyIds: [] };
+      if (cycle === 3)
+        return { items: [{ id: "M-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+      return { items: [], readyIds: [] };
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+      metricsWriterDeps: {
+        mkdir: vi.fn(),
+        writeFile: (path: string, data: string) => writtenFiles.push({ path, data }),
+      },
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, {
+      projectRoot: "/test-project",
+      aiTool: "claude",
+    });
+
+    // Metrics file was written
+    expect(writtenFiles).toHaveLength(1);
+    expect(writtenFiles[0]!.path).toContain("/test-project/.ninthwave/analytics/run-");
+
+    // Metrics contain correct data
+    const metrics = JSON.parse(writtenFiles[0]!.data);
+    expect(metrics.itemsAttempted).toBe(1);
+    expect(metrics.itemsCompleted).toBe(1);
+    expect(metrics.itemsFailed).toBe(0);
+    expect(metrics.mergeStrategy).toBe("asap");
+    expect(metrics.wipLimit).toBe(2);
+    expect(metrics.durationMs).toBeGreaterThanOrEqual(0);
+    expect(metrics.items).toHaveLength(1);
+    expect(metrics.items[0].id).toBe("M-1-1");
+    expect(metrics.items[0].tool).toBe("claude");
+
+    // Log entry confirms metrics write
+    expect(logs.some((l) => l.event === "metrics_written")).toBe(true);
+  });
+
+  it("does not write metrics when projectRoot is not configured", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("N-1-1"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+    const writeFileSpy = vi.fn();
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      if (cycle === 1) return { items: [], readyIds: ["N-1-1"] };
+      if (cycle === 2) return { items: [{ id: "N-1-1", workerAlive: true }], readyIds: [] };
+      if (cycle === 3)
+        return { items: [{ id: "N-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+      return { items: [], readyIds: [] };
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+      metricsWriterDeps: {
+        mkdir: vi.fn(),
+        writeFile: writeFileSpy,
+      },
+    };
+
+    // No projectRoot in config
+    await orchestrateLoop(orch, defaultCtx, deps, {});
+
+    // Metrics NOT written
+    expect(writeFileSpy).not.toHaveBeenCalled();
+    expect(logs.some((l) => l.event === "metrics_written")).toBe(false);
+  });
 });
 
 describe("adaptivePollInterval", () => {
