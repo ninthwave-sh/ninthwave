@@ -2,7 +2,7 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { join } from "path";
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { parseTodos, extractFilePaths, extractTestPlan, normalizeDomain, truncateSlug, expandWildcardDeps } from "../core/parser.ts";
 import {
   setupTempRepo,
@@ -864,7 +864,6 @@ describe("parseTodos — UTF-8 BOM handling", () => {
 
     // Prepend BOM to the fixture file
     const todosPath = join(repo, "TODOS.md");
-    const { readFileSync, writeFileSync } = require("fs");
     const original = readFileSync(todosPath, "utf-8");
     writeFileSync(todosPath, "\uFEFF" + original);
 
