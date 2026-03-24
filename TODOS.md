@@ -12,6 +12,7 @@
 
 
 
+
 ### Feat: Create Homebrew tap and formula (H-BREW-4)
 
 **Priority:** High
@@ -51,19 +52,6 @@ Key files: `README.md`, `CONTRIBUTING.md`, `setup` (delete), `remote-install.sh`
 
 
 
-### Feat: Implement orchestrator action execution (H-ORCH-7)
-
-**Priority:** High
-**Source:** Orchestrator pivot
-**Depends on:** H-ORCH-6, H-ORCH-2, H-ORCH-4, H-ORCH-5
-
-Add `executeAction(action)` method to the `Orchestrator` class. Action types: `launch` (calls `launchSingleItem`), `merge` (calls `prMerge`, pulls main, sends rebase requests to dependent workers), `notify-ci-failure` (sends CI failure details to worker via `cmux send`), `notify-review` (sends review comments to worker), `clean` (calls `cleanSingleWorktree`, closes workspace), `mark-done` (calls `cmdMarkDone`). Each action updates internal state on success. Post PR comments as audit trail for key actions.
-
-Acceptance: Each action type executes correctly with mocked dependencies. State updates after action execution. Failed actions (merge conflict, missing workspace) are handled gracefully. Tests mock `gh.ts`, `cmux.ts`, `git.ts`, `start.ts`, `clean.ts`.
-
-Key files: `core/orchestrator.ts`, `test/orchestrator.test.ts`
-
----
 
 ### Feat: Implement event loop and orchestrate CLI command (H-ORCH-8)
 
@@ -108,6 +96,7 @@ Key files: `agents/todo-worker.md`
 ---
 
 ## Vision (recurring, 2026-03-23)
+
 
 
 
