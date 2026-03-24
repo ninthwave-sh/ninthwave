@@ -32,19 +32,19 @@ This skill is highly interactive. You MUST use your interactive question tool to
 
 ## Instructions
 
-This skill orchestrates batch processing of engineering TODOs in two phases: interactive selection, then delegating to the `ninthwave orchestrate` daemon which handles launching workers, polling CI, merging PRs, and cleanup automatically.
+This skill interactively selects TODO items, then delegates all orchestration to `ninthwave orchestrate` — a deterministic TypeScript daemon that handles launching workers, polling CI, merging PRs, cleaning up, and marking items done. The skill's job is Phase 1 (interactive selection) and Phase 2 (launching the daemon). Everything after that is automated.
 
 > **CLI shortcut:** You can skip the interactive selection and run the orchestrator directly from any terminal:
 > ```
 > ninthwave orchestrate --items ID1,ID2 --merge-strategy asap --wip-limit 4
 > ```
-> Run `ninthwave orchestrate --help` for all options. No AI tool session required.
+> No AI tool session required.
 
 ---
 
 ### Phase 1: SELECT
 
-**Goal:** Help the user choose which TODO items to work on and how.
+**Goal:** Help the user choose which TODO items to work on and how to process them.
 
 1. Run `.ninthwave/work list --ready` to get all available items.
 2. Parse the output and present a summary table to the user showing: ID, priority, domain, title, and estimated complexity. Items with a `Repo:` field will indicate which target repo they belong to.
@@ -97,11 +97,13 @@ This skill orchestrates batch processing of engineering TODOs in two phases: int
 
 9. **WIP limit** (only when total items >= 4):
 
-   AskUserQuestion -- "What WIP limit? (default: 4)"
-   - A) Default (4) -- up to 4 workers in parallel
-   - B) Custom -- let me specify a number
+   AskUserQuestion -- "WIP limit? (how many items to process concurrently)"
+   - A) 4 (default) -- good balance of parallelism and memory usage
+   - B) 2 -- conservative, lower memory usage
+   - C) All at once -- start all simultaneously (set WIP_LIMIT to item count)
+   - D) Custom -- let me enter a number
 
-   Store WIP_LIMIT (default 4).
+   Store WIP_LIMIT (default: 4).
 
 ---
 
@@ -118,6 +120,8 @@ This skill orchestrates batch processing of engineering TODOs in two phases: int
      --wip-limit <WIP_LIMIT>
    ```
 
+   If running via the `.ninthwave/work` shim, use `.ninthwave/work orchestrate ...` instead.
+
 2. Run the command. The orchestrator handles the full lifecycle automatically:
    - **Queued** items wait for dependencies to clear
    - **Ready** items get launched as worker sessions (up to the WIP limit)
@@ -128,9 +132,11 @@ This skill orchestrates batch processing of engineering TODOs in two phases: int
    - Crash recovery reconstructs state from disk and GitHub on restart
 
 3. The orchestrator emits structured JSON log lines. Monitor the output for:
-   - `transition` events — items moving between states
+   - `orchestrate_start` — daemon started, lists all items
+   - `transition` — items moving between states (e.g., `queued → ready → launching`)
    - `action_execute` / `action_result` — launches, merges, cleanups
-   - `orchestrate_complete` — all items reached terminal state
+   - `orchestrate_complete` — all items reached terminal state (done or stuck)
+   - `shutdown` — SIGINT received, clean exit
 
 4. **When the orchestrator exits**, summarize results:
    - How many items completed successfully (done)
@@ -142,25 +148,28 @@ This skill orchestrates batch processing of engineering TODOs in two phases: int
    - B) Investigate -- look at the stuck PRs/branches manually
    - C) Done -- accept the results as-is
 
+6. **Crash recovery:** If the orchestrator is interrupted (crash, Ctrl-C, terminal closed), re-running the same command reconstructs state from existing worktrees and GitHub PRs and resumes automatically.
+
 ---
 
 ## Orchestrator-Worker Communication
 
-**Operational messages:** Use `cmux send` to push text into worker sessions.
+The orchestrator daemon communicates with workers via `cmux send`:
 
-```bash
-cmux send --workspace <workspace-ref> "message"
-cmux send-key --workspace <workspace-ref> enter
-```
+- **CI fix requests:** Sent when CI fails on a worker's PR
+- **Review feedback:** Relayed when a trusted collaborator leaves review comments
+- **Rebase requests:** Sent after a dependency merges and the worker needs to rebase
+- **Stop requests:** Sent when the orchestrator needs to shut down a worker
 
-**PR comments (audit trail):** Prefix with `**[Orchestrator]**`.
+**PR comments (audit trail):** The daemon posts comments prefixed with `**[Orchestrator]**`.
 
-Workers prefix with `**[Worker: TODO-ID]**`.
+Workers prefix their comments with `**[Worker: TODO-ID]**`.
 
 ## Important Rules
 
 - **Script dependency:** `.ninthwave/work` must exist and be executable
 - **Branch safety:** All implementation on `todo/*` branches, never directly on main
+- **Conflict handling:** Always check before launching
 - **No silent failures:** Report errors and ask how to proceed
-- **External merges:** Detect and handle gracefully
+- **Crash recovery:** Re-running the orchestrate command resumes from where it left off
 - **Orchestrator handles lifecycle:** Do not manually merge PRs, clean worktrees, or mark items done — the orchestrator does this automatically
