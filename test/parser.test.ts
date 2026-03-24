@@ -3,7 +3,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
-import { parseTodos, extractFilePaths, extractTestPlan, normalizeDomain } from "../core/parser.ts";
+import { parseTodos, extractFilePaths, extractTestPlan, normalizeDomain, truncateSlug } from "../core/parser.ts";
 import {
   setupTempRepo,
   setupTempRepoPair,
@@ -346,6 +346,80 @@ describe("normalizeDomain", () => {
     expect(normalizeDomain("Infrastructure (from old-repo)")).toBe(
       "infrastructure",
     );
+  });
+
+  it("returns short slugs unchanged (<= 40 chars)", () => {
+    expect(normalizeDomain("Cloud Infrastructure")).toBe(
+      "cloud-infrastructure",
+    );
+    expect(normalizeDomain("Cloud Infrastructure").length).toBeLessThanOrEqual(40);
+  });
+
+  it("truncates long slugs at hyphen boundary to max 40 chars", () => {
+    // This header auto-slugifies to > 40 chars
+    const long = "Architecture Design Review And Implementation Planning Session Notes";
+    const result = normalizeDomain(long);
+    expect(result.length).toBeLessThanOrEqual(40);
+    // Should not cut mid-word — must end at a hyphen boundary
+    expect(result).not.toMatch(/-$/);
+    // Should be a prefix of the full slug
+    const fullSlug = "architecture-design-review-and-implementation-planning-session-notes";
+    expect(fullSlug.startsWith(result)).toBe(true);
+  });
+
+  it("does not truncate slug of exactly 40 chars", () => {
+    // Build a header that produces exactly 40 chars when slugified
+    // "abcdefghij-abcdefghij-abcdefghij-abcdefg" = 40 chars (10+1+10+1+10+1+7)
+    const header = "abcdefghij abcdefghij abcdefghij abcdefg";
+    const result = normalizeDomain(header);
+    expect(result).toBe("abcdefghij-abcdefghij-abcdefghij-abcdefg");
+    expect(result.length).toBe(40);
+  });
+
+  it("custom domain mappings take priority over truncation", () => {
+    // Create a temp domains.conf that maps a long header to a short domain
+    const { writeFileSync, mkdirSync } = require("fs");
+    const { join } = require("path");
+    const tmpDir = join(require("os").tmpdir(), `nw-test-domains-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    const domainsFile = join(tmpDir, "domains.conf");
+    writeFileSync(
+      domainsFile,
+      "architecture design review=arch-review\n",
+    );
+
+    const long = "Architecture Design Review And Implementation Planning Session Notes";
+    const result = normalizeDomain(long, domainsFile);
+    expect(result).toBe("arch-review");
+
+    // Cleanup
+    require("fs").rmSync(tmpDir, { recursive: true });
+  });
+});
+
+describe("truncateSlug", () => {
+  it("returns short slugs unchanged", () => {
+    expect(truncateSlug("cloud-infrastructure", 40)).toBe("cloud-infrastructure");
+  });
+
+  it("truncates at last hyphen boundary within limit", () => {
+    const slug = "architecture-design-review-and-implementation-planning";
+    const result = truncateSlug(slug, 40);
+    expect(result.length).toBeLessThanOrEqual(40);
+    expect(result).toBe("architecture-design-review-and");
+    // Verify no trailing hyphen
+    expect(result).not.toMatch(/-$/);
+  });
+
+  it("does not truncate slug of exactly maxLen", () => {
+    const slug = "abcdefghij-abcdefghij-abcdefghij-abcdef"; // 40 chars
+    expect(truncateSlug(slug, 40)).toBe(slug);
+  });
+
+  it("handles single long word with no hyphens", () => {
+    const slug = "a".repeat(50);
+    const result = truncateSlug(slug, 40);
+    expect(result.length).toBe(40);
   });
 });
 

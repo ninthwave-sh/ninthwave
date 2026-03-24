@@ -44,12 +44,32 @@ export function normalizeDomain(
 
   // Default auto-slugify: lowercase, strip non-alphanum (keep spaces and hyphens),
   // collapse spaces, spaces to hyphens, strip leading/trailing hyphens
-  return lower
+  const slug = lower
     .replace(/[^a-z0-9 -]/g, "")
     .replace(/ +/g, " ")
     .replace(/ /g, "-")
     .replace(/^-+/, "")
     .replace(/-+$/, "");
+
+  // Cap at 40 characters, truncating at the last complete hyphen-separated word
+  return truncateSlug(slug, 40);
+}
+
+/**
+ * Truncate a slug to maxLen characters at hyphen boundaries (no mid-word cuts).
+ * If the slug is already within the limit, return it unchanged.
+ */
+export function truncateSlug(slug: string, maxLen: number): string {
+  if (slug.length <= maxLen) return slug;
+
+  // Find the last hyphen at or before maxLen
+  const truncated = slug.slice(0, maxLen);
+  const lastHyphen = truncated.lastIndexOf("-");
+
+  // If no hyphen found, return the full truncated string (single long word)
+  if (lastHyphen === -1) return truncated;
+
+  return truncated.slice(0, lastHyphen);
 }
 
 /**
