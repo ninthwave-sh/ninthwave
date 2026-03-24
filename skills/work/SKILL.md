@@ -1,8 +1,8 @@
 ---
 name: work
 description: |
-  Batch-process work items through parallel AI coding sessions via cmux.
-  Interactively select, launch, monitor, merge, and finalize work items.
+  Batch-process work items through parallel AI coding sessions.
+  Interactively select items, then delegate execution to `ninthwave orchestrate`.
   Use when asked to "process work items", "batch work", "run work", or "start work".
 allowed-tools:
   - Bash
@@ -32,13 +32,19 @@ This skill is highly interactive. You MUST use your interactive question tool to
 
 ## Instructions
 
-This skill orchestrates batch processing of engineering TODOs through 5 interactive phases. The utility script `.ninthwave/work` must exist and be executable. All implementation work happens on worktree branches, never directly on main. VERSION and CHANGELOG.md are ONLY modified during Phase 5 (version-bump), never on feature branches.
+This skill orchestrates batch processing of engineering TODOs in two phases: interactive selection, then delegating to the `ninthwave orchestrate` daemon which handles launching workers, polling CI, merging PRs, and cleanup automatically.
+
+> **CLI shortcut:** You can skip the interactive selection and run the orchestrator directly from any terminal:
+> ```
+> ninthwave orchestrate --items ID1,ID2 --merge-strategy asap --wip-limit 4
+> ```
+> Run `ninthwave orchestrate --help` for all options. No AI tool session required.
 
 ---
 
 ### Phase 1: SELECT
 
-**Goal:** Help the user choose which TODO items to work on in this batch.
+**Goal:** Help the user choose which TODO items to work on and how.
 
 1. Run `.ninthwave/work list --ready` to get all available items.
 2. Parse the output and present a summary table to the user showing: ID, priority, domain, title, and estimated complexity. Items with a `Repo:` field will indicate which target repo they belong to.
@@ -66,16 +72,16 @@ This skill orchestrates batch processing of engineering TODOs through 5 interact
 
 4. **Dependency analysis:** Run `.ninthwave/work batch-order <selected-IDs>` to check for dependency chains.
 
-   - **If all items are in Batch 1** (no dependencies): proceed to conflict check and launch.
-   - **If items span multiple batches**: present the batch plan. Start with Batch 1, process remaining after merge.
+   - **If all items are in Batch 1** (no dependencies): proceed to conflict check.
+   - **If items span multiple batches**: present the batch plan. The orchestrator handles dependency ordering automatically — all selected items can be passed together.
 
 5. Run `.ninthwave/work conflicts <batch-IDs>` to check for file overlaps.
 
-6. Present the conflict analysis. If conflicts, suggest splitting into sub-batches.
+6. Present the conflict analysis. If conflicts, suggest splitting into sub-batches or lowering the WIP limit.
 
 7. AskUserQuestion -- "Start this batch?"
    - Options:
-     - A) Start these N items -- launch parallel sessions now
+     - A) Start these N items -- launch the orchestrator now
      - B) Remove conflicting items -- run only non-overlapping subset
      - C) Pick manually -- let me choose specific items by ID
      - D) Cancel -- go back to selection
@@ -89,97 +95,52 @@ This skill orchestrates batch processing of engineering TODOs through 5 interact
 
    Store MERGE_STRATEGY as: `approved` | `asap` | `ask`
 
-9. **Execution mode** (only when total items >= 4):
+9. **WIP limit** (only when total items >= 4):
 
-   AskUserQuestion -- "How should we run these N items?"
-   - A) WIP Autopilot -- launch up to a WIP limit; auto-start next when each PR opens
-   - B) All at once -- start all simultaneously
+   AskUserQuestion -- "What WIP limit? (default: 4)"
+   - A) Default (4) -- up to 4 workers in parallel
+   - B) Custom -- let me specify a number
 
-   If user picks A, ask for WIP limit. Store WIP_LIMIT. Proceed to Phase 2A.
-   If user picks B or total items < 4: proceed to Phase 2.
-
----
-
-### Phase 2: LAUNCH
-
-**Goal:** Create worktrees and launch parallel AI coding sessions.
-
-1. Run `.ninthwave/work start <IDs>`. For cross-repo items (those with a `Repo:` field), this creates worktrees in the target repo rather than the hub repo.
-2. Display summary: item ID, title, branch, worktree path, session name.
-3. Tell the user sessions are running. Proceed to Phase 3.
+   Store WIP_LIMIT (default 4).
 
 ---
 
-### Phase 2A: AUTOPILOT (WIP Mode)
+### Phase 2: ORCHESTRATE
 
-**Skip if WIP Autopilot was NOT selected.**
+**Goal:** Launch the `ninthwave orchestrate` daemon and monitor its output.
 
-#### State tracking
+1. Build the orchestrate command from the user's selections:
 
-Maintain four sets: **queued**, **implementing** (counts against WIP), **pr_open** (does NOT count against WIP), **merged**.
+   ```bash
+   ninthwave orchestrate \
+     --items <comma-separated-IDs> \
+     --merge-strategy <MERGE_STRATEGY> \
+     --wip-limit <WIP_LIMIT>
+   ```
 
-#### Initialization
+2. Run the command. The orchestrator handles the full lifecycle automatically:
+   - **Queued** items wait for dependencies to clear
+   - **Ready** items get launched as worker sessions (up to the WIP limit)
+   - **Implementing** workers are monitored for completion
+   - **CI-pending/CI-passed** PRs are tracked through CI
+   - **Merging** PRs are squash-merged, worktrees cleaned, and items marked done
+   - Adaptive polling adjusts check frequency based on current state
+   - Crash recovery reconstructs state from disk and GitHub on restart
 
-1. Build item list ordered by batch-order output.
-2. Launch min(WIP_LIMIT, launchable items).
-3. Report status.
+3. The orchestrator emits structured JSON log lines. Monitor the output for:
+   - `transition` events — items moving between states
+   - `action_execute` / `action_result` — launches, merges, cleanups
+   - `orchestrate_complete` — all items reached terminal state
 
-#### Watch loop
+4. **When the orchestrator exits**, summarize results:
+   - How many items completed successfully (done)
+   - How many items got stuck (stuck) and why
+   - Any errors or warnings from the log output
 
-Use `.ninthwave/work autopilot-watch --interval 120 --state-file /tmp/autopilot-state.tsv` as a background task.
-
-**CRITICAL: Check-then-watch pattern.** Before each watch, run `watch-ready` first and process actionable items.
-
-**When transitions return:**
-
-1. Update internal state from transitions
-2. Merge according to MERGE_STRATEGY (merge eligible items, rebase dependents)
-3. Orchestrator-driven post-PR handling (CI failures via `ci-failures`, review feedback via `pr-activity`, rebase needs)
-4. Launch next items (fill WIP slots from queued)
-5. Progress report
-6. Check exit conditions
-7. Loop
-
-#### Merge execution
-
-For each item being merged:
-1. Close cmux workspace for that item
-2. `gh pr merge <PR> --squash`
-3. `git pull origin main --ff-only`
-4. Rebase dependent active worktrees
-5. Clean worktree and partition
-6. Move to merged
-
----
-
-### Phase 3: WAIT
-
-**Skip if Phase 2A was used.**
-
-Wait for user to confirm sessions completed, then verify PR status.
-
----
-
-### Phase 4: MERGE
-
-**Goal:** Merge all PRs from the batch.
-
-1. Run `watch-ready` and `merged-ids` to categorize items
-2. Use MERGE_STRATEGY from Phase 1 (or ask if not set)
-3. Execute merges in order, handling conflicts and retries. For cross-repo items, merges happen in the target repo's context.
-
----
-
-### Phase 5: FINALIZE
-
-**Goal:** Bump version, clean up, mark done.
-
-1. `.ninthwave/work version-bump`
-2. `.ninthwave/work clean`
-3. `.ninthwave/work mark-done <IDs>` for all merged items
-4. Commit TODOS.md changes
-5. Present completion summary
-6. Check for remaining dependency batches -- offer to continue
+5. If items remain stuck, AskUserQuestion:
+   - A) Retry stuck items -- re-run orchestrate with just those IDs
+   - B) Investigate -- look at the stuck PRs/branches manually
+   - C) Done -- accept the results as-is
 
 ---
 
@@ -199,9 +160,7 @@ Workers prefix with `**[Worker: TODO-ID]**`.
 ## Important Rules
 
 - **Script dependency:** `.ninthwave/work` must exist and be executable
-- **Branch safety:** All implementation on `todo/*` worktree branches, main only during Phase 5
-- **VERSION/CHANGELOG discipline:** Only modified during Phase 5
-- **Conflict handling:** Always check before launching
+- **Branch safety:** All implementation on `todo/*` branches, never directly on main
 - **No silent failures:** Report errors and ask how to proceed
 - **External merges:** Detect and handle gracefully
-- **Partition isolation:** Dynamic allocation, cleaned during start/clean
+- **Orchestrator handles lifecycle:** Do not manually merge PRs, clean worktrees, or mark items done — the orchestrator does this automatically
