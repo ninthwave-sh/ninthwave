@@ -13,7 +13,7 @@ import {
   deleteBranch,
   createWorktree,
 } from "../git.ts";
-import { type Multiplexer, getMux } from "../mux.ts";
+import { type Multiplexer, getMux, waitForReady } from "../mux.ts";
 import {
   allocatePartition,
   getPartitionFor,
@@ -117,8 +117,11 @@ function launchAiSession(
     return null;
   }
 
-  // Give the workspace a moment to initialize, then send initial prompt
-  Bun.sleepSync(2000);
+  // Wait for the AI tool to finish loading before sending the prompt.
+  // Claude Code / OpenCode can take 5-15s to initialize; a fixed sleep races.
+  if (!waitForReady(mux, wsRef)) {
+    warn(`Workspace ${wsRef} did not become ready within timeout for ${id} -- sending prompt anyway`);
+  }
   if (!mux.sendMessage(wsRef, initialPrompt + "\n")) {
     warn(`Failed to send initial prompt to ${wsRef} for ${id}`);
   }

@@ -46,6 +46,22 @@ export function sendMessage(
   });
 }
 
+/** Read screen content from a cmux workspace. Returns raw text or "" on failure. */
+export function readScreen(
+  workspaceRef: string,
+  lines: number = 10,
+): string {
+  const result = run("cmux", [
+    "read-screen",
+    "--workspace",
+    workspaceRef,
+    "--lines",
+    String(lines),
+  ]);
+  if (result.exitCode !== 0) return "";
+  return result.stdout;
+}
+
 /** List all cmux workspaces. Returns the raw output string. */
 export function listWorkspaces(): string {
   const result = run("cmux", ["list-workspaces"]);

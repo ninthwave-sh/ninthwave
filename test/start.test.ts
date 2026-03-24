@@ -20,6 +20,7 @@ vi.mock("../core/git.ts", () => ({
 vi.mock("../core/cmux.ts", () => ({
   launchWorkspace: vi.fn(() => "workspace:1"),
   sendMessage: vi.fn(() => true),
+  readScreen: vi.fn(() => "line1\nline2\nline3\nline4\n"),
 }));
 
 // Import mocked modules for assertions
