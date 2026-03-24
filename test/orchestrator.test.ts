@@ -1800,6 +1800,18 @@ describe("Orchestrator", () => {
         expect(orch.getItem("X-1-1")!.state).toBe("review-pending");
       });
 
+      it("→ review-pending when CI passes (asap strategy) with CHANGES_REQUESTED", () => {
+        orch = new Orchestrator({ mergeStrategy: "asap" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "pr-open");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "pass", prState: "open", reviewDecision: "CHANGES_REQUESTED" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("review-pending");
+        expect(actions.some((a) => a.type === "merge")).toBe(false);
+      });
+
       it("→ merged when PR externally merged", () => {
         orch.addItem(makeTodo("X-1-1"));
         orch.setState("X-1-1", "pr-open");
@@ -1980,6 +1992,56 @@ describe("Orchestrator", () => {
           snapshotWith([{ id: "X-1-1", ciStatus: "fail", prState: "open" }]),
         );
         expect(orch.getItem("X-1-1")!.ciFailCount).toBe(1);
+      });
+
+      // ── CHANGES_REQUESTED guard (H-ORC-2) ──────────────────────────
+
+      it("→ review-pending when asap strategy and CHANGES_REQUESTED", () => {
+        orch = new Orchestrator({ mergeStrategy: "asap" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "ci-passed");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "pass", prState: "open", reviewDecision: "CHANGES_REQUESTED" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("review-pending");
+        expect(actions.some((a) => a.type === "merge")).toBe(false);
+      });
+
+      it("→ merging when asap strategy and no review decision", () => {
+        orch = new Orchestrator({ mergeStrategy: "asap" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "ci-passed");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "pass", prState: "open", reviewDecision: "" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("merging");
+        expect(actions.some((a) => a.type === "merge")).toBe(true);
+      });
+
+      it("→ merging when asap strategy and APPROVED", () => {
+        orch = new Orchestrator({ mergeStrategy: "asap" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "ci-passed");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "pass", prState: "open", reviewDecision: "APPROVED" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("merging");
+        expect(actions.some((a) => a.type === "merge")).toBe(true);
+      });
+
+      it("→ merging when asap strategy and REVIEW_REQUIRED (no explicit rejection)", () => {
+        orch = new Orchestrator({ mergeStrategy: "asap" });
+        orch.addItem(makeTodo("X-1-1"));
+        orch.setState("X-1-1", "ci-passed");
+        orch.getItem("X-1-1")!.prNumber = 10;
+        const actions = orch.processTransitions(
+          snapshotWith([{ id: "X-1-1", ciStatus: "pass", prState: "open", reviewDecision: "REVIEW_REQUIRED" }]),
+        );
+        expect(orch.getItem("X-1-1")!.state).toBe("merging");
+        expect(actions.some((a) => a.type === "merge")).toBe(true);
       });
     });
 

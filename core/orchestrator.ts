@@ -573,6 +573,13 @@ export class Orchestrator {
 
     switch (this.config.mergeStrategy) {
       case "asap":
+        // Guard: never auto-merge when a reviewer has explicitly requested changes
+        if (snap?.reviewDecision === "CHANGES_REQUESTED") {
+          if (item.state !== "review-pending") {
+            this.transition(item, "review-pending");
+          }
+          break;
+        }
         // Merge as soon as CI passes
         this.transition(item, "merging");
         actions.push({
