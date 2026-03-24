@@ -51,23 +51,24 @@ Key files: `core/mux.ts`, `test/mux.test.ts`
 
 
 
-### Fix: Guard asap merge strategy against CHANGES_REQUESTED (H-ORC-2)
+### Fix: TOCTOU race in lock.ts acquireLock (H-LCK-1)
 
 **Priority:** High
-**Source:** Eng review H-ENG-1 — finding F3
+**Source:** Eng review H-ENG-1 — finding F6
 **Depends on:** None
 
-With `mergeStrategy: "asap"`, `evaluateMerge` triggers a merge when CI passes regardless of review state. A PR with explicit "changes requested" review decision would still be auto-merged. In repos without branch protection, this could merge PRs that a human explicitly flagged for revision. Add a guard: if `reviewDecision === "CHANGES_REQUESTED"`, transition to `review-pending` instead of merging, even with `asap` strategy. This respects explicit human feedback in all modes.
+In `acquireLock`, two processes can both detect a stale lock and race to acquire it. Process A acquires the lock, then process B removes A's lock (thinking it's still stale) and acquires its own. Both believe they hold the lock. Fix by adding a verification step after PID file write: re-read the PID file and verify `process.pid` matches. If another process stole the lock, retry. This turns the TOCTOU into a detect-and-retry pattern with atomic verification.
 
 **Test plan:**
-- Unit test: asap strategy with CHANGES_REQUESTED → review-pending (not merging)
-- Unit test: asap strategy with no review → merging (unchanged behavior)
-- Unit test: asap strategy with APPROVED → merging (unchanged behavior)
-- Unit test: asap strategy with REVIEW_REQUIRED → merging (unchanged, no explicit rejection)
+- Unit test: acquireLock succeeds on first try when lock is free
+- Unit test: acquireLock detects stale lock and recovers
+- Unit test: acquireLock times out when lock is held by a live process
+- Unit test: verify-after-write detects stolen lock and retries
+- Edge case: PID file is deleted between write and verify (treat as stolen)
 
-Acceptance: The `asap` merge strategy no longer auto-merges PRs with `CHANGES_REQUESTED`. Other review states are unchanged. Tests pass. No regression in existing merge strategy tests.
+Acceptance: Lock acquisition is safe against concurrent stale-lock recovery. PID is verified after write. Existing timeout and backoff behavior preserved. Tests pass.
 
-Key files: `core/orchestrator.ts`, `test/orchestrator.test.ts`
+Key files: `core/lock.ts`, `test/lock.test.ts`
 
 ---
 
