@@ -365,7 +365,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tready\tMERGEABLE");
+    expect(result).toBe("H-1-1\t10\tready\tMERGEABLE\t");
   });
 
   it("returns ci-passed when CI passes but not approved", () => {
@@ -384,7 +384,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tci-passed\tMERGEABLE");
+    expect(result).toBe("H-1-1\t10\tci-passed\tMERGEABLE\t");
   });
 
   it("returns ci-passed when CI passes but not mergeable", () => {
@@ -403,7 +403,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tci-passed\tCONFLICTING");
+    expect(result).toBe("H-1-1\t10\tci-passed\tCONFLICTING\t");
   });
 
   it("returns failing when CI fails", () => {
@@ -422,7 +422,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE");
+    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
   });
 
   it("returns pending when CI is pending", () => {
@@ -441,7 +441,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tpending\tMERGEABLE");
+    expect(result).toBe("H-1-1\t10\tpending\tMERGEABLE\t");
   });
 
   // ── CI failure state detection (H-ORC-1) ─────────────────────
@@ -459,7 +459,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE");
+    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
   });
 
   it("returns failing for CANCELLED check state", () => {
@@ -475,7 +475,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE");
+    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
   });
 
   it("returns failing for TIMED_OUT check state", () => {
@@ -491,7 +491,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE");
+    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
   });
 
   it("returns failing for STARTUP_FAILURE check state", () => {
@@ -507,7 +507,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE");
+    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
   });
 
   it("returns failing when mix of SUCCESS and ERROR checks", () => {
@@ -524,7 +524,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE");
+    expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
   });
 
   it("includes CONFLICTING mergeable status in 4th field", () => {
@@ -540,7 +540,7 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tfailing\tCONFLICTING");
+    expect(result).toBe("H-1-1\t10\tfailing\tCONFLICTING\t");
   });
 
   it("returns UNKNOWN when mergeable field is empty", () => {
@@ -556,7 +556,69 @@ describe("checkPrStatus", () => {
     ]);
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
-    expect(result).toBe("H-1-1\t10\tpending\tUNKNOWN");
+    expect(result).toBe("H-1-1\t10\tpending\tUNKNOWN\t");
+
+  });
+
+  it("includes completedAt from CI checks as eventTime in 5th field", () => {
+    (gh.prList as Mock).mockImplementation(
+      (_root: string, _branch: string, state: string) => {
+        if (state === "open") return [{ number: 10 }];
+        return [];
+      },
+    );
+    (gh.prView as Mock).mockReturnValue({
+      reviewDecision: "",
+      mergeable: "MERGEABLE",
+      updatedAt: "2026-03-24T10:00:00Z",
+    });
+    (gh.prChecks as Mock).mockReturnValue([
+      { state: "SUCCESS", name: "test", url: "", completedAt: "2026-03-24T10:05:00Z" },
+    ]);
+
+    const result = checkPrStatus("H-1-1", "/fake/repo");
+    expect(result).toBe("H-1-1\t10\tci-passed\tMERGEABLE\t2026-03-24T10:05:00Z");
+  });
+
+  it("uses updatedAt as eventTime when CI has no completedAt", () => {
+    (gh.prList as Mock).mockImplementation(
+      (_root: string, _branch: string, state: string) => {
+        if (state === "open") return [{ number: 10 }];
+        return [];
+      },
+    );
+    (gh.prView as Mock).mockReturnValue({
+      reviewDecision: "",
+      mergeable: "MERGEABLE",
+      updatedAt: "2026-03-24T10:00:00Z",
+    });
+    (gh.prChecks as Mock).mockReturnValue([
+      { state: "PENDING", name: "build", url: "" },
+    ]);
+
+    const result = checkPrStatus("H-1-1", "/fake/repo");
+    expect(result).toBe("H-1-1\t10\tpending\tMERGEABLE\t2026-03-24T10:00:00Z");
+  });
+
+  it("uses latest completedAt when multiple checks complete", () => {
+    (gh.prList as Mock).mockImplementation(
+      (_root: string, _branch: string, state: string) => {
+        if (state === "open") return [{ number: 10 }];
+        return [];
+      },
+    );
+    (gh.prView as Mock).mockReturnValue({
+      reviewDecision: "",
+      mergeable: "MERGEABLE",
+      updatedAt: "2026-03-24T10:00:00Z",
+    });
+    (gh.prChecks as Mock).mockReturnValue([
+      { state: "SUCCESS", name: "lint", url: "", completedAt: "2026-03-24T10:03:00Z" },
+      { state: "SUCCESS", name: "test", url: "", completedAt: "2026-03-24T10:05:00Z" },
+    ]);
+
+    const result = checkPrStatus("H-1-1", "/fake/repo");
+    expect(result).toBe("H-1-1\t10\tci-passed\tMERGEABLE\t2026-03-24T10:05:00Z");
   });
 });
 

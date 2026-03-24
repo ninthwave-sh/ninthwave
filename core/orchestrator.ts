@@ -53,6 +53,12 @@ export interface OrchestratorItem {
   lastCommitTime?: string | null;
   /** Whether a rebase request has been sent and is awaiting resolution. */
   rebaseRequested?: boolean;
+  /** Timestamp from the external system when the triggering event occurred (ISO string). */
+  eventTime?: string;
+  /** Timestamp when the orchestrator detected the state change (ISO string). */
+  detectedTime?: string;
+  /** Detection latency in milliseconds (detectedTime - eventTime). */
+  detectionLatencyMs?: number;
 }
 
 export interface OrchestratorConfig {
@@ -88,6 +94,9 @@ export interface ItemSnapshot {
   workerAlive?: boolean;
   /** ISO timestamp of the most recent commit on the worktree branch, or null if none beyond base. */
   lastCommitTime?: string | null;
+  /** Timestamp from the external system for the current state (ISO string).
+   *  e.g., GitHub's completedAt for CI checks, mergedAt for merges, updatedAt for PR changes. */
+  eventTime?: string;
 }
 
 export interface PollSnapshot {
@@ -328,10 +337,18 @@ export class Orchestrator {
 
   // ── Private helpers ────────────────────────────────────────────
 
-  /** Set state and update timestamp. */
-  private transition(item: OrchestratorItem, state: OrchestratorItemState): void {
+  /** Set state and update timestamp. Records detection latency when eventTime is provided. */
+  private transition(item: OrchestratorItem, state: OrchestratorItemState, eventTime?: string): void {
+    const detectedTime = new Date().toISOString();
     item.state = state;
-    item.lastTransition = new Date().toISOString();
+    item.lastTransition = detectedTime;
+    item.detectedTime = detectedTime;
+    item.eventTime = eventTime ?? detectedTime;
+    const detectedMs = new Date(detectedTime).getTime();
+    const eventMs = new Date(item.eventTime).getTime();
+    item.detectionLatencyMs = Number.isFinite(detectedMs) && Number.isFinite(eventMs)
+      ? Math.max(0, detectedMs - eventMs)
+      : 0;
     // Clear rebase flag on any state change — the worker pushed or CI restarted
     item.rebaseRequested = false;
   }
@@ -350,7 +367,7 @@ export class Orchestrator {
 
       case "launching":
         if (snap?.workerAlive) {
-          this.transition(item, "implementing");
+          this.transition(item, "implementing", snap?.eventTime);
         } else if (snap?.workerAlive === false) {
           return this.stuckOrRetry(item);
         }
@@ -390,13 +407,13 @@ export class Orchestrator {
     // If PR was auto-merged between polls, skip straight to merged
     if (snap?.prState === "merged") {
       if (snap.prNumber) item.prNumber = snap.prNumber;
-      this.transition(item, "merged");
+      this.transition(item, "merged", snap?.eventTime);
       return [{ type: "clean", itemId: item.id }];
     }
     // If a PR appeared, move to pr-open
     if (snap?.prNumber && snap.prState === "open") {
       item.prNumber = snap.prNumber;
-      this.transition(item, "pr-open");
+      this.transition(item, "pr-open", snap?.eventTime);
       // Fall through to handle CI status in the same cycle
       return this.handlePrLifecycle(item, snap);
     }
@@ -452,7 +469,7 @@ export class Orchestrator {
 
     // Check for external merge first (takes priority)
     if (snap?.prState === "merged") {
-      this.transition(item, "merged");
+      this.transition(item, "merged", snap?.eventTime);
       actions.push({ type: "clean", itemId: item.id });
       return actions;
     }
@@ -468,9 +485,9 @@ export class Orchestrator {
       }
       // If CI recovered, transition and continue processing
       if (ciStatus === "pass") {
-        this.transition(item, "ci-passed");
+        this.transition(item, "ci-passed", snap?.eventTime);
       } else if (ciStatus === "pending") {
-        this.transition(item, "ci-pending");
+        this.transition(item, "ci-pending", snap?.eventTime);
         return [];
       } else {
         return []; // Still failing, no action needed
@@ -479,7 +496,7 @@ export class Orchestrator {
 
     // Determine the new CI-based state
     if (ciStatus === "fail") {
-      this.transition(item, "ci-failed");
+      this.transition(item, "ci-failed", snap?.eventTime);
       item.ciFailCount++;
 
       // When CI fails due to merge conflicts with main, send a rebase
@@ -505,7 +522,7 @@ export class Orchestrator {
     }
 
     if (ciStatus === "pending" && item.state !== "ci-pending") {
-      this.transition(item, "ci-pending");
+      this.transition(item, "ci-pending", snap?.eventTime);
       return [];
     }
 
@@ -524,17 +541,17 @@ export class Orchestrator {
 
     if (ciStatus === "pass") {
       if (item.state !== "ci-passed") {
-        this.transition(item, "ci-passed");
+        this.transition(item, "ci-passed", snap?.eventTime);
       }
-      // CI passed — evaluate merge strategy
-      actions.push(...this.evaluateMerge(item, snap));
+      // CI passed — evaluate merge strategy (pass eventTime for chained transitions)
+      actions.push(...this.evaluateMerge(item, snap, snap?.eventTime));
       return actions;
     }
 
     // No CI status change or unknown — stay in current state
     // But if we're already in ci-passed, re-evaluate merge
     if (item.state === "ci-passed") {
-      actions.push(...this.evaluateMerge(item, snap));
+      actions.push(...this.evaluateMerge(item, snap, snap?.eventTime));
     }
 
     return actions;
@@ -549,14 +566,14 @@ export class Orchestrator {
 
     // Check for external merge
     if (snap?.prState === "merged") {
-      this.transition(item, "merged");
+      this.transition(item, "merged", snap?.eventTime);
       actions.push({ type: "clean", itemId: item.id });
       return actions;
     }
 
     // If review approved and CI still passes, evaluate merge
     if (snap?.reviewDecision === "APPROVED" && snap?.ciStatus === "pass") {
-      actions.push(...this.evaluateMerge(item, snap));
+      actions.push(...this.evaluateMerge(item, snap, snap?.eventTime));
     }
 
     return actions;
@@ -570,17 +587,18 @@ export class Orchestrator {
     const actions: Action[] = [];
 
     if (snap?.prState === "merged") {
-      this.transition(item, "merged");
+      this.transition(item, "merged", snap?.eventTime);
       actions.push({ type: "clean", itemId: item.id });
     }
 
     return actions;
   }
 
-  /** Evaluate whether to merge based on merge strategy. */
+  /** Evaluate whether to merge based on merge strategy. Carries eventTime through chained transitions. */
   private evaluateMerge(
     item: OrchestratorItem,
     snap: ItemSnapshot | undefined,
+    eventTime?: string,
   ): Action[] {
     const actions: Action[] = [];
 
@@ -589,12 +607,12 @@ export class Orchestrator {
         // Guard: never auto-merge when a reviewer has explicitly requested changes
         if (snap?.reviewDecision === "CHANGES_REQUESTED") {
           if (item.state !== "review-pending") {
-            this.transition(item, "review-pending");
+            this.transition(item, "review-pending", eventTime);
           }
           break;
         }
         // Merge as soon as CI passes
-        this.transition(item, "merging");
+        this.transition(item, "merging", eventTime);
         actions.push({
           type: "merge",
           itemId: item.id,
@@ -605,7 +623,7 @@ export class Orchestrator {
       case "approved":
         // Need review approval before merging
         if (snap?.reviewDecision === "APPROVED") {
-          this.transition(item, "merging");
+          this.transition(item, "merging", eventTime);
           actions.push({
             type: "merge",
             itemId: item.id,
@@ -613,14 +631,14 @@ export class Orchestrator {
           });
         } else if (item.state !== "review-pending") {
           // Move to review-pending to wait for approval
-          this.transition(item, "review-pending");
+          this.transition(item, "review-pending", eventTime);
         }
         break;
 
       case "ask":
         // Never auto-merge — just move to review-pending
         if (item.state !== "review-pending") {
-          this.transition(item, "review-pending");
+          this.transition(item, "review-pending", eventTime);
         }
         break;
     }
@@ -727,6 +745,7 @@ export class Orchestrator {
       `**[Orchestrator]** Auto-merged PR #${prNum} for ${item.id}.`,
     );
 
+    // Merge was initiated by us, so eventTime is now
     this.transition(item, "merged");
 
     // Pull latest main

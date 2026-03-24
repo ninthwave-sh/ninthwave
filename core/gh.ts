@@ -59,17 +59,17 @@ export function prView(
   }
 }
 
-/** Get CI check status for a PR. */
+/** Get CI check status for a PR. Includes completedAt for detection latency measurement. */
 export function prChecks(
   repoRoot: string,
   prNumber: number,
-): { state: string; name: string; url: string }[] {
+): { state: string; name: string; url: string; completedAt?: string }[] {
   const result = ghInRepo(repoRoot, [
     "pr",
     "checks",
     String(prNumber),
     "--json",
-    "state,name,detailsUrl",
+    "state,name,detailsUrl,completedAt",
   ]);
   if (result.exitCode !== 0 || !result.stdout) return [];
   try {
@@ -77,11 +77,13 @@ export function prChecks(
       state: string;
       name: string;
       detailsUrl: string;
+      completedAt?: string;
     }>;
     return raw.map((c) => ({
       state: c.state,
       name: c.name,
       url: c.detailsUrl,
+      completedAt: c.completedAt || undefined,
     }));
   } catch {
     return [];

@@ -78,13 +78,15 @@ export function checkPrStatus(id: string, repoRoot: string): string {
 
   const prNumber = openPrs[0]!.number;
 
-  // Check CI and review status
+  // Check CI and review status (include updatedAt for detection latency)
   const prData = prView(repoRoot, prNumber, [
     "reviewDecision",
     "mergeable",
+    "updatedAt",
   ]);
   const reviewDecision = (prData.reviewDecision as string) ?? "";
   const isMergeable = (prData.mergeable as string) ?? "";
+  const prUpdatedAt = (prData.updatedAt as string) ?? "";
 
   const checks = prChecks(repoRoot, prNumber);
   const nonSkipped = checks.filter((c) => c.state !== "SKIPPED");
@@ -112,10 +114,22 @@ export function checkPrStatus(id: string, repoRoot: string): string {
     status = "pending";
   }
 
-  // Include mergeable status as 4th field for open PRs so the orchestrator
-  // can distinguish CI failures caused by merge conflicts (needs rebase)
-  // from regular CI failures (needs code fix).
-  return `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}`;
+  // Determine event time: use the latest CI check completedAt for terminal CI states,
+  // fall back to PR updatedAt for other states.
+  let eventTime = prUpdatedAt;
+  if (ciStatus === "pass" || ciStatus === "fail") {
+    const completedTimes = nonSkipped
+      .map((c) => c.completedAt)
+      .filter((t): t is string => !!t)
+      .sort();
+    if (completedTimes.length > 0) {
+      // Use the latest completedAt — the check that determined the final CI status
+      eventTime = completedTimes[completedTimes.length - 1]!;
+    }
+  }
+
+  // Fields: ID, PR number, status, mergeable, eventTime (5th field for detection latency)
+  return `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`;
 }
 
 /**

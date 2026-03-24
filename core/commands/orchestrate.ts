@@ -149,6 +149,7 @@ export function buildSnapshot(
       const prNumStr = parts[1];
       const status = parts[2];
       const mergeableStr = parts[3]; // 4th field: MERGEABLE|CONFLICTING|UNKNOWN
+      const eventTimeStr = parts[4]; // 5th field: event timestamp for detection latency
 
       if (prNumStr) {
         snap.prNumber = parseInt(prNumStr, 10);
@@ -186,6 +187,11 @@ export function buildSnapshot(
         snap.isMergeable = true;
       } else if (mergeableStr === "CONFLICTING") {
         snap.isMergeable = false;
+      }
+
+      // Set eventTime from the 5th field for detection latency measurement
+      if (eventTimeStr) {
+        snap.eventTime = eventTimeStr;
       }
     }
 
@@ -856,6 +862,9 @@ export async function orchestrateLoop(
           itemId: item.id,
           from: prev,
           to: item.state,
+          eventTime: item.eventTime,
+          detectedTime: item.detectedTime,
+          detectionLatencyMs: item.detectionLatencyMs,
         });
 
         // Status sync: update external tracker labels on state transitions

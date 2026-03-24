@@ -3661,4 +3661,163 @@ describe("Orchestrator", () => {
       expect(mergeActions[0]!.itemId).toBe("C-1-1");
     });
   });
+
+  // ── Detection latency timestamps ──────────────────────────────────
+
+  describe("detection latency", () => {
+    it("records eventTime, detectedTime, and detectionLatencyMs on state transitions", () => {
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      const eventTime = new Date(Date.now() - 5000).toISOString(); // 5s ago
+      orch.processTransitions(
+        snapshotWith([
+          { id: "H-1-1", prNumber: 42, prState: "open", ciStatus: "pass", eventTime },
+        ]),
+      );
+
+      const item = orch.getItem("H-1-1")!;
+      expect(item.eventTime).toBe(eventTime);
+      expect(item.detectedTime).toBeDefined();
+      expect(typeof item.detectionLatencyMs).toBe("number");
+      expect(item.detectionLatencyMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it("calculates detectionLatencyMs correctly", () => {
+      // Use "approved" strategy so ci-passed doesn't immediately chain to merging
+      // without approval — item stays in review-pending with the eventTime carried through
+      orch = new Orchestrator({ mergeStrategy: "approved" });
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "ci-pending");
+
+      const eventTime = new Date(Date.now() - 3000).toISOString(); // 3s ago
+      orch.processTransitions(
+        snapshotWith([
+          { id: "H-1-1", prNumber: 10, prState: "open", ciStatus: "pass", eventTime },
+        ]),
+      );
+
+      const item = orch.getItem("H-1-1")!;
+      // ci-pending → ci-passed → review-pending; eventTime carried through chain
+      expect(item.state).toBe("review-pending");
+      // Latency should be at least 3000ms (the event was 3s ago)
+      expect(item.detectionLatencyMs).toBeGreaterThanOrEqual(2900);
+      // But not unreasonably large (allow some slack for test execution)
+      expect(item.detectionLatencyMs).toBeLessThan(10000);
+    });
+
+    it("falls back to detectedTime when eventTime is not available", () => {
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      // No eventTime in snapshot
+      orch.processTransitions(
+        snapshotWith([
+          { id: "H-1-1", prNumber: 42, prState: "open", ciStatus: "pending" },
+        ]),
+      );
+
+      const item = orch.getItem("H-1-1")!;
+      // When eventTime is missing, it falls back to detectedTime, so latency is 0
+      expect(item.eventTime).toBeDefined();
+      expect(item.detectedTime).toBeDefined();
+      expect(item.eventTime).toBe(item.detectedTime);
+      expect(item.detectionLatencyMs).toBe(0);
+    });
+
+    it("records latency on CI failure transitions", () => {
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "ci-pending");
+
+      const eventTime = new Date(Date.now() - 2000).toISOString();
+      orch.processTransitions(
+        snapshotWith([
+          { id: "H-1-1", prNumber: 10, prState: "open", ciStatus: "fail", eventTime },
+        ]),
+      );
+
+      const item = orch.getItem("H-1-1")!;
+      expect(item.state).toBe("ci-failed");
+      expect(item.eventTime).toBe(eventTime);
+      expect(item.detectionLatencyMs).toBeGreaterThanOrEqual(1900);
+    });
+
+    it("records latency on merged transitions", () => {
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "merging");
+
+      const eventTime = new Date(Date.now() - 1000).toISOString();
+      orch.processTransitions(
+        snapshotWith([
+          { id: "H-1-1", prNumber: 10, prState: "merged", eventTime },
+        ]),
+      );
+
+      const item = orch.getItem("H-1-1")!;
+      // merging → merged in this cycle (merged → done happens next cycle)
+      expect(item.state).toBe("merged");
+      expect(item.eventTime).toBe(eventTime);
+      expect(item.detectionLatencyMs).toBeGreaterThanOrEqual(900);
+    });
+
+    it("carries eventTime through CI pass to merged transition", () => {
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "ci-pending");
+
+      const eventTime = new Date(Date.now() - 2000).toISOString();
+      orch.processTransitions(
+        snapshotWith([
+          { id: "H-1-1", prNumber: 10, prState: "merged", eventTime },
+        ]),
+      );
+
+      // ci-pending → handlePrLifecycle detects merged → transition with eventTime
+      const item = orch.getItem("H-1-1")!;
+      expect(item.state).toBe("merged");
+      expect(item.eventTime).toBe(eventTime);
+      expect(item.detectionLatencyMs).toBeGreaterThanOrEqual(1900);
+    });
+
+    it("latency fields are optional and backward-compatible with existing items", () => {
+      orch.addItem(makeTodo("H-1-1"));
+      const item = orch.getItem("H-1-1")!;
+
+      // New items should not have latency fields set until a transition occurs
+      expect(item.eventTime).toBeUndefined();
+      expect(item.detectedTime).toBeUndefined();
+      expect(item.detectionLatencyMs).toBeUndefined();
+
+      // After a transition via setState (no eventTime), fields remain undefined
+      orch.setState("H-1-1", "ready");
+      const updated = orch.getItem("H-1-1")!;
+      // setState uses lastTransition but doesn't set latency fields
+      expect(updated.eventTime).toBeUndefined();
+    });
+
+    it("records latency through implementing → pr-open → ci-passed → merging chain", () => {
+      orch.addItem(makeTodo("H-1-1"));
+      orch.setState("H-1-1", "implementing");
+
+      const eventTime = new Date(Date.now() - 4000).toISOString();
+      orch.processTransitions(
+        snapshotWith([
+          {
+            id: "H-1-1",
+            prNumber: 42,
+            prState: "open",
+            ciStatus: "pass",
+            workerAlive: true,
+            eventTime,
+          },
+        ]),
+      );
+
+      const item = orch.getItem("H-1-1")!;
+      // Should have gone implementing → pr-open → ci-passed → merging (asap strategy)
+      // eventTime is carried through the entire chain
+      expect(item.state).toBe("merging");
+      expect(item.eventTime).toBe(eventTime);
+      expect(item.detectionLatencyMs).toBeGreaterThanOrEqual(3900);
+    });
+  });
 });
