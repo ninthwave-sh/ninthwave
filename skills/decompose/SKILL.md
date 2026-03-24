@@ -76,7 +76,15 @@ This skill decomposes a feature spec into work items sized for individual human-
    - "Needs:" -- what must be added/changed
    - "Patterns to follow:" -- existing code to model after
 
-3. Present the delta summary to the user.
+3. **Check decomposition templates.** Load templates from the `templates/` directory in the ninthwave bundle (resolve via `core/templates.ts`). Match the feature description against available templates using keyword scoring. If a template matches:
+   - Present it to the user as a suggested starting structure
+   - Show the template's typical breakdown and dependency graph
+   - Explain that the template is advisory — the actual decomposition can deviate based on codebase analysis
+   - AskUserQuestion: "Use this template as a starting point, modify it, or skip?"
+
+   Templates are **not prescriptive** — they improve consistency for common patterns while preserving flexibility for unique features. If no template matches (or the user skips), proceed with freeform decomposition.
+
+4. Present the delta summary to the user.
 
 ---
 
