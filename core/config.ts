@@ -5,9 +5,16 @@ import { join } from "path";
 import type { ProjectConfig } from "./types.ts";
 import { DEFAULT_LOC_EXTENSIONS } from "./types.ts";
 
+/** Keys recognised by ninthwave. Anything else triggers a warning. */
+export const KNOWN_CONFIG_KEYS = new Set([
+  "LOC_EXTENSIONS",
+  "webhook_url",
+]);
+
 /**
  * Load project config from .ninthwave/config (key=value format).
  * Only accepts KEY=VALUE lines; comments and blank lines are skipped.
+ * Warns on unrecognised keys so typos are caught early.
  */
 export function loadConfig(projectRoot: string): ProjectConfig {
   const config: ProjectConfig = {
@@ -30,6 +37,16 @@ export function loadConfig(projectRoot: string): ProjectConfig {
     value = value.replace(/^["']/, "").replace(/["']$/, "");
 
     config[key] = value;
+  }
+
+  // Warn on unrecognised keys (typos, removed options, etc.)
+  for (const k of Object.keys(config)) {
+    if (k === "locExtensions") continue; // internal default, not user-supplied
+    if (!KNOWN_CONFIG_KEYS.has(k)) {
+      console.warn(
+        `[ninthwave] warning: unknown config key "${k}" in ${configPath}`,
+      );
+    }
   }
 
   // Apply LOC_EXTENSIONS if set in config
