@@ -180,7 +180,33 @@ gh pr merge --squash --auto
 cmux set-status "todo-YOUR_TODO_ID" "PR Created" --icon "checkmark.circle.fill" --color "#22c55e"
 ```
 
-## 9. Idle -- Wait for Orchestrator Daemon
+## 9. Dogfooding Friction Log (ninthwave projects only)
+
+If the project being worked on is the ninthwave repo itself (dogfooding mode), log any friction encountered during this TODO's implementation. **Skip this step entirely for non-ninthwave projects.**
+
+**Detection:** Check if `skills/work/SKILL.md` exists in the project root. If it does, this is a ninthwave project and friction logging is active.
+
+```bash
+# Only run if dogfooding (skills/work/SKILL.md exists in project root)
+if [ -f "${PROJECT_ROOT}/skills/work/SKILL.md" ]; then
+  mkdir -p "${PROJECT_ROOT}/.ninthwave"
+  cat >> "${PROJECT_ROOT}/.ninthwave/friction.log" <<ENTRY
+---
+todo: YOUR_TODO_ID
+date: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+severity: low|medium|high|none
+description: <brief description of friction encountered>
+ENTRY
+fi
+```
+
+When logging friction:
+- **Severity levels:** `none` (no friction observed), `low` (minor annoyance), `medium` (slowed you down noticeably), `high` (blocked or required workaround)
+- If you encountered no friction, append an entry with severity `none` and description "No friction observed"
+- Be specific: mention the tool, command, or workflow step that caused friction
+- One entry per TODO — keep descriptions concise (1-2 sentences)
+
+## 10. Idle -- Wait for Orchestrator Daemon
 
 After creating the PR, your implementation work is done. The **orchestrator daemon** (`ninthwave orchestrate`) is a deterministic TypeScript process -- not an LLM -- that handles the entire post-PR lifecycle automatically:
 
