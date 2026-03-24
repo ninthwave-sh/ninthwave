@@ -235,9 +235,11 @@ export function getMux(deps?: DetectMuxDeps): Multiplexer {
 export function waitForReady(
   mux: Multiplexer,
   ref: string,
-  sleep: (ms: number) => void = (ms) => Bun.sleepSync(ms),
-  maxAttempts: number = 15,
-  pollMs: number = 2000,
+  sleep: (ms: number) => void = process.env.NODE_ENV === "test"
+    ? () => {}
+    : (ms) => Bun.sleepSync(ms),
+  maxAttempts: number = 30,
+  pollMs: number = 500,
 ): boolean {
   let lastScreen = "";
 

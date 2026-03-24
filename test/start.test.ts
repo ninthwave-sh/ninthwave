@@ -28,6 +28,7 @@ import * as cmux from "../core/cmux.ts";
 import { detectAiTool, cmdStart, launchSingleItem } from "../core/commands/start.ts";
 import { parseTodos } from "../core/parser.ts";
 
+
 function captureOutput(fn: () => void): string {
   const lines: string[] = [];
   const origLog = console.log;
