@@ -9,6 +9,7 @@ import { join, dirname, basename } from "path";
 import { writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { parseTodos } from "../core/parser.ts";
 import {
+  resolveRepo,
   writeCrossRepoIndex,
   removeCrossRepoIndex,
   getWorktreeInfo,
@@ -190,7 +191,70 @@ describe("cross-repo", () => {
     });
   });
 
-  // Group 5: Hub fallback behavior
+  // Group 5: resolveRepo error handling
+  describe("resolveRepo error handling", () => {
+    it("returns projectRoot for empty alias", () => {
+      const repo = setupTempRepo();
+      expect(resolveRepo("", repo)).toBe(repo);
+    });
+
+    it("returns projectRoot for 'self' alias", () => {
+      const repo = setupTempRepo();
+      expect(resolveRepo("self", repo)).toBe(repo);
+    });
+
+    it("returns projectRoot for 'hub' alias", () => {
+      const repo = setupTempRepo();
+      expect(resolveRepo("hub", repo)).toBe(repo);
+    });
+
+    it("resolves sibling repo via convention", () => {
+      const hub = setupTempRepoPair();
+      const parent = dirname(hub);
+      expect(resolveRepo("target-repo-a", hub)).toBe(
+        join(parent, "target-repo-a"),
+      );
+    });
+
+    it("throws on unresolvable alias (no sibling, no repos.conf)", () => {
+      const repo = setupTempRepo();
+      expect(() => resolveRepo("nonexistent-repo", repo)).toThrow(
+        /not found/i,
+      );
+    });
+
+    it("throws when repos.conf maps alias to non-git directory", () => {
+      const repo = setupTempRepo();
+      const confDir = join(repo, ".ninthwave");
+      mkdirSync(confDir, { recursive: true });
+      // Create a directory that is NOT a git repo
+      const fakePath = join(dirname(repo), "not-a-repo");
+      mkdirSync(fakePath, { recursive: true });
+      writeFileSync(
+        join(confDir, "repos.conf"),
+        `my-alias = ${fakePath}\n`,
+      );
+      expect(() => resolveRepo("my-alias", repo)).toThrow(
+        /not a git repository/i,
+      );
+    });
+
+    it("callers can catch the error and continue", () => {
+      const repo = setupTempRepo();
+      let caught = false;
+      try {
+        resolveRepo("nonexistent-repo", repo);
+      } catch {
+        caught = true;
+      }
+      expect(caught).toBe(true);
+      // Caller can continue after catching
+      const result = resolveRepo("", repo);
+      expect(result).toBe(repo);
+    });
+  });
+
+  // Group 6: Hub fallback behavior
   describe("hub fallback", () => {
     it("items without Repo field default to empty alias", () => {
       const repo = setupTempRepo();

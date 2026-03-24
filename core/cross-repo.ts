@@ -8,7 +8,7 @@ import {
 } from "fs";
 import { join, dirname, basename } from "path";
 import { acquireLock, releaseLock } from "./lock.ts";
-import { die, info, BOLD, CYAN, GREEN, RED, RESET } from "./output.ts";
+import { info, BOLD, CYAN, GREEN, RED, RESET } from "./output.ts";
 import { run } from "./shell.ts";
 import type { WorktreeInfo } from "./types.ts";
 
@@ -42,7 +42,7 @@ export function resolveRepo(
         if (isGitRepo(value)) {
           return value;
         }
-        die(
+        throw new Error(
           `repos.conf maps '${alias}' to '${value}' but it is not a git repository`,
         );
       }
@@ -57,7 +57,7 @@ export function resolveRepo(
   }
 
   // 3. Not found
-  die(
+  throw new Error(
     `Repo '${alias}' not found. Checked repos.conf and sibling directory '${siblingPath}'. Add it to .ninthwave/repos.conf or clone it alongside this repo.`,
   );
 }

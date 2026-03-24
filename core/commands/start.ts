@@ -177,7 +177,13 @@ export function launchSingleItem(
   aiTool: string,
   mux: Multiplexer = getMux(),
 ): LaunchResult | null {
-  const targetRepo = resolveRepo(item.repoAlias, projectRoot);
+  let targetRepo: string;
+  try {
+    targetRepo = resolveRepo(item.repoAlias, projectRoot);
+  } catch (err) {
+    warn(`Skipping ${item.id}: ${(err as Error).message}`);
+    return null;
+  }
   const branchName = `todo/${item.id}`;
 
   // Ensure worktree directory exists
@@ -345,8 +351,12 @@ export function cmdStart(
   const resolvedRepos = new Map<string, string>();
   for (const id of ids) {
     const item = itemMap.get(id)!;
-    const targetRepo = resolveRepo(item.repoAlias, projectRoot);
-    resolvedRepos.set(id, targetRepo);
+    try {
+      const targetRepo = resolveRepo(item.repoAlias, projectRoot);
+      resolvedRepos.set(id, targetRepo);
+    } catch (err) {
+      die(`Failed to resolve repo for ${id}: ${(err as Error).message}`);
+    }
   }
 
   // Check for file-level conflicts between selected items (warn only)
