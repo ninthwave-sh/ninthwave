@@ -9,19 +9,6 @@
 
 
 
-### Feat: Port setup script to TypeScript CLI command (H-BREW-2)
-
-**Priority:** High
-**Source:** Brew distribution pivot
-**Depends on:** H-BREW-1
-
-Create `core/commands/setup.ts` that replaces the bash `setup` script. Wire it as `ninthwave setup` in `cli.ts`. Two modes: `ninthwave setup` (project — seeds `.ninthwave/`, TODOS.md, skill symlinks, agent copies, .gitignore) and `ninthwave setup --global` (user — seeds `~/.claude/skills/` symlinks only). Uses `getBundleDir()` from `core/paths.ts` to resolve skill/agent source paths. Also add `ninthwave version` command that reads VERSION from bundle dir. Update `cli.ts` to support commands that don't need a project root (`setup`, `version`).
-
-Acceptance: `bun run core/cli.ts setup` in a git repo creates the same artifacts as the bash `setup` script. `bun run core/cli.ts setup --global` creates skill symlinks in `~/.claude/skills/`. `bun run core/cli.ts version` prints the version. Tests cover project setup, global setup, idempotency (running twice produces same result), and preserving existing config files.
-
-Key files: `core/commands/setup.ts` (new), `core/cli.ts`, `test/setup.test.ts` (new), `setup` (reference for porting)
-
----
 
 ### Feat: Add binary compilation and release pipeline (H-BREW-3)
 
@@ -81,6 +68,7 @@ Key files: `README.md`, `CONTRIBUTING.md`, `setup` (delete), `remote-install.sh`
 ---
 
 ## Event-Driven Orchestrator (orchestrator pivot, 2026-03-23)
+
 
 
 
@@ -158,6 +146,7 @@ Key files: `agents/todo-worker.md`
 ---
 
 ## Vision (recurring, 2026-03-23)
+
 
 
 
