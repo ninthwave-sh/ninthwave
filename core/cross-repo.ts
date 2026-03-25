@@ -122,23 +122,43 @@ export function removeCrossRepoIndex(
 }
 
 /**
+ * Parse the cross-repo index file and return all entries.
+ * Returns an empty array if the file doesn't exist or is malformed.
+ */
+export function listCrossRepoEntries(indexPath: string): WorktreeInfo[] {
+  if (!existsSync(indexPath)) return [];
+  try {
+    const content = readFileSync(indexPath, "utf-8");
+    const entries: WorktreeInfo[] = [];
+    for (const line of content.split("\n")) {
+      if (!line.trim()) continue;
+      const [id, repoRoot, worktreePath] = line.split("\t");
+      if (id && repoRoot && worktreePath) {
+        entries.push({ todoId: id, repoRoot, worktreePath });
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Get worktree info for a TODO ID.
  * Checks cross-repo index first, falls back to hub worktree dir.
+ * Accepts optional pre-parsed entries to avoid repeated file I/O.
  */
 export function getWorktreeInfo(
   todoId: string,
   indexPath: string,
   worktreeDir: string,
+  cachedEntries?: WorktreeInfo[],
 ): WorktreeInfo | null {
-  // Check cross-repo index first
-  if (existsSync(indexPath)) {
-    const content = readFileSync(indexPath, "utf-8");
-    for (const line of content.split("\n")) {
-      if (!line.trim()) continue;
-      const [id, repoRoot, worktreePath] = line.split("\t");
-      if (id === todoId && repoRoot && worktreePath) {
-        return { todoId: id, repoRoot, worktreePath };
-      }
+  // Check cross-repo index first (use cached entries if provided)
+  const entries = cachedEntries ?? listCrossRepoEntries(indexPath);
+  for (const entry of entries) {
+    if (entry.todoId === todoId) {
+      return entry;
     }
   }
 

@@ -640,6 +640,40 @@ describe("CI_FAILURE_STATES", () => {
   });
 });
 
+describe("cmdWatchReady cross-repo", () => {
+  beforeEach(() => vi.clearAllMocks());
+  afterEach(() => cleanupTempRepos());
+
+  it("checks cross-repo worktrees from the cross-repo index", () => {
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    // Write cross-repo index with an entry pointing to a different repo
+    const indexPath = join(worktreeDir, ".cross-repo-index");
+    writeFileSync(indexPath, "X-CR-1\t/target-repo\t/target-repo/.worktrees/todo-X-CR-1\n");
+
+    // Mock prList to return no-pr for this cross-repo item
+    (gh.prList as Mock).mockReturnValue([]);
+
+    const result = cmdWatchReady(worktreeDir, repo);
+    expect(result).toContain("X-CR-1");
+    expect(result).toContain("no-pr");
+  });
+
+  it("handles missing cross-repo index gracefully", () => {
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+    // No .cross-repo-index file — should not crash
+
+    (gh.prList as Mock).mockReturnValue([]);
+
+    const result = cmdWatchReady(worktreeDir, repo);
+    expect(result).toBe("");
+  });
+});
+
 describe("getWatchReadyState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -677,6 +711,30 @@ describe("getWatchReadyState", () => {
     const result = getWatchReadyState(worktreeDir, repo);
     expect(result).toContain("A-1-1");
     expect(result).not.toContain("other-dir");
+  });
+});
+
+describe("getWatchReadyState cross-repo", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (gh.isAvailable as Mock).mockReturnValue(true);
+  });
+  afterEach(() => cleanupTempRepos());
+
+  it("includes cross-repo worktrees in state output", () => {
+    const repo = setupTempRepo();
+    const worktreeDir = join(repo, ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    // Write cross-repo index
+    const indexPath = join(worktreeDir, ".cross-repo-index");
+    writeFileSync(indexPath, "X-CR-2\t/other-repo\t/other-repo/.worktrees/todo-X-CR-2\n");
+
+    (gh.prList as Mock).mockReturnValue([]);
+
+    const result = getWatchReadyState(worktreeDir, repo);
+    expect(result).toContain("X-CR-2");
+    expect(result).toContain("no-pr");
   });
 });
 

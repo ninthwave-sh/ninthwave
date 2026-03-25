@@ -1118,6 +1118,111 @@ describe("reconstructState", () => {
   });
 });
 
+describe("reconstructState cross-repo", () => {
+  it("uses cross-repo index to find worktree paths", () => {
+    const orch = new Orchestrator();
+    const todo = makeTodo("XR-1-1");
+    todo.repoAlias = "target";
+    orch.addItem(todo);
+
+    const tmpDir = join(require("os").tmpdir(), `nw-xr-reconstruct-${Date.now()}`);
+    const wtDir = join(tmpDir, ".worktrees");
+    const targetWtPath = join("/tmp/target-repo", ".worktrees", "todo-XR-1-1");
+    require("fs").mkdirSync(wtDir, { recursive: true });
+
+    // Write cross-repo index pointing to target repo worktree
+    const indexPath = join(wtDir, ".cross-repo-index");
+    require("fs").writeFileSync(indexPath, `XR-1-1\t/tmp/target-repo\t${targetWtPath}\n`);
+
+    // But the worktree doesn't actually exist on disk, so item stays queued
+    const noopCheckPr = () => null;
+    reconstructState(orch, tmpDir, wtDir, undefined, noopCheckPr);
+
+    // Item should still be queued (worktree path doesn't exist)
+    expect(orch.getItem("XR-1-1")!.state).toBe("queued");
+
+    require("fs").rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("uses resolvedRepoRoot for PR query when cross-repo", () => {
+    const orch = new Orchestrator();
+    const todo = makeTodo("XR-2-1");
+    orch.addItem(todo);
+    orch.getItem("XR-2-1")!.resolvedRepoRoot = "/target-repo";
+
+    const tmpDir = join(require("os").tmpdir(), `nw-xr-reconstruct2-${Date.now()}`);
+    const wtDir = join(tmpDir, ".worktrees");
+    const wtPath = join(wtDir, "todo-XR-2-1");
+    require("fs").mkdirSync(wtPath, { recursive: true });
+
+    // Track which repo root is passed to checkPr
+    let checkPrRepo: string | undefined;
+    const trackingCheckPr = (id: string, repoRoot: string) => {
+      checkPrRepo = repoRoot;
+      return null;
+    };
+
+    reconstructState(orch, tmpDir, wtDir, undefined, trackingCheckPr);
+
+    // Should use resolvedRepoRoot for PR query
+    expect(checkPrRepo).toBe("/target-repo");
+
+    require("fs").rmSync(tmpDir, { recursive: true, force: true });
+  });
+});
+
+describe("buildSnapshot cross-repo", () => {
+  it("uses resolvedRepoRoot for PR checks", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("BS-1-1"));
+    orch.setState("BS-1-1", "implementing");
+    orch.getItem("BS-1-1")!.resolvedRepoRoot = "/target-repo";
+
+    let checkedRepo: string | undefined;
+    const trackingCheckPr = (id: string, repoRoot: string) => {
+      checkedRepo = repoRoot;
+      return null;
+    };
+
+    const fakeMux = {
+      isAvailable: () => false,
+      launchWorkspace: () => null,
+      sendMessage: () => true,
+      readScreen: () => "",
+      listWorkspaces: () => "",
+      closeWorkspace: () => true,
+    };
+
+    buildSnapshot(orch, "/hub-root", "/hub-root/.worktrees", fakeMux, () => null, trackingCheckPr);
+    expect(checkedRepo).toBe("/target-repo");
+  });
+
+  it("uses resolvedRepoRoot for commit time checks", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("BS-2-1"));
+    orch.setState("BS-2-1", "implementing");
+    orch.getItem("BS-2-1")!.resolvedRepoRoot = "/target-repo";
+
+    let commitTimeRepo: string | undefined;
+    const trackingCommitTime = (repoRoot: string, _branch: string) => {
+      commitTimeRepo = repoRoot;
+      return null;
+    };
+
+    const fakeMux = {
+      isAvailable: () => false,
+      launchWorkspace: () => null,
+      sendMessage: () => true,
+      readScreen: () => "",
+      listWorkspaces: () => "",
+      closeWorkspace: () => true,
+    };
+
+    buildSnapshot(orch, "/hub-root", "/hub-root/.worktrees", fakeMux, trackingCommitTime, () => null);
+    expect(commitTimeRepo).toBe("/target-repo");
+  });
+});
+
 describe("serializeOrchestratorState includes ciFailCount", () => {
   it("serializes ciFailCount in daemon state items", () => {
     const { serializeOrchestratorState } = require("../core/daemon.ts");

@@ -536,6 +536,81 @@ describe("reconcile", () => {
   });
 });
 
+// --- Cross-repo reconcile tests ---
+
+describe("reconcile cross-repo", () => {
+  it("passes worktreeDir to getMergedTodoIds", () => {
+    const { todosDir, worktreeDir, projectRoot } = setupTodosDir();
+    let receivedWorktreeDir: string | undefined;
+
+    const deps = makeDeps({
+      getMergedTodoIds: (_root, wtDir) => {
+        receivedWorktreeDir = wtDir;
+        return [];
+      },
+    });
+
+    reconcile(todosDir, worktreeDir, projectRoot, deps);
+    expect(receivedWorktreeDir).toBe(worktreeDir);
+  });
+
+  it("cleans cross-repo worktrees for merged items", () => {
+    const { todosDir, worktreeDir, projectRoot } = setupTodosDir();
+    const cleaned: Array<{ id: string; wtDir: string; root: string }> = [];
+
+    // Write a cross-repo index entry
+    const indexPath = join(worktreeDir, ".cross-repo-index");
+    writeFileSync(indexPath, "M-CI-1\t/target-repo\t/target-repo/.worktrees/todo-M-CI-1\n");
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => ["M-CI-1"],
+      cleanWorktree: (id, wtDir, root) => {
+        cleaned.push({ id, wtDir, root });
+        return true;
+      },
+    });
+
+    captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
+    // Should clean both hub-local and cross-repo worktree
+    const crossRepoClean = cleaned.find(
+      (c) => c.root === "/target-repo",
+    );
+    expect(crossRepoClean).toBeDefined();
+    expect(crossRepoClean!.wtDir).toBe("/target-repo/.worktrees");
+  });
+
+  it("uses target repo root for cross-repo stale worktree checks", () => {
+    const { todosDir, worktreeDir, projectRoot } = setupTodosDir();
+    const commitChecks: Array<{ id: string; root: string }> = [];
+    const prChecks: Array<{ id: string; root: string }> = [];
+
+    // Cross-repo index with an item that has a matching todo file
+    const indexPath = join(worktreeDir, ".cross-repo-index");
+    writeFileSync(indexPath, "M-CI-1\t/target-repo\t/target-repo/.worktrees/todo-M-CI-1\n");
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => [],
+      worktreeHasCommits: (id, _wtDir, root) => {
+        commitChecks.push({ id, root });
+        return false;
+      },
+      branchHasOpenPR: (id, root) => {
+        prChecks.push({ id, root });
+        return false;
+      },
+      cleanWorktree: () => true,
+    });
+
+    captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
+
+    // Cross-repo stale checks should use target repo root, not hub root
+    const crossRepoCommitCheck = commitChecks.find((c) => c.id === "M-CI-1" && c.root === "/target-repo");
+    const crossRepoPrCheck = prChecks.find((c) => c.id === "M-CI-1" && c.root === "/target-repo");
+    expect(crossRepoCommitCheck).toBeDefined();
+    expect(crossRepoPrCheck).toBeDefined();
+  });
+});
+
 // --- closeWorkspacesForIds tests ---
 
 function mockMux(overrides: Partial<Multiplexer> = {}): Multiplexer {

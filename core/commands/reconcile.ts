@@ -6,6 +6,7 @@ import { info, warn, GREEN, RESET } from "../output.ts";
 import { run } from "../shell.ts";
 import { commitCount } from "../git.ts";
 import { prList } from "../gh.ts";
+import { listCrossRepoEntries } from "../cross-repo.ts";
 import { cmdMarkDone } from "./mark-done.ts";
 import { cleanSingleWorktree, closeWorkspacesForIds } from "./clean.ts";
 import { getMux } from "../mux.ts";
@@ -17,8 +18,8 @@ export interface ReconcileDeps {
   /** Pull latest main with rebase. Returns { ok, conflict, error }. */
   pullRebase(projectRoot: string): { ok: boolean; conflict: boolean; error?: string };
 
-  /** Get IDs of merged todo/* PRs from GitHub. */
-  getMergedTodoIds(projectRoot: string): string[];
+  /** Get IDs of merged todo/* PRs from GitHub. Queries hub repo and any cross-repo targets. */
+  getMergedTodoIds(projectRoot: string, worktreeDir: string): string[];
 
   /** Get IDs of open todo items from the todos directory. */
   getOpenTodoIds(todosDir: string): string[];
@@ -65,14 +66,13 @@ function defaultPullRebase(projectRoot: string): { ok: boolean; conflict: boolea
   return { ok: false, conflict: false, error: result.stderr };
 }
 
-function defaultGetMergedTodoIds(projectRoot: string): string[] {
-  // List all merged PRs with todo/* head branches
+function getMergedTodoIdsFromRepo(repoRoot: string): string[] {
   const result = run("gh", [
     "pr", "list",
     "--state", "merged",
     "--json", "headRefName",
     "--limit", "200",
-  ], { cwd: projectRoot });
+  ], { cwd: repoRoot });
 
   if (result.exitCode !== 0 || !result.stdout) return [];
 
@@ -88,6 +88,32 @@ function defaultGetMergedTodoIds(projectRoot: string): string[] {
   } catch {
     return [];
   }
+}
+
+function defaultGetMergedTodoIds(projectRoot: string, worktreeDir: string): string[] {
+  // Query hub repo for merged todo/* PRs
+  const ids = new Set(getMergedTodoIdsFromRepo(projectRoot));
+
+  // Also query cross-repo targets discovered from the cross-repo index
+  const indexPath = join(worktreeDir, ".cross-repo-index");
+  const entries = listCrossRepoEntries(indexPath);
+  const targetRepos = new Set<string>();
+  for (const entry of entries) {
+    if (entry.repoRoot !== projectRoot) {
+      targetRepos.add(entry.repoRoot);
+    }
+  }
+  for (const repo of targetRepos) {
+    try {
+      for (const id of getMergedTodoIdsFromRepo(repo)) {
+        ids.add(id);
+      }
+    } catch (e) {
+      warn(`Failed to query merged PRs in ${repo}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  return Array.from(ids);
 }
 
 function defaultGetOpenTodoIds(todosDir: string): string[] {
@@ -172,7 +198,7 @@ function defaultBranchHasOpenPR(id: string, projectRoot: string): boolean {
 export function defaultDeps(): ReconcileDeps {
   return {
     pullRebase: defaultPullRebase,
-    getMergedTodoIds: defaultGetMergedTodoIds,
+    getMergedTodoIds: (projectRoot, worktreeDir) => defaultGetMergedTodoIds(projectRoot, worktreeDir),
     getOpenTodoIds: defaultGetOpenTodoIds,
     markDone: defaultMarkDone,
     getWorktreeIds: defaultGetWorktreeIds,
@@ -213,9 +239,9 @@ export function reconcile(
     return;
   }
 
-  // Step 2: Get merged todo IDs from GitHub
+  // Step 2: Get merged todo IDs from GitHub (hub + cross-repo targets)
   info("Querying GitHub for merged todo/* PRs...");
-  const mergedIds = deps.getMergedTodoIds(projectRoot);
+  const mergedIds = deps.getMergedTodoIds(projectRoot, worktreeDir);
   if (mergedIds.length === 0) {
     info("No merged todo/* PRs found.");
   }
@@ -245,6 +271,22 @@ export function reconcile(
     }
   }
 
+  // Also clean cross-repo worktrees for done items
+  const crossRepoIndex = join(worktreeDir, ".cross-repo-index");
+  const crossRepoEntries = listCrossRepoEntries(crossRepoIndex);
+  const crossRepoMap = new Map(crossRepoEntries.map((e) => [e.todoId, e]));
+  const crossRepoCleaned = new Set<string>();
+
+  for (const entry of crossRepoEntries) {
+    if (doneIds.has(entry.todoId) && !crossRepoCleaned.has(entry.todoId)) {
+      const targetWtDir = join(entry.repoRoot, ".worktrees");
+      if (deps.cleanWorktree(entry.todoId, targetWtDir, entry.repoRoot)) {
+        cleanedCount++;
+        crossRepoCleaned.add(entry.todoId);
+      }
+    }
+  }
+
   if (cleanedCount > 0) {
     info(`Cleaned ${cleanedCount} stale worktree(s).`);
   }
@@ -264,6 +306,17 @@ export function reconcile(
     if (!doneIds.has(wtId) && !refreshedOpenIds.has(wtId)) {
       if (deps.cleanWorktree(wtId, worktreeDir, projectRoot)) {
         orphanCount++;
+      }
+    }
+  }
+  // Also clean orphaned cross-repo worktrees
+  for (const entry of crossRepoEntries) {
+    if (crossRepoCleaned.has(entry.todoId)) continue;
+    if (!doneIds.has(entry.todoId) && !refreshedOpenIds.has(entry.todoId)) {
+      const targetWtDir = join(entry.repoRoot, ".worktrees");
+      if (deps.cleanWorktree(entry.todoId, targetWtDir, entry.repoRoot)) {
+        orphanCount++;
+        crossRepoCleaned.add(entry.todoId);
       }
     }
   }
@@ -288,6 +341,21 @@ export function reconcile(
     info(`Cleaning stale worktree for ${wtId} (zero commits, no open PR)`);
     if (deps.cleanWorktree(wtId, worktreeDir, projectRoot)) {
       staleCount++;
+    }
+  }
+  // Also check cross-repo worktrees for staleness
+  for (const entry of crossRepoEntries) {
+    if (crossRepoCleaned.has(entry.todoId)) continue;
+    if (doneIds.has(entry.todoId)) continue;
+    if (!refreshedOpenIds.has(entry.todoId)) continue;
+    const targetWtDir = join(entry.repoRoot, ".worktrees");
+    if (deps.worktreeHasCommits(entry.todoId, targetWtDir, entry.repoRoot)) continue;
+    if (deps.branchHasOpenPR(entry.todoId, entry.repoRoot)) continue;
+
+    info(`Cleaning stale cross-repo worktree for ${entry.todoId} (zero commits, no open PR)`);
+    if (deps.cleanWorktree(entry.todoId, targetWtDir, entry.repoRoot)) {
+      staleCount++;
+      crossRepoCleaned.add(entry.todoId);
     }
   }
   if (staleCount > 0) {
