@@ -69,20 +69,20 @@ export function prChecks(
     "checks",
     String(prNumber),
     "--json",
-    "state,name,detailsUrl,completedAt",
+    "state,name,link,completedAt",
   ]);
   if (result.exitCode !== 0 || !result.stdout) return [];
   try {
     const raw = JSON.parse(result.stdout) as Array<{
       state: string;
       name: string;
-      detailsUrl: string;
+      link: string;
       completedAt?: string;
     }>;
     return raw.map((c) => ({
       state: c.state,
       name: c.name,
-      url: c.detailsUrl,
+      url: c.link,
       completedAt: c.completedAt || undefined,
     }));
   } catch {
