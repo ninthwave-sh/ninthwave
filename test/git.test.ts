@@ -387,6 +387,55 @@ describe("git.ts error handling", () => {
     });
   });
 
+  // ── deleteRemoteBranch() — mocked elsewhere, tested via run() ────────
+  // deleteRemoteBranch does: run("git", ["-C", repoRoot, "push", "origin", "--delete", branch])
+  // It suppresses "remote ref does not exist" errors (branch already deleted,
+  // e.g. by GitHub's auto-delete head branches setting) and throws for other
+  // failures (auth errors, network issues, etc.).
+
+  describe("deleteRemoteBranch() suppresses already-deleted branches (via run)", () => {
+    it("succeeds (exit 0) when branch exists on remote", () => {
+      const repo = setupTempRepo();
+      initWithCommit(repo);
+      const bare = `${repo}-bare`;
+      spawnSync("git", ["clone", "--bare", repo, bare], { stdio: "pipe" });
+      gitSetup(repo, "remote", "add", "origin", bare);
+      gitSetup(repo, "checkout", "-b", "test-branch");
+      writeFileSync(`${repo}/test.txt`, "test");
+      gitSetup(repo, "add", ".");
+      gitSetup(repo, "commit", "-m", "test commit", "--quiet");
+      gitSetup(repo, "push", "origin", "test-branch");
+
+      // deleteRemoteBranch: exit 0 → return (no throw)
+      const result = run("git", ["-C", repo, "push", "origin", "--delete", "test-branch"]);
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("stderr contains 'remote ref does not exist' for already-deleted branch", () => {
+      const repo = setupTempRepo();
+      initWithCommit(repo);
+      const bare = `${repo}-bare`;
+      spawnSync("git", ["clone", "--bare", repo, bare], { stdio: "pipe" });
+      gitSetup(repo, "remote", "add", "origin", bare);
+
+      // Try deleting a branch that was never pushed (simulates auto-delete)
+      const result = run("git", ["-C", repo, "push", "origin", "--delete", "nonexistent-branch"]);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain("remote ref does not exist");
+      // deleteRemoteBranch suppresses this: returns without throwing
+    });
+
+    it("other errors (no remote) do NOT contain 'remote ref does not exist'", () => {
+      const repo = setupTempRepo();
+      initWithCommit(repo);
+      // No remote configured → different error
+      const result = run("git", ["-C", repo, "push", "origin", "--delete", "some-branch"]);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).not.toContain("remote ref does not exist");
+      // deleteRemoteBranch would throw for this case (genuine failure)
+    });
+  });
+
   // ── createWorktree() startPoint — mocked elsewhere, tested via run() ──
 
   describe("createWorktree() startPoint (via run)", () => {

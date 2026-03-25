@@ -92,9 +92,18 @@ export function deleteBranch(repoRoot: string, branch: string): void {
   git(repoRoot, ["branch", "-D", branch]);
 }
 
-/** Delete a remote branch. */
+/** Delete a remote branch. Treats "remote ref does not exist" as success
+ *  (the branch was already deleted, e.g. by GitHub's auto-delete setting). */
 export function deleteRemoteBranch(repoRoot: string, branch: string): void {
-  git(repoRoot, ["push", "origin", "--delete", branch]);
+  const result = run("git", ["-C", repoRoot, "push", "origin", "--delete", branch]);
+  if (result.exitCode === 0) return;
+
+  // GitHub auto-delete head branches: branch is already gone
+  if (result.stderr.includes("remote ref does not exist")) return;
+
+  throw new Error(
+    `git push failed (exit ${result.exitCode}): ${result.stderr}`,
+  );
 }
 
 /** Check if a branch has been merged into another branch. */
