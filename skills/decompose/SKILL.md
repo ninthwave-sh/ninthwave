@@ -144,7 +144,7 @@ Keep test plans concise — 2-4 bullet points per item.
 
 #### Dependency mapping
 
-Group TODOs into **batches**. Items within a batch can run in parallel. Batches run sequentially.
+Group TODOs into **batches**. Items within a batch can run in parallel. Batches run sequentially. **Stacking:** items with a single in-flight dependency can launch early — the orchestrator creates their worktree from the dependency's branch and rebases automatically after merge. This means dependency chains execute faster than strict batch ordering suggests, so prefer clear dependency declarations over artificially flattening items into a single batch.
 
 #### ID assignment
 

@@ -92,7 +92,7 @@ This skill interactively selects TODO items, then delegates all orchestration to
 6. **Dependency analysis:** Run `ninthwave batch-order <selected-IDs>` to check for dependency chains.
 
    - **If all items are in Batch 1** (no dependencies): proceed to conflict check.
-   - **If items span multiple batches**: present the batch plan. The orchestrator handles dependency ordering automatically — all selected items can be passed together.
+   - **If items span multiple batches**: present the batch plan. The orchestrator handles dependency ordering automatically — all selected items can be passed together. **Stacking note:** items with in-flight dependencies will automatically launch stacked on the dependency's branch (no need to wait for it to merge first). This means multi-batch dependency chains often execute faster than the batch plan suggests.
 
 7. Run `ninthwave conflicts <batch-IDs>` to check for file overlaps.
 
@@ -158,11 +158,13 @@ This skill interactively selects TODO items, then delegates all orchestration to
    ```
 
 2. Run the command. The orchestrator handles the full lifecycle automatically:
-   - **Queued** items wait for dependencies to clear
+   - **Queued** items wait for dependencies to clear — or **stack early** if a dependency is already in-flight (ci-passed, review-pending, or merging). Stacked items launch from the dependency's branch instead of main.
    - **Ready** items get launched as worker sessions (up to the WIP limit)
    - **Implementing** workers are monitored for completion
    - **CI-pending/CI-passed** PRs are tracked through CI
    - **Merging** PRs are squash-merged, worktrees cleaned, and items marked done
+   - **Post-merge restacking** — after a dependency merges, stacked dependents are automatically rebased onto main using squash-merge-safe `rebaseOnto()`
+   - **Stack navigation comments** — PRs in a dependency chain get comments showing the full stack with links, so reviewers can navigate up and down the chain
    - Adaptive polling adjusts check frequency based on current state
    - Crash recovery reconstructs state from disk and GitHub on restart
 

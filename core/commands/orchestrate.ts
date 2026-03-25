@@ -740,6 +740,7 @@ function handleActionExecution(
     action: action.type,
     itemId: action.itemId,
     prNumber: action.prNumber,
+    ...(action.type === "launch" && action.baseBranch ? { stacked: true, baseBranch: action.baseBranch } : {}),
   });
 
   const result = orch.executeAction(action, ctx, deps.actionDeps);
@@ -950,7 +951,7 @@ export async function orchestrateLoop(
     for (const item of orch.getAllItems()) {
       const prev = prevStates.get(item.id);
       if (prev && prev !== item.state) {
-        wrappedLog({
+        const transitionLog: Record<string, unknown> = {
           ts: new Date().toISOString(),
           level: "info",
           event: "transition",
@@ -960,7 +961,13 @@ export async function orchestrateLoop(
           eventTime: item.eventTime,
           detectedTime: item.detectedTime,
           detectionLatencyMs: item.detectionLatencyMs,
-        });
+        };
+        // Log stacking info when an item is promoted from queued → ready with a baseBranch
+        if (prev === "queued" && item.state === "ready" && item.baseBranch) {
+          transitionLog.stacked = true;
+          transitionLog.baseBranch = item.baseBranch;
+        }
+        wrappedLog(transitionLog);
 
         // Status sync: update external tracker labels on state transitions
         if (deps.statusSync) {

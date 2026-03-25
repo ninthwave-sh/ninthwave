@@ -41,9 +41,13 @@ v0.1.0 shipped March 2026. Five grind cycles (0-4) have shipped since then.
 - **File-per-todo migration** — replaced TODOS.md with `.ninthwave/todos/` directory, eliminating merge conflicts between parallel workers.
 - **Priority-ordered merge queue** — merge PRs in priority order to reduce conflict cascades (DET-5).
 
-**Shipped in grind cycle 4 (Phase A-quinquies, in progress):**
+**Shipped in grind cycle 4 (Phase A-quinquies):**
 - **CLI polish** — `--version`/`-v` and `--help`/`-h` flags (CLI-2).
 - **nono default sandboxing** — kernel-level worker isolation via Seatbelt (macOS) and Landlock (Linux), zero-config (SBX-1).
+- **Stacked branch execution** — items with in-flight dependencies launch early from the dependency's branch instead of waiting for merge. Squash-merge-safe `rebaseOnto()` restacks automatically post-merge. Stack navigation comments on PRs show the full dependency chain with links (STK-1 through STK-6).
+- **CI failure detection fix** — `gh pr checks` field name correction (`link` not `detailsUrl`) that was silently breaking all CI status detection, plus notification delivery hardening with retry on failure.
+- **Status UX improvements** — flicker-free status refresh, status pane reuse on daemon restart, full queue and WIP info display (STA-1 through STA-3).
+- **Observability backends** — Sentry and PagerDuty task backend adapters for external issue tracking (SNT-1, PGD-1).
 
 **Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 24 issues across 4 grind cycles, driving improvements from poll interval tuning to the file-per-todo migration. The L-VIS recurring item in `.ninthwave/todos/` keeps the self-improvement loop running.
 
