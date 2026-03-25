@@ -258,7 +258,7 @@ All orchestration features work identically — the only difference is the UI.
 
 ### CLI
 
-All commands work with both `nw` and `ninthwave` (identical behavior). In-project, `.ninthwave/work` also works:
+All commands work with both `nw` and `ninthwave` (identical behavior):
 
 | Command | Description |
 |---------|-------------|
@@ -307,7 +307,6 @@ Workers reference these skill names during execution. If available, they're used
 
 | Path | Purpose |
 |------|---------|
-| `.ninthwave/work` | CLI shim that calls the ninthwave binary |
 | `.ninthwave/config` | Project settings (LOC extensions, domain mappings) |
 | `.ninthwave/domains.conf` | Custom domain slug mappings |
 | `.claude/skills/*` | Symlinks to skills (for discovery) |

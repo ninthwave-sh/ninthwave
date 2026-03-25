@@ -10,7 +10,6 @@ import {
   readFileSync,
   symlinkSync,
   unlinkSync,
-  chmodSync,
 } from "fs";
 import { join, relative, dirname } from "path";
 import { getBundleDir } from "../paths.ts";
@@ -253,42 +252,6 @@ export function setupGlobal(bundleDir: string): void {
 }
 
 /**
- * Generate the content for the .ninthwave/work shim script.
- *
- * The shim auto-resolves the ninthwave binary without depending on .ninthwave/dir:
- * 1. If `ninthwave` is in PATH (e.g. brew install), use it directly.
- * 2. Dev-mode fallback: walk up from the shim's directory to find core/cli.ts.
- */
-export function generateShimContent(): string {
-  return `#!/usr/bin/env bash
-# ninthwave CLI shim — auto-resolves the ninthwave binary.
-# Priority: (1) nw or ninthwave in PATH, (2) dev-mode walk-up to find core/cli.ts
-
-# 1. If nw is in PATH, use it directly (preferred short alias)
-if command -v nw &>/dev/null; then
-  exec nw "$@"
-fi
-
-# 2. If ninthwave is in PATH, use it directly
-if command -v ninthwave &>/dev/null; then
-  exec ninthwave "$@"
-fi
-
-# 3. Dev mode: walk up from this script to find a ninthwave checkout
-dir="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)"
-while [ "$dir" != "/" ]; do
-  if [ -f "$dir/core/cli.ts" ]; then
-    exec bun run "$dir/core/cli.ts" "$@"
-  fi
-  dir="$(dirname "$dir")"
-done
-
-echo "Error: ninthwave not found in PATH and no checkout found in parent directories." >&2
-exit 1
-`;
-}
-
-/**
  * Project setup: seed .ninthwave/, .ninthwave/todos/, skill symlinks, agent copies, .gitignore.
  *
  * Optional `deps` parameter allows injecting stubs for testing.
@@ -315,20 +278,6 @@ export function setupProject(
   // --- .ninthwave/ config ---
   console.log("Config (.ninthwave/)...");
   mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
-
-  // Create the CLI shim (auto-resolves ninthwave binary — no .ninthwave/dir needed)
-  // Clean up old shim name
-  const oldShim = join(projectDir, ".ninthwave/nw");
-  if (existsSync(oldShim)) unlinkSync(oldShim);
-
-  // Clean up legacy .ninthwave/dir if present
-  const legacyDir = join(projectDir, ".ninthwave/dir");
-  if (existsSync(legacyDir)) unlinkSync(legacyDir);
-
-  const shimPath = join(projectDir, ".ninthwave/work");
-  writeFileSync(shimPath, generateShimContent());
-  chmodSync(shimPath, 0o755);
-  console.log("  .ninthwave/work");
 
   // Config file (preserve existing)
   const configPath = join(projectDir, ".ninthwave/config");

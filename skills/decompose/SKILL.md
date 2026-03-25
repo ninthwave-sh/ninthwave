@@ -37,7 +37,7 @@ This skill is highly interactive. You MUST use your interactive question tool to
 
 This skill decomposes a feature spec into work items sized for individual human-reviewable PRs. Each item is written as an individual file in `.ninthwave/todos/`, ready for processing via `/work`.
 
-**Prerequisites:** `.ninthwave/work` must exist and be executable. `.ninthwave/todos/` directory must exist.
+**Prerequisites:** `ninthwave` (or `nw`) must be in PATH. `.ninthwave/todos/` directory must exist.
 
 ---
 
@@ -211,7 +211,7 @@ Key files: `path/to/file.ts`, `path/to/other.ex`
    Note: The heading uses `# ` (not `### `). The `**Domain:**` field is required — it was previously inferred from TODOS.md section headers but must now be explicit in each file.
 
 5. Verify every item has a `**Test plan:**` section (non-optional for decomposed items)
-6. Verify parseable: `ls .ninthwave/todos/` to confirm files were written, then `.ninthwave/work list | grep <feature_code>`
+6. Verify parseable: `ls .ninthwave/todos/` to confirm files were written, then `ninthwave list | grep <feature_code>`
 
 ---
 

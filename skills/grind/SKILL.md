@@ -65,8 +65,8 @@ The user can interrupt at any checkpoint. Between major phases the skill pauses 
 
 **Goal:** Set up the grind loop with sensible defaults, confirm with the user.
 
-1. Run `.ninthwave/work reconcile` to sync todo state with GitHub.
-2. Run `.ninthwave/work list` to get the full picture.
+1. Run `ninthwave reconcile` to sync todo state with GitHub.
+2. Run `ninthwave list` to get the full picture.
 3. Count items by status: ready, blocked, in-progress, total.
 
 4. AskUserQuestion — "Starting the grind loop. Here's the current state: N ready, M blocked, K in-progress, T total. Settings?"
@@ -88,9 +88,9 @@ If the user picks B, ask follow-up questions for each setting.
 
 **Goal:** Process all ready TODOs through the orchestrator.
 
-1. Get the list of ready items: `.ninthwave/work list --ready`
+1. Get the list of ready items: `ninthwave list --ready`
 2. If no items are ready, skip to Phase 2 (friction review).
-3. Get the batch order: `.ninthwave/work batch-order <IDs>`
+3. Get the batch order: `ninthwave batch-order <IDs>`
 4. Show the user the batch plan (how many batches, which items in each).
 5. Launch the orchestrator:
 
@@ -99,7 +99,7 @@ ninthwave orchestrate --items <IDs> --merge-strategy <STRATEGY> --wip-limit <WIP
 ```
 
 6. Wait for orchestration to complete.
-7. Run `.ninthwave/work reconcile` to sync state.
+7. Run `ninthwave reconcile` to sync state.
 8. Report results: items merged, items stuck, items remaining.
 
 **If items are stuck:** Report them and ask the user whether to investigate or skip.
@@ -164,7 +164,7 @@ ninthwave orchestrate --items <IDs> --merge-strategy <STRATEGY> --wip-limit <WIP
 
 **Goal:** Decide whether to continue the loop.
 
-1. Run `.ninthwave/work list --ready` to see if new items exist (from vision or friction).
+1. Run `ninthwave list --ready` to see if new items exist (from vision or friction).
 2. Report cycle summary:
    - Items processed this cycle
    - Items created this cycle (from friction + vision)

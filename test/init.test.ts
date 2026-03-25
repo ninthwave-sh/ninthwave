@@ -607,7 +607,6 @@ describe("initProject", () => {
     expect(existsSync(join(projectDir, ".ninthwave/config"))).toBe(true);
 
     // Scaffolding completed
-    expect(existsSync(join(projectDir, ".ninthwave/work"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/domains.conf"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/todos/.gitkeep"))).toBe(true);
     expect(existsSync(join(projectDir, ".ninthwave/friction/.gitkeep"))).toBe(true);

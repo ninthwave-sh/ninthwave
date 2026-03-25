@@ -332,7 +332,7 @@ When you receive a message, it will be one of these categories:
 
 #### Stop Request
 
-Clean up and exit: `${HUB_ROOT}/.ninthwave/work clean-single YOUR_TODO_ID`
+Clean up and exit: `ninthwave clean-single YOUR_TODO_ID`
 
 > Use `HUB_ROOT` (not `PROJECT_ROOT`) because `clean-single` must run from the hub repo where the orchestrator state lives.
 

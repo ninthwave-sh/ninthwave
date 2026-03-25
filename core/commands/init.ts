@@ -11,7 +11,6 @@ import {
   writeFileSync,
   readFileSync,
   readdirSync,
-  chmodSync,
   unlinkSync,
   symlinkSync,
 } from "fs";
@@ -21,7 +20,6 @@ import { info, GREEN, BOLD, DIM, RESET, YELLOW, RED } from "../output.ts";
 import { run } from "../shell.ts";
 import {
   createSkillSymlinks,
-  generateShimContent,
   type CommandChecker,
 } from "./setup.ts";
 
@@ -353,17 +351,6 @@ function scaffold(projectDir: string, bundleDir: string): void {
   // --- .ninthwave/ directory ---
   mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
 
-  // Clean up legacy files
-  const oldShim = join(projectDir, ".ninthwave/nw");
-  if (existsSync(oldShim)) unlinkSync(oldShim);
-  const legacyDir = join(projectDir, ".ninthwave/dir");
-  if (existsSync(legacyDir)) unlinkSync(legacyDir);
-
-  // Create CLI shim
-  const shimPath = join(projectDir, ".ninthwave/work");
-  writeFileSync(shimPath, generateShimContent());
-  chmodSync(shimPath, 0o755);
-
   // Domains config (preserve existing)
   const domainsPath = join(projectDir, ".ninthwave/domains.conf");
   if (!existsSync(domainsPath)) {
@@ -468,7 +455,6 @@ export function initProject(
 
   // 4. Run scaffolding
   scaffold(projectDir, bundleDir);
-  console.log(`  .ninthwave/work ${DIM}(CLI shim)${RESET}`);
   console.log(`  .ninthwave/domains.conf`);
   console.log(`  .ninthwave/todos/ ${DIM}(work items)${RESET}`);
   console.log(`  .ninthwave/friction/ ${DIM}(friction log)${RESET}`);

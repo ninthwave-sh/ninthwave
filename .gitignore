@@ -4,6 +4,9 @@
 # Machine-specific bundle location (created by setup)
 .ninthwave/dir
 
+# Legacy CLI shim (no longer created by setup)
+.ninthwave/work
+
 # Claude Code per-user data (created in worktrees by workers)
 .claude/projects/
 

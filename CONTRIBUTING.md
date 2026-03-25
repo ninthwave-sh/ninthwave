@@ -74,7 +74,7 @@ ninthwave/                          # The repo IS the installable bundle
 | File | What it does |
 |------|-------------|
 | `core/cli.ts` | The CLI entry point. Routes commands to `core/commands/` which handle worktrees/partitions, AI session launches, PR monitoring, and version bumps. TypeScript + Bun. |
-| `core/commands/setup.ts` | The `ninthwave setup` command. Creates project-level config: `.ninthwave/` dir, CLI shim, skill symlinks, agent copies. |
+| `core/commands/setup.ts` | The `ninthwave setup` command. Creates project-level config: `.ninthwave/` dir, skill symlinks, agent copies. |
 | `skills/work/SKILL.md` | The orchestration skill. Drives the 5-phase workflow (select, launch, monitor, merge, finalize). |
 | `skills/decompose/SKILL.md` | Breaks feature specs into PR-sized work items with dependency batches. |
 | `agents/todo-worker.md` | The worker prompt. Each AI session follows this: read the TODO, read project conventions, implement, test, review, PR, wait for orchestrator. |
@@ -82,8 +82,8 @@ ninthwave/                          # The repo IS the installable bundle
 ### How the Pieces Fit
 
 1. **User runs `/decompose`** — the decompose skill explores the codebase, breaks the feature into work items, writes them to `.ninthwave/todos/`
-2. **User runs `/work`** — the work skill reads `.ninthwave/todos/`, presents selection options, then calls `.ninthwave/work start` to create worktrees and launch AI sessions via cmux
-3. **`.ninthwave/work start`** (shim → `ninthwave` binary) auto-detects the AI tool, creates a git worktree per item, allocates a partition for port/DB isolation, and launches each session with the `todo-worker` agent
+2. **User runs `/work`** — the work skill reads `.ninthwave/todos/`, presents selection options, then calls `ninthwave start` to create worktrees and launch AI sessions via cmux
+3. **`ninthwave start`** auto-detects the AI tool, creates a git worktree per item, allocates a partition for port/DB isolation, and launches each session with the `todo-worker` agent
 4. **Each worker session** reads `CLAUDE.md`/`AGENTS.md` for project conventions, implements the TODO, runs tests, creates a PR, then idles waiting for orchestrator messages
 5. **The orchestrator** (the `/work` skill session) monitors PR status, dispatches CI fixes and review feedback to workers via `cmux send`, merges PRs, rebases dependents, and handles version bumping
 

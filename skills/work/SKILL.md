@@ -48,8 +48,8 @@ This skill interactively selects TODO items, then delegates all orchestration to
 
 > **Rule: Never trust `list --ready` without reconciling first.** Todo files in `.ninthwave/todos/` may be stale if PRs were merged outside the orchestrator (manually, by another session, or by GitHub auto-merge). Always reconcile before listing.
 
-1. Run `.ninthwave/work reconcile` to sync todo state with GitHub (removes files for merged PRs, cleans stale worktrees).
-2. Run `.ninthwave/work list --ready` to get all available items.
+1. Run `ninthwave reconcile` to sync todo state with GitHub (removes files for merged PRs, cleans stale worktrees).
+2. Run `ninthwave list --ready` to get all available items.
 3. Parse the output and present a summary table to the user showing: ID, priority, domain, title, and estimated complexity. Items with a `Repo:` field will indicate which target repo they belong to.
 
 4. AskUserQuestion -- "How do you want to select items?"
@@ -63,7 +63,7 @@ This skill interactively selects TODO items, then delegates all orchestration to
    **If user picks A (feature code):**
    - List the distinct feature codes found.
    - AskUserQuestion to pick a feature code.
-   - Run `.ninthwave/work list --feature <code>`.
+   - Run `ninthwave list --feature <code>`.
 
    **If user picks B (priority):**
    - AskUserQuestion -- "Which priority level?"
@@ -73,12 +73,12 @@ This skill interactively selects TODO items, then delegates all orchestration to
    - AskUserQuestion -- "Which domain?"
    - Filter items by chosen domain.
 
-5. **Dependency analysis:** Run `.ninthwave/work batch-order <selected-IDs>` to check for dependency chains.
+5. **Dependency analysis:** Run `ninthwave batch-order <selected-IDs>` to check for dependency chains.
 
    - **If all items are in Batch 1** (no dependencies): proceed to conflict check.
    - **If items span multiple batches**: present the batch plan. The orchestrator handles dependency ordering automatically — all selected items can be passed together.
 
-6. Run `.ninthwave/work conflicts <batch-IDs>` to check for file overlaps.
+6. Run `ninthwave conflicts <batch-IDs>` to check for file overlaps.
 
 7. Present the conflict analysis. If conflicts, suggest splitting into sub-batches or lowering the WIP limit.
 
@@ -141,8 +141,6 @@ This skill interactively selects TODO items, then delegates all orchestration to
      --supervisor
    ```
 
-   If running via the `.ninthwave/work` shim, use `.ninthwave/work orchestrate ...` instead.
-
 2. Run the command. The orchestrator handles the full lifecycle automatically:
    - **Queued** items wait for dependencies to clear
    - **Ready** items get launched as worker sessions (up to the WIP limit)
@@ -184,9 +182,9 @@ Phase 3 runs automatically after Phase 2 completes. It checks whether more work 
 
 #### Step 1: Reconcile and check for remaining ready items
 
-Run `.ninthwave/work reconcile` to sync todo state with GitHub — files for merged items are removed from `.ninthwave/todos/`, stale worktrees are cleaned, and changes are committed/pushed. Never trust `list --ready` without reconciling first.
+Run `ninthwave reconcile` to sync todo state with GitHub — files for merged items are removed from `.ninthwave/todos/`, stale worktrees are cleaned, and changes are committed/pushed. Never trust `list --ready` without reconciling first.
 
-Then run `.ninthwave/work list --ready` to see if any items were unblocked by the batch that just completed.
+Then run `ninthwave list --ready` to see if any items were unblocked by the batch that just completed.
 
 - If **no ready items remain**, report "All done — no remaining work items" and exit the loop.
 - If **ready items exist**, continue to Step 2.
@@ -206,7 +204,7 @@ If in dogfooding mode:
    - B) Skip — continue with existing ready items only
    - C) Show entries — display the friction entries before deciding
 
-   If the user chooses A, use the `/decompose` skill (or `.ninthwave/work decompose`) to break friction entries into TODOs. The newly created items will appear in the next `list --ready` call.
+   If the user chooses A, use the `/decompose` skill (or `ninthwave decompose`) to break friction entries into TODOs. The newly created items will appear in the next `list --ready` call.
 
 If **not** in dogfooding mode, skip this step entirely.
 
@@ -250,7 +248,7 @@ Workers prefix their comments with `**[Worker: TODO-ID]**`.
 
 ## Important Rules
 
-- **Script dependency:** `.ninthwave/work` must exist and be executable
+- **CLI dependency:** `ninthwave` (or `nw`) must be in PATH
 - **Branch safety:** All implementation on `todo/*` branches, never directly on main
 - **Conflict handling:** Always check before launching
 - **No silent failures:** Report errors and ask how to proceed
