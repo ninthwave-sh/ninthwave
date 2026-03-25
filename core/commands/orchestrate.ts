@@ -1078,6 +1078,28 @@ export function isInsideWorkspace(env: EnvAccessor = defaultEnv): boolean {
 }
 
 /**
+ * Close a stale status pane from a previous daemon run.
+ *
+ * Reads the daemon state file to find the `statusPaneRef` from the last run.
+ * If present, closes that pane so we don't accumulate duplicates across
+ * daemon restarts.
+ */
+export function closeStaleStatusPane(
+  mux: Multiplexer,
+  projectRoot: string,
+  readState: (projectRoot: string) => DaemonState | null = readStateFile,
+): void {
+  const oldState = readState(projectRoot);
+  if (oldState?.statusPaneRef) {
+    try {
+      mux.closeWorkspace(oldState.statusPaneRef);
+    } catch {
+      // Best effort — pane may already be gone
+    }
+  }
+}
+
+/**
  * Launch a dedicated status pane that runs `ninthwave status --watch`.
  *
  * When running inside an existing workspace (detected via CMUX_WORKSPACE_ID
@@ -1092,12 +1114,6 @@ export function launchStatusPane(
   env: EnvAccessor = defaultEnv,
 ): string | null {
   if (!mux.isAvailable()) return null;
-
-  // Check if a status pane is already running — don't open duplicates
-  const existing = mux.listWorkspaces();
-  if (existing && existing.includes(STATUS_PANE_NAME)) {
-    return null;
-  }
 
   // When inside an existing workspace, split a pane instead of creating a new workspace
   if (isInsideWorkspace(env)) {
@@ -1430,12 +1446,16 @@ export async function cmdOrchestrate(
   // Analytics directory — always enabled, writes to .ninthwave/analytics/
   const analyticsDir = join(projectRoot, ".ninthwave", "analytics");
 
-  // Daemon state persistence: serialize state each poll cycle when running as daemon child
+  // Daemon state persistence: serialize state each poll cycle when running as daemon child.
+  // statusPaneRef is captured by reference so the closure always persists the current value.
   const daemonStartedAt = new Date().toISOString();
+  let statusPaneRef: string | null = null;
   const onPollComplete = isDaemonChild
     ? (items: OrchestratorItem[]) => {
         try {
-          const state = serializeOrchestratorState(items, process.pid, daemonStartedAt);
+          const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
+            statusPaneRef,
+          });
           writeStateFile(projectRoot, state);
         } catch {
           // Non-fatal — state persistence failure shouldn't block the orchestrator
@@ -1501,8 +1521,13 @@ export async function cmdOrchestrate(
     aiTool,
   };
 
+  // Close stale status pane from a previous daemon run before launching a new one
+  if (!isDaemonChild) {
+    closeStaleStatusPane(mux, projectRoot);
+  }
+
   // Launch status pane if running inside a multiplexer (skip for daemon child — no terminal)
-  const statusPaneRef = isDaemonChild ? null : launchStatusPane(mux, projectRoot);
+  statusPaneRef = isDaemonChild ? null : launchStatusPane(mux, projectRoot);
   if (statusPaneRef) {
     structuredLog({
       ts: new Date().toISOString(),
