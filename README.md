@@ -291,11 +291,21 @@ Workers reference these skill names during execution. If available, they're used
 
 ### Work item backends
 
+**Project management:**
+
 | Backend | When to use |
 |---------|-------------|
-| `TODOS.md` (built-in) | Solo devs, quick projects, everything in markdown |
-| Linear, ClickUp, Jira (adapters) | Teams with existing task management |
+| `.ninthwave/todos/` (built-in) | Solo devs, quick projects, everything in markdown |
 | GitHub Issues | Lightweight project tracking |
+| ClickUp | Teams with existing task management |
+| Linear, Jira (planned) | Coming soon |
+
+**Observability:**
+
+| Backend | When to use |
+|---------|-------------|
+| Sentry | Turn unresolved errors into work items automatically |
+| PagerDuty | Turn incidents into work items, resolve on merge |
 
 <details>
 <summary><strong>What gets installed</strong></summary>
