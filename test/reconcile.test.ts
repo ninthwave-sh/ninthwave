@@ -91,6 +91,8 @@ function makeDeps(overrides: Partial<ReconcileDeps> = {}): ReconcileDeps {
     cleanWorktree: () => false,
     closeStaleWorkspaces: () => 0,
     commitAndPush: () => false,
+    worktreeHasCommits: () => true,
+    branchHasOpenPR: () => false,
     ...overrides,
   };
 }
@@ -411,6 +413,126 @@ describe("reconcile", () => {
 
     const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
     expect(output).toContain("2 orphaned worktree(s)");
+  });
+
+  // ── Stale worktree cleanup (zero commits, no open PR) ────────────
+
+  it("cleans stale worktrees with zero commits and no open PR", () => {
+    const { todosDir, worktreeDir, projectRoot } = setupTodosDir();
+    const cleaned: string[] = [];
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => [],
+      // M-CI-1 has a matching todo file, worktree exists, but zero commits
+      getWorktreeIds: () => ["M-CI-1"],
+      worktreeHasCommits: () => false,
+      branchHasOpenPR: () => false,
+      cleanWorktree: (id) => {
+        cleaned.push(id);
+        return true;
+      },
+    });
+
+    const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
+    expect(cleaned).toContain("M-CI-1");
+    expect(output).toContain("stale worktree");
+    expect(output).toContain("zero commits");
+  });
+
+  it("preserves worktrees with commits beyond main", () => {
+    const { todosDir, worktreeDir, projectRoot } = setupTodosDir();
+    const cleaned: string[] = [];
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => [],
+      getWorktreeIds: () => ["M-CI-1"],
+      worktreeHasCommits: () => true,
+      branchHasOpenPR: () => false,
+      cleanWorktree: (id) => {
+        cleaned.push(id);
+        return true;
+      },
+    });
+
+    captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
+    expect(cleaned).not.toContain("M-CI-1");
+  });
+
+  it("preserves worktrees with zero commits but an open PR", () => {
+    const { todosDir, worktreeDir, projectRoot } = setupTodosDir();
+    const cleaned: string[] = [];
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => [],
+      getWorktreeIds: () => ["M-CI-1"],
+      worktreeHasCommits: () => false,
+      branchHasOpenPR: () => true,
+      cleanWorktree: (id) => {
+        cleaned.push(id);
+        return true;
+      },
+    });
+
+    captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
+    expect(cleaned).not.toContain("M-CI-1");
+  });
+
+  it("reports stale worktree cleanup count", () => {
+    const { todosDir, worktreeDir, projectRoot } = setupTodosDir();
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => [],
+      getWorktreeIds: () => ["M-CI-1", "H-CI-2"],
+      worktreeHasCommits: () => false,
+      branchHasOpenPR: () => false,
+      cleanWorktree: () => true,
+    });
+
+    const output = captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
+    expect(output).toContain("2 stale worktree(s) with zero commits");
+  });
+
+  it("stale cleanup only checks worktrees with matching todo files", () => {
+    // Worktrees without matching todo files are handled by orphan cleanup
+    const { todosDir, worktreeDir, projectRoot } = setupTodosDir();
+    const commitCheckedIds: string[] = [];
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => [],
+      getWorktreeIds: () => ["M-CI-1", "X-ORPHAN-1"],
+      worktreeHasCommits: (id) => {
+        commitCheckedIds.push(id);
+        return false;
+      },
+      branchHasOpenPR: () => false,
+      cleanWorktree: () => true,
+    });
+
+    captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
+    // Only M-CI-1 (which has a todo file) should be checked for commits
+    // X-ORPHAN-1 is handled by orphan cleanup, not stale cleanup
+    expect(commitCheckedIds).toContain("M-CI-1");
+    expect(commitCheckedIds).not.toContain("X-ORPHAN-1");
+  });
+
+  it("does not double-clean merged items in stale step", () => {
+    const { todosDir, worktreeDir, projectRoot } = setupTodosDir();
+    let cleanCount = 0;
+
+    const deps = makeDeps({
+      getMergedTodoIds: () => ["M-CI-1"],
+      getWorktreeIds: () => ["M-CI-1"],
+      worktreeHasCommits: () => false,
+      branchHasOpenPR: () => false,
+      cleanWorktree: () => {
+        cleanCount++;
+        return true;
+      },
+    });
+
+    captureOutput(() => reconcile(todosDir, worktreeDir, projectRoot, deps));
+    // M-CI-1 should be cleaned once by the merged-item step, not again by stale step
+    expect(cleanCount).toBe(1);
   });
 });
 

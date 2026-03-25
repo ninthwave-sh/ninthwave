@@ -1,8 +1,11 @@
 // reconcile command: synchronize todo files with GitHub PR state and clean stale worktrees.
 
 import { existsSync, readdirSync } from "fs";
+import { join } from "path";
 import { info, warn, GREEN, RESET } from "../output.ts";
 import { run } from "../shell.ts";
+import { commitCount } from "../git.ts";
+import { prList } from "../gh.ts";
 import { cmdMarkDone } from "./mark-done.ts";
 import { cleanSingleWorktree, closeWorkspacesForIds } from "./clean.ts";
 import { getMux } from "../mux.ts";
@@ -34,6 +37,12 @@ export interface ReconcileDeps {
 
   /** Stage, commit, and push todo file changes. Returns true if committed. */
   commitAndPush(projectRoot: string, todosDir: string): boolean;
+
+  /** Check if a worktree has any commits beyond main. */
+  worktreeHasCommits(id: string, worktreeDir: string, projectRoot: string): boolean;
+
+  /** Check if a branch has an open PR on GitHub. */
+  branchHasOpenPR(id: string, projectRoot: string): boolean;
 }
 
 // --- Default implementations ---
@@ -147,6 +156,18 @@ function defaultCloseStaleWorkspaces(doneIds: string[]): number {
   return closeWorkspacesForIds(new Set(doneIds), getMux());
 }
 
+function defaultWorktreeHasCommits(id: string, worktreeDir: string, _projectRoot: string): boolean {
+  const worktreePath = join(worktreeDir, `todo-${id}`);
+  if (!existsSync(worktreePath)) return false;
+  // Count commits on the todo branch beyond main
+  return commitCount(worktreePath, "main", "HEAD") > 0;
+}
+
+function defaultBranchHasOpenPR(id: string, projectRoot: string): boolean {
+  const branch = `todo/${id}`;
+  return prList(projectRoot, branch, "open").length > 0;
+}
+
 /** Build default dependencies from real implementations. */
 export function defaultDeps(): ReconcileDeps {
   return {
@@ -158,6 +179,8 @@ export function defaultDeps(): ReconcileDeps {
     cleanWorktree: defaultCleanWorktree,
     closeStaleWorkspaces: defaultCloseStaleWorkspaces,
     commitAndPush: defaultCommitAndPush,
+    worktreeHasCommits: defaultWorktreeHasCommits,
+    branchHasOpenPR: defaultBranchHasOpenPR,
   };
 }
 
@@ -246,6 +269,29 @@ export function reconcile(
   }
   if (orphanCount > 0) {
     info(`Cleaned ${orphanCount} orphaned worktree(s).`);
+  }
+
+  // Step 4.7: Clean stale worktrees — worktrees with zero commits beyond main and no open PR.
+  // These are left behind by aborted orchestration runs and incorrectly mark items as in-progress.
+  const postCleanWorktreeIds = deps.getWorktreeIds(worktreeDir);
+  let staleCount = 0;
+  for (const wtId of postCleanWorktreeIds) {
+    // Skip items already cleaned by merged-item step
+    if (doneIds.has(wtId)) continue;
+    // Only check items with matching todo files (orphans already cleaned above)
+    if (!refreshedOpenIds.has(wtId)) continue;
+    // Skip if the worktree has actual commits
+    if (deps.worktreeHasCommits(wtId, worktreeDir, projectRoot)) continue;
+    // Skip if there's an open PR (someone might be working on it)
+    if (deps.branchHasOpenPR(wtId, projectRoot)) continue;
+
+    info(`Cleaning stale worktree for ${wtId} (zero commits, no open PR)`);
+    if (deps.cleanWorktree(wtId, worktreeDir, projectRoot)) {
+      staleCount++;
+    }
+  }
+  if (staleCount > 0) {
+    info(`Cleaned ${staleCount} stale worktree(s) with zero commits.`);
   }
 
   // Step 5: Commit and push todo file changes if any
