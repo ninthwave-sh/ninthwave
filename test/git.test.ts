@@ -299,6 +299,8 @@ describe("git.ts error handling", () => {
     it("replays only dependent commits after a squash merge (no duplicate commits)", () => {
       const repo = setupTempRepo();
       initWithCommit(repo);
+      // Ensure default branch is named "main" (CI may default to "master")
+      gitSetup(repo, "branch", "-M", "main");
 
       // Create branch A with a commit
       gitSetup(repo, "checkout", "-b", "todo/A");
@@ -333,6 +335,7 @@ describe("git.ts error handling", () => {
     it("returns true on a clean rebase with no conflicts", () => {
       const repo = setupTempRepo();
       initWithCommit(repo);
+      gitSetup(repo, "branch", "-M", "main");
 
       // Create a branch with a non-conflicting change
       gitSetup(repo, "checkout", "-b", "feature");
@@ -354,6 +357,7 @@ describe("git.ts error handling", () => {
     it("returns false on conflict and aborts cleanly", () => {
       const repo = setupTempRepo();
       initWithCommit(repo);
+      gitSetup(repo, "branch", "-M", "main");
 
       const base = gitSetup(repo, "rev-parse", "HEAD");
 
