@@ -12,6 +12,7 @@ import {
   buildSnapshot,
   launchStatusPane,
   closeStatusPane,
+  closeStaleStatusPane,
   isInsideWorkspace,
   isWorkerAlive,
   forkDaemon,
@@ -32,6 +33,7 @@ import {
 } from "../core/orchestrator.ts";
 import type { TodoItem } from "../core/types.ts";
 import type { Multiplexer } from "../core/mux.ts";
+import type { DaemonState } from "../core/daemon.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -1578,6 +1580,91 @@ describe("closeStatusPane", () => {
 
     closeStatusPane(mux, null);
     expect(closeWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+// ── closeStaleStatusPane ─────────────────────────────────────────────
+
+describe("closeStaleStatusPane", () => {
+  function mockMux(overrides?: Partial<Multiplexer>): Multiplexer {
+    return {
+      isAvailable: () => true,
+      launchWorkspace: vi.fn(() => "workspace:99"),
+      splitPane: vi.fn(() => "pane:1"),
+      sendMessage: () => true,
+      readScreen: () => "",
+      listWorkspaces: () => "",
+      closeWorkspace: vi.fn(() => true),
+      ...overrides,
+    };
+  }
+
+  it("closes old status pane when state file has statusPaneRef", () => {
+    const mux = mockMux();
+    const oldState: DaemonState = {
+      pid: 123,
+      startedAt: "2026-03-25T00:00:00Z",
+      updatedAt: "2026-03-25T00:01:00Z",
+      statusPaneRef: "workspace:42",
+      items: [],
+    };
+
+    closeStaleStatusPane(mux, "/tmp/project", () => oldState);
+
+    expect(mux.closeWorkspace).toHaveBeenCalledWith("workspace:42");
+  });
+
+  it("is a no-op when no state file exists", () => {
+    const mux = mockMux();
+
+    closeStaleStatusPane(mux, "/tmp/project", () => null);
+
+    expect(mux.closeWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when state file has no statusPaneRef", () => {
+    const mux = mockMux();
+    const oldState: DaemonState = {
+      pid: 123,
+      startedAt: "2026-03-25T00:00:00Z",
+      updatedAt: "2026-03-25T00:01:00Z",
+      items: [],
+    };
+
+    closeStaleStatusPane(mux, "/tmp/project", () => oldState);
+
+    expect(mux.closeWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when statusPaneRef is null", () => {
+    const mux = mockMux();
+    const oldState: DaemonState = {
+      pid: 123,
+      startedAt: "2026-03-25T00:00:00Z",
+      updatedAt: "2026-03-25T00:01:00Z",
+      statusPaneRef: null,
+      items: [],
+    };
+
+    closeStaleStatusPane(mux, "/tmp/project", () => oldState);
+
+    expect(mux.closeWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("handles closeWorkspace failure gracefully", () => {
+    const mux = mockMux({
+      closeWorkspace: vi.fn(() => { throw new Error("pane gone"); }),
+    });
+    const oldState: DaemonState = {
+      pid: 123,
+      startedAt: "2026-03-25T00:00:00Z",
+      updatedAt: "2026-03-25T00:01:00Z",
+      statusPaneRef: "workspace:99",
+      items: [],
+    };
+
+    // Should not throw
+    expect(() => closeStaleStatusPane(mux, "/tmp/project", () => oldState)).not.toThrow();
   });
 });
 

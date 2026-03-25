@@ -344,4 +344,34 @@ describe("serializeOrchestratorState", () => {
     expect(state.items).toEqual([]);
     expect(state.pid).toBe(1);
   });
+
+  it("includes extras (statusPaneRef) in returned state", () => {
+    const state = serializeOrchestratorState(
+      [],
+      42,
+      "2026-03-25T00:00:00.000Z",
+      { statusPaneRef: "workspace:7" },
+    );
+    expect(state.statusPaneRef).toBe("workspace:7");
+    expect(state.pid).toBe(42);
+  });
+
+  it("omits statusPaneRef when extras not provided", () => {
+    const state = serializeOrchestratorState(
+      [],
+      42,
+      "2026-03-25T00:00:00.000Z",
+    );
+    expect(state.statusPaneRef).toBeUndefined();
+  });
+
+  it("spreads null statusPaneRef from extras", () => {
+    const state = serializeOrchestratorState(
+      [],
+      42,
+      "2026-03-25T00:00:00.000Z",
+      { statusPaneRef: null },
+    );
+    expect(state.statusPaneRef).toBeNull();
+  });
 });

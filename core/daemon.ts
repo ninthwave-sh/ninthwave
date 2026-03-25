@@ -27,6 +27,7 @@ export interface DaemonState {
   pid: number;
   startedAt: string;
   updatedAt: string;
+  statusPaneRef?: string | null;
   items: DaemonStateItem[];
 }
 
@@ -188,11 +189,13 @@ export function serializeOrchestratorState(
   items: OrchestratorItem[],
   pid: number,
   startedAt: string,
+  extras?: { statusPaneRef?: string | null; wipLimit?: number },
 ): DaemonState {
   return {
     pid,
     startedAt,
     updatedAt: new Date().toISOString(),
+    ...extras,
     items: items.map((item) => ({
       id: item.id,
       state: item.state,
