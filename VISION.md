@@ -65,7 +65,11 @@ v0.1.0 shipped March 2026. Seven grind cycles (0-6) have shipped since then.
 - **BYOT tunnel model** — Bring Your Own Tunnel. Users expose the localhost dashboard with their tunneling tool of choice (cloudflared, ngrok, zrok, SSH, Tailscale). ninthwave does not manage tunnels in the OSS CLI. `nw doctor` checks for cloudflared as an optional info-level dependency.
 - **`nw doctor` command** — health check for the ninthwave environment. Required checks: gh CLI, AI tool, multiplexer, git config. Recommended checks: project config, nono sandbox, pre-commit hook. Optional checks: cloudflared (for remote access), webhook URL (M-DX-1).
 
-**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 24 issues across 4 grind cycles, driving improvements from poll interval tuning to the file-per-todo migration. The L-VIS recurring item in `.ninthwave/todos/` keeps the self-improvement loop running.
+**Grind cycle 7 (Phase B continuation + C-bis: Worker Health Monitoring):**
+- **Policy proxy decomposition** — 9 TODOs (H-PRX-1 through M-PRX-9) for a standalone Rust MITM proxy with Cedar policy evaluation, credential injection, and structured audit logging. H-PRX-1 (design doc decomposition) and H-PRX-2 (Cedar entity hierarchy validation) shipped. H-PRX-3 through M-PRX-9 in progress.
+- **Worker health monitoring decomposition** — 4 TODOs (H-HLT-1, M-HLT-2, M-ORC-7, M-CLN-1) for deterministic screen-based health checks, supervisor screen awareness, and orchestrator polish. Driven by friction log review (supervisor-missed-stalled-workers, remote-branch-delete-fails).
+
+**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 25+ issues across 7 grind cycles, driving improvements from poll interval tuning to the file-per-todo migration to deterministic worker health monitoring. The L-VIS recurring item in `.ninthwave/todos/` keeps the self-improvement loop running.
 
 **Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching. Agent Teams is complementary (intra-task collaboration on one item) while ninthwave is inter-task orchestration (N workers on N items).
 
@@ -119,17 +123,25 @@ Priority areas ordered by dependency and impact. Phases A through A-sexies and C
 
 ~~Ship the OSS foundation for remote session access: dashboard server, auth, provider pattern, health checks.~~ Done. Orchestrator dashboard server with token auth (H-REM-1), dashboard lifecycle wiring with `--remote` flag (H-REM-2), `SessionUrlProvider` pattern for cloud extensibility, BYOT tunnel model, and `nw doctor` health check command (M-DX-1) all shipped. Architecture: one dashboard per orchestration run (not per-worker servers). OSS provides the server, user brings their own tunnel. Cloud adds managed tunneling + persistent domains via the provider pattern.
 
-### B. Sandboxed Workers
+### B. Sandboxed Workers *(in progress)*
 
 Workers run in isolated environments. Prevent accidental destructive operations and contain blast radius.
 
 Tiered approach based on trust level and environment:
 
-- **Local/lightweight (default):** [nono](https://github.com/always-further/nono) — kernel-level sandboxing via Seatbelt (macOS) and Landlock (Linux). Zero startup latency, granular filesystem allowlisting, snapshot and rollback, credential injection via proxy. Best fit for trusted local development. Convention: this is the default, zero-config.
-- **Policy-driven:** [leash](https://github.com/strongdm/leash) — container-based isolation with Cedar policy engine. Full audit trail of every filesystem access and network connection. For environments needing complete observability and composable policies.
-- **Maximum isolation:** [Firecracker](https://github.com/firecracker-microvm/firecracker) microVMs — hardware virtualization via KVM. Minimal overhead, battle-tested at AWS Lambda scale. For untrusted code or multi-tenant scenarios.
+- **Local/lightweight (default):** [nono](https://github.com/always-further/nono) — kernel-level sandboxing via Seatbelt (macOS) and Landlock (Linux). Zero startup latency, granular filesystem allowlisting, snapshot and rollback, credential injection via proxy. Best fit for trusted local development. Convention: this is the default, zero-config. *(Shipped: SBX-1 through SBX-4.)*
+- **Policy-driven:** MITM policy proxy — standalone Rust binary with Cedar policy engine. Selective MITM for credentialed services (GitHub API), per-request policy evaluation, credential injection, structured JSON audit logging. Integrates with nono via `--upstream-proxy`. *(In progress: H-PRX-3 through M-PRX-9.)*
+- **Maximum isolation:** [Firecracker](https://github.com/firecracker-microvm/firecracker) microVMs — hardware virtualization via KVM. Minimal overhead, battle-tested at AWS Lambda scale. For untrusted code or multi-tenant scenarios. *(Future.)*
 
 Worker snapshots enable pre-commit review of filesystem changes before they're applied to the repo.
+
+### C-bis. Worker Health Monitoring
+
+Deterministic worker health checks — the daemon detects stalled workers by reading terminal screens, not just checking state-level data. Friction log surfaced this as the #1 reliability gap: the supervisor reported "ok" while all 3 workers were stalled at empty prompts.
+
+- **Deterministic screen health checks (H-HLT-1).** Orchestrator reads worker screens during snapshot building. Detects: empty input (stalled), permission prompts (waiting for user), error output (stuck), no change (hung process). Emits nudge actions automatically.
+- **Supervisor screen awareness (M-HLT-2).** Feed screen health classifications into the supervisor prompt so the LLM can detect subtler anomalies and systemic patterns (e.g., all workers stalled = environment issue).
+- **Orchestrator log cleanup (M-ORC-7).** Suppress false "branch delete failed" warnings when GitHub auto-delete is enabled.
 
 ### C-beta. Remote Session Access — Cloud Track
 
@@ -141,14 +153,16 @@ Cloud-track items building on the C-alpha foundation. These extend the BYOT mode
 
 Use cases: team visibility into worker progress without self-managed tunnels, reviewer jumps into a session from the PR link, remote pair debugging with a stuck worker.
 
-### D. LLM Supervisor
+### D. LLM Supervisor *(foundation shipped)*
 
 An optional advisory layer on top of the deterministic daemon.
 
-- Opt-in via `--supervisor` flag on `ninthwave orchestrate`. Auto-activates in dogfooding mode.
-- Periodically reviews the daemon's structured logs and applies judgment: stuck workers, repeating CI errors, patterns suggesting systemic issues, process improvements the daemon can't detect.
-- Advisory outputs only: structured log events, friction log entries, suggested actions (send worker a hint, adjust WIP). The daemon continues regardless of supervisor output.
-- **Key principle: the LLM makes itself less necessary over time.** Each dogfooding cycle should move more intelligence from the supervisor into deterministic daemon logic. The supervisor's job is to detect what the daemon doesn't handle yet — then that detection gets codified.
+- Opt-in via `--supervisor` flag on `ninthwave orchestrate`. Auto-activates in dogfooding mode. *(Shipped.)*
+- Periodically reviews the daemon's structured logs and applies judgment: stuck workers, repeating CI errors, patterns suggesting systemic issues, process improvements the daemon can't detect. *(Shipped — core supervisor tick loop with prompt construction, response parsing, action application, and friction file writing.)*
+- Advisory outputs only: structured log events, friction log entries, suggested actions (send worker a hint, adjust WIP). The daemon continues regardless of supervisor output. *(Shipped.)*
+- Error resilience: exponential backoff after 3 consecutive LLM failures, auto-disable after 10 failures, error details logged. *(Shipped.)*
+- **Key principle: the LLM makes itself less necessary over time.** Each dogfooding cycle should move more intelligence from the supervisor into deterministic daemon logic. The supervisor's job is to detect what the daemon doesn't handle yet — then that detection gets codified. *(In progress — C-bis moves screen health checks from supervisor into deterministic daemon logic.)*
+- **Remaining:** Worker screen content in supervisor prompt (M-HLT-2). Supervisor-generated friction entries auto-decomposed into TODOs. Integration with external notification channels beyond log entries.
 
 ### E. Expand the Surface Area
 
