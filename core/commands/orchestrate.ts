@@ -32,6 +32,8 @@ import { type Multiplexer, getMux } from "../mux.ts";
 import { reconcile } from "./reconcile.ts";
 import { die } from "../output.ts";
 import type { TodoItem, StatusSync } from "../types.ts";
+import { ClickUpBackend, resolveClickUpConfig } from "../backends/clickup.ts";
+import { loadConfig } from "../config.ts";
 import {
   supervisorTick,
   applySupervisorActions,
@@ -1173,6 +1175,7 @@ export async function cmdOrchestrate(
   let daemonMode = false;
   let isDaemonChild = false;
   let noSandbox = false;
+  let clickupListId: string | undefined;
 
   // Parse args
   let i = 0;
@@ -1234,6 +1237,10 @@ export async function cmdOrchestrate(
       case "--_daemon-child":
         isDaemonChild = true;
         i += 1;
+        break;
+      case "--clickup-list":
+        clickupListId = args[i + 1];
+        i += 2;
         break;
       default:
         die(`Unknown option: ${args[i]}`);
@@ -1416,6 +1423,22 @@ export async function cmdOrchestrate(
     });
   }
 
+  // Resolve ClickUp status sync if configured
+  const projectConfig = loadConfig(projectRoot);
+  const ckConfig = resolveClickUpConfig(clickupListId, (key) => projectConfig[key]);
+  const statusSync: StatusSync | undefined = ckConfig
+    ? new ClickUpBackend(ckConfig.listId, ckConfig.apiToken)
+    : undefined;
+
+  if (statusSync) {
+    structuredLog({
+      ts: new Date().toISOString(),
+      level: "info",
+      event: "clickup_sync_enabled",
+      listId: ckConfig!.listId,
+    });
+  }
+
   const loopDeps: OrchestrateLoopDeps = {
     buildSnapshot: (o, pr, wd) => buildSnapshot(o, pr, wd, mux),
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
@@ -1429,6 +1452,7 @@ export async function cmdOrchestrate(
     analyticsCommit: { hasChanges, gitAdd, getStagedFiles, gitCommit, gitReset },
     readScreen: (ref, lines) => mux.readScreen(ref, lines),
     onPollComplete,
+    statusSync,
   };
 
   // Resolve repo URL for PR URL construction in completion event

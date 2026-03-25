@@ -5,7 +5,9 @@ import { die, BOLD, RED, YELLOW, CYAN, DIM, RESET } from "../output.ts";
 import { ID_PATTERN_GLOBAL } from "../types.ts";
 import type { TodoItem } from "../types.ts";
 import { GitHubIssuesBackend } from "../backends/github-issues.ts";
+import { ClickUpBackend, resolveClickUpConfig } from "../backends/clickup.ts";
 import { ghInRepo } from "../gh.ts";
+import { loadConfig } from "../config.ts";
 
 export function cmdList(
   args: string[],
@@ -18,6 +20,7 @@ export function cmdList(
   let filterFeature = "";
   let showReady = false;
   let backend = "";
+  let clickupListId = "";
 
   // Parse args
   let i = 0;
@@ -43,6 +46,10 @@ export function cmdList(
         backend = args[i + 1] ?? "";
         i += 2;
         break;
+      case "--clickup-list":
+        clickupListId = args[i + 1] ?? "";
+        i += 2;
+        break;
       default:
         die(`Unknown option: ${args[i]}`);
     }
@@ -53,6 +60,21 @@ export function cmdList(
     if (!projectRoot) die("Project root is required for github-issues backend");
     const ghBackend = new GitHubIssuesBackend(projectRoot!, "ninthwave", ghInRepo);
     items = ghBackend.list();
+  } else if (backend === "clickup") {
+    if (!projectRoot) die("Project root is required for clickup backend");
+    const config = loadConfig(projectRoot!);
+    const ckConfig = resolveClickUpConfig(
+      clickupListId || undefined,
+      (key) => config[key],
+    );
+    if (!ckConfig) {
+      die(
+        "ClickUp backend requires CLICKUP_API_TOKEN env var and list ID " +
+          "(via --clickup-list flag or CLICKUP_LIST_ID in .ninthwave/config)",
+      );
+    }
+    const ckBackend = new ClickUpBackend(ckConfig!.listId, ckConfig!.apiToken);
+    items = ckBackend.list();
   } else if (backend) {
     die(`Unknown backend: ${backend}`);
   } else {
