@@ -78,7 +78,12 @@ v0.1.0 shipped March 2026. Nine grind cycles (0-8) have shipped since then.
 - **CLI and UX** — comma/space-separated ID parsing (M-CLI-2), dependency tree visualization in status output (M-UX-1), interactive CLI flow for orchestrate command (L-UX-1).
 - **Testing** — daemon lifecycle integration tests (M-TST-5).
 
-**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 25+ issues across 8+ grind cycles, driving improvements from poll interval tuning to the file-per-todo migration to deterministic worker health monitoring to multiplexer reliability fixes. The L-VIS recurring item in `.ninthwave/todos/` keeps the self-improvement loop running.
+**Shipped in grind cycle 9 (public repo readiness + vision L-VIS-10):**
+- **Runtime state relocation (H-PUB-1).** Moved orchestrator state files (PID, state, logs, health samples, archives) from `.ninthwave/` inside the project to `~/.ninthwave/projects/<hash>/`. Eliminates runtime clutter from git history on public repos.
+- **Symlink gitignore (M-PUB-2).** `ninthwave setup` now gitignores agent and skill symlinks (`.claude/agents/`, `.claude/skills/`, `.opencode/agents/`, `.github/agents/`) on non-ninthwave projects so broken symlinks don't appear for external contributors. Self-hosting mode (ninthwave repo) is excluded.
+- **Vision exploration (L-VIS-10).** Reviewed friction log (clean — all entries resolved or decomposed). Identified next iteration theme: autonomous loop closure + platform reach. Decomposed into 4 items: supervisor friction auto-decomposition (H-ADF-1), Linear task backend (M-LIN-1), supervisor webhook notifications (M-NTF-1), architecture documentation (L-ARC-1).
+
+**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 25+ issues across 9+ grind cycles, driving improvements from poll interval tuning to the file-per-todo migration to deterministic worker health monitoring to multiplexer reliability fixes to public repo readiness. The L-VIS recurring item in `.ninthwave/todos/` keeps the self-improvement loop running.
 
 **Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching. Agent Teams is complementary (intra-task collaboration on one item) while ninthwave is inter-task orchestration (N workers on N items).
 
@@ -172,7 +177,7 @@ An optional advisory layer on top of the deterministic daemon.
 - Advisory outputs only: structured log events, friction log entries, suggested actions (send worker a hint, adjust WIP). The daemon continues regardless of supervisor output. *(Shipped.)*
 - Error resilience: exponential backoff after 3 consecutive LLM failures, auto-disable after 10 failures, error details logged. *(Shipped.)*
 - **Key principle: the LLM makes itself less necessary over time.** Each dogfooding cycle should move more intelligence from the supervisor into deterministic daemon logic. The supervisor's job is to detect what the daemon doesn't handle yet — then that detection gets codified. *(Demonstrated — C-bis moved screen health checks from supervisor into deterministic daemon logic, making the system simpler and more reliable.)*
-- **Remaining:** Supervisor-generated friction entries auto-decomposed into TODOs (next priority — closes the loop between friction detection and work item creation). Integration with external notification channels beyond log entries.
+- **Remaining:** ~~Supervisor-generated friction entries auto-decomposed into TODOs (next priority — closes the loop between friction detection and work item creation).~~ Decomposed → H-ADF-1. ~~Integration with external notification channels beyond log entries.~~ Decomposed → M-NTF-1.
 
 ### E. Expand the Surface Area
 
