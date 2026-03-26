@@ -20,6 +20,8 @@ import { info, GREEN, BOLD, DIM, RESET, YELLOW, RED } from "../output.ts";
 import { run } from "../shell.ts";
 import {
   createSkillSymlinks,
+  isSelfHosting,
+  SYMLINK_GITIGNORE_DIRS,
   type CommandChecker,
 } from "./setup.ts";
 
@@ -479,16 +481,45 @@ function scaffold(projectDir: string, bundleDir: string): void {
 
   // --- .gitignore ---
   const gitignorePath = join(projectDir, ".gitignore");
+  const selfHosting = isSelfHosting(projectDir, bundleDir);
+
   if (existsSync(gitignorePath)) {
-    const content = readFileSync(gitignorePath, "utf-8");
+    let content = readFileSync(gitignorePath, "utf-8");
+    let modified = false;
+
     if (!content.includes(".worktrees/")) {
-      writeFileSync(
-        gitignorePath,
-        content + "\n# ninthwave worktrees\n.worktrees/\n",
+      content += "\n# ninthwave worktrees\n.worktrees/\n";
+      modified = true;
+    }
+
+    // Add symlink directories for non-self-hosting projects
+    if (!selfHosting) {
+      const missing = SYMLINK_GITIGNORE_DIRS.filter(
+        (d) => !content.includes(d),
       );
+      if (missing.length > 0) {
+        content +=
+          "\n# ninthwave symlinks (developer-local, re-created by ninthwave setup)\n";
+        for (const entry of missing) {
+          content += entry + "\n";
+        }
+        modified = true;
+      }
+    }
+
+    if (modified) {
+      writeFileSync(gitignorePath, content);
     }
   } else {
-    writeFileSync(gitignorePath, "# ninthwave worktrees\n.worktrees/\n");
+    let content = "# ninthwave worktrees\n.worktrees/\n";
+    if (!selfHosting) {
+      content +=
+        "\n# ninthwave symlinks (developer-local, re-created by ninthwave setup)\n";
+      for (const entry of SYMLINK_GITIGNORE_DIRS) {
+        content += entry + "\n";
+      }
+    }
+    writeFileSync(gitignorePath, content);
   }
 
   // --- Version tracking ---
