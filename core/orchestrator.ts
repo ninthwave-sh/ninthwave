@@ -21,6 +21,7 @@ const PRIORITY_RANK: Record<Priority, number> = {
 export type OrchestratorItemState =
   | "queued"
   | "ready"
+  | "bootstrapping"
   | "launching"
   | "implementing"
   | "pr-open"
@@ -146,6 +147,7 @@ export interface PollSnapshot {
 // ── Actions ──────────────────────────────────────────────────────────
 
 export type ActionType =
+  | "bootstrap"
   | "launch"
   | "merge"
   | "notify-ci-failure"
@@ -228,6 +230,12 @@ export interface OrchestratorDeps {
    */
   syncStackComments?: (baseBranch: string, stack: Array<{ prNumber: number; title: string }>) => void;
   /**
+   * Bootstrap a target repo (clone from remote or create new).
+   * Called before launch when a cross-repo TODO has bootstrap: true and the repo doesn't exist locally.
+   * Returns the resolved repo path on success, or an error string on failure.
+   */
+  bootstrapRepo?: (alias: string, projectRoot: string) => { status: "exists" | "cloned" | "created"; path?: string } | { status: "failed"; reason: string };
+  /**
    * Launch a review worker for a PR. Returns a workspace reference on success.
    * Actual logic lives in H-RVW-3; stub for now.
    */
@@ -288,6 +296,7 @@ export function calculateMemoryWipLimit(
 // ── WIP states: states that count toward the WIP limit ───────────────
 
 const WIP_STATES: Set<OrchestratorItemState> = new Set([
+  "bootstrapping",
   "launching",
   "implementing",
   "pr-open",
@@ -478,6 +487,12 @@ export class Orchestrator {
       case "queued":
       case "ready":
         // Handled in bulk in processTransitions
+        actions = [];
+        break;
+
+      case "bootstrapping":
+        // Bootstrap is synchronous — it transitions to launching or stuck
+        // in executeBootstrap. Nothing to do here in the snapshot-based loop.
         actions = [];
         break;
 
@@ -985,6 +1000,8 @@ export class Orchestrator {
     }
 
     switch (action.type) {
+      case "bootstrap":
+        return this.executeBootstrap(item, ctx, deps);
       case "launch":
         return this.executeLaunch(item, action, ctx, deps);
       case "merge":
@@ -1010,6 +1027,45 @@ export class Orchestrator {
       case "send-message":
         return this.executeSendMessage(item, action, deps);
     }
+  }
+
+  /**
+   * Bootstrap a target repo for a cross-repo item.
+   * On success, sets resolvedRepoRoot and transitions to launching.
+   * On failure, marks the item stuck with a descriptive reason.
+   */
+  private executeBootstrap(
+    item: OrchestratorItem,
+    ctx: ExecutionContext,
+    deps: OrchestratorDeps,
+  ): ActionResult {
+    if (!deps.bootstrapRepo) {
+      this.transition(item, "stuck");
+      item.failureReason = "bootstrap-failed: bootstrapRepo dependency not provided";
+      return { success: false, error: `Bootstrap not available for ${item.id}` };
+    }
+
+    const alias = item.todo.repoAlias;
+    const result = deps.bootstrapRepo(alias, ctx.projectRoot);
+
+    if (result.status === "failed") {
+      this.transition(item, "stuck");
+      item.failureReason = `bootstrap-failed: ${result.reason}`;
+      return { success: false, error: `Bootstrap failed for ${item.id}: ${result.reason}` };
+    }
+
+    // Resolve the repo root now that bootstrap succeeded
+    if (result.status === "cloned" || result.status === "created") {
+      item.resolvedRepoRoot = result.path;
+    }
+    // status === "exists" should not normally happen (needsBootstrap checks resolvedRepoRoot),
+    // but is harmless — resolvedRepoRoot remains unset and launch will resolve normally.
+
+    // Transition to launching — the next processTransitions cycle will not
+    // re-emit a launch action (launching is handled by transitionItem).
+    // Instead, we return success so the execution layer can emit a follow-up launch.
+    this.transition(item, "launching");
+    return { success: true };
   }
 
   /** Launch a worker for an item. Stores workspaceRef on success, marks stuck or schedules retry on failure. */
@@ -1658,14 +1714,35 @@ export class Orchestrator {
 
     for (let i = 0; i < Math.min(readyItems.length, slotsAvailable); i++) {
       const item = readyItems[i]!;
-      this.transition(item, "launching");
-      const action: Action = { type: "launch", itemId: item.id };
-      if (item.baseBranch) {
-        action.baseBranch = item.baseBranch;
+
+      // Cross-repo items with bootstrap: true that have no resolvedRepoRoot
+      // need bootstrap before launch
+      if (this.needsBootstrap(item)) {
+        this.transition(item, "bootstrapping");
+        actions.push({ type: "bootstrap", itemId: item.id });
+      } else {
+        this.transition(item, "launching");
+        const action: Action = { type: "launch", itemId: item.id };
+        if (item.baseBranch) {
+          action.baseBranch = item.baseBranch;
+        }
+        actions.push(action);
       }
-      actions.push(action);
     }
 
     return actions;
+  }
+
+  /**
+   * Check if an item needs bootstrap before launch.
+   * True when the TODO has bootstrap: true, has a cross-repo alias, and the repo isn't resolved yet.
+   */
+  private needsBootstrap(item: OrchestratorItem): boolean {
+    if (!item.todo.bootstrap) return false;
+    const alias = item.todo.repoAlias;
+    if (!alias || alias === "self" || alias === "hub") return false;
+    // If already resolved, no bootstrap needed
+    if (item.resolvedRepoRoot) return false;
+    return true;
   }
 }

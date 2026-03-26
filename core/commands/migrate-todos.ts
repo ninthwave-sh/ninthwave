@@ -103,6 +103,7 @@ function parseLegacyTodos(
       rawText,
       filePaths: [],
       testPlan: extractTestPlan(rawText),
+      bootstrap: false,
     };
 
     item.filePaths = extractFilePaths(item);

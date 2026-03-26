@@ -24,6 +24,7 @@ import {
 
 export type ItemState =
   | "merged"
+  | "bootstrapping"
   | "implementing"
   | "ci-failed"
   | "ci-pending"
@@ -58,6 +59,7 @@ export function stateColor(state: ItemState): string {
   switch (state) {
     case "merged":
       return GREEN;
+    case "bootstrapping":
     case "implementing":
     case "in-progress":
       return YELLOW;
@@ -80,6 +82,7 @@ export function stateIcon(state: ItemState): string {
   switch (state) {
     case "merged":
       return "✓";
+    case "bootstrapping":
     case "implementing":
     case "in-progress":
       return "▸";
@@ -103,6 +106,8 @@ export function stateLabel(state: ItemState): string {
   switch (state) {
     case "merged":
       return "Merged";
+    case "bootstrapping":
+      return "Bootstrapping";
     case "implementing":
       return "Implementing";
     case "ci-failed":
@@ -193,6 +198,7 @@ export function formatBatchProgress(items: StatusItem[]): string {
     "review",
     "pr-open",
     "ci-pending",
+    "bootstrapping",
     "implementing",
     "in-progress",
     "ci-failed",
@@ -505,6 +511,8 @@ export function mapDaemonItemState(orchState: string): ItemState {
     case "merged":
     case "done":
       return "merged";
+    case "bootstrapping":
+      return "bootstrapping";
     case "implementing":
     case "launching":
       return "implementing";

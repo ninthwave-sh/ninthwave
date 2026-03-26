@@ -69,6 +69,7 @@ export function taskToTodoItem(task: ClickUpTask): TodoItem {
     rawText: task.description ?? "",
     filePaths: [],
     testPlan: "",
+    bootstrap: false,
   };
 }
 

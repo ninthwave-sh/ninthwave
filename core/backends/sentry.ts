@@ -109,6 +109,7 @@ export function issueToTodoItem(
     rawText: rawLines.join("\n"),
     filePaths,
     testPlan: "",
+    bootstrap: false,
   };
 }
 

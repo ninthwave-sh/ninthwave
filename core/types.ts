@@ -16,6 +16,7 @@ export interface TodoItem {
   rawText: string; // full markdown text of the TODO item
   filePaths: string[]; // extracted file paths mentioned in the item
   testPlan: string; // extracted from **Test plan:** section (empty if not present)
+  bootstrap: boolean; // whether the orchestrator should bootstrap the target repo before launch
 }
 
 export const PRIORITY_NUM: Record<Priority, number> = {

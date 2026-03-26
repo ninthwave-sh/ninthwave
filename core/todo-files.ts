@@ -74,6 +74,7 @@ export function parseTodoFile(filePath: string): TodoItem | null {
   let bundle = "";
   let domain = "";
   let repoAlias = "";
+  let bootstrap = false;
 
   for (const line of lines) {
     const priorityMatch = line.match(/^\*\*Priority:\*\*\s+(.+)/);
@@ -101,6 +102,11 @@ export function parseTodoFile(filePath: string): TodoItem | null {
     const repoMatch = line.match(/^\*\*Repo:\*\*\s+(.+)/);
     if (repoMatch) {
       repoAlias = repoMatch[1]!.trim();
+    }
+
+    const bootstrapMatch = line.match(/^\*\*Bootstrap:\*\*\s+(.+)/i);
+    if (bootstrapMatch) {
+      bootstrap = bootstrapMatch[1]!.trim().toLowerCase() === "true";
     }
   }
 
@@ -143,6 +149,7 @@ export function parseTodoFile(filePath: string): TodoItem | null {
     rawText,
     filePaths: [],
     testPlan: extractTestPlan(rawText),
+    bootstrap,
   };
 
   item.filePaths = extractFilePaths(item);
@@ -283,6 +290,11 @@ export function writeTodoFile(todosDir: string, item: TodoItem): void {
   // Repo
   if (item.repoAlias) {
     lines.push(`**Repo:** ${item.repoAlias}`);
+  }
+
+  // Bootstrap
+  if (item.bootstrap) {
+    lines.push(`**Bootstrap:** true`);
   }
 
   lines.push("");

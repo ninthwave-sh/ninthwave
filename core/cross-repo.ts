@@ -9,7 +9,7 @@ import {
 import { join, dirname, basename } from "path";
 import { acquireLock, releaseLock } from "./lock.ts";
 import { info, BOLD, CYAN, GREEN, RED, RESET } from "./output.ts";
-import { run } from "./shell.ts";
+import { run, GIT_TIMEOUT, GH_TIMEOUT } from "./shell.ts";
 import type { WorktreeInfo } from "./types.ts";
 
 /**
@@ -187,6 +187,179 @@ export function ensureWorktreeExcluded(targetRepo: string): void {
     mkdirSync(dirname(excludeFile), { recursive: true });
     writeFileSync(excludeFile, ".worktrees/\n");
   }
+}
+
+export type BootstrapResult =
+  | { status: "exists" }
+  | { status: "cloned"; path: string }
+  | { status: "created"; path: string }
+  | { status: "failed"; reason: string };
+
+/**
+ * Bootstrap a target repo for a cross-repo TODO.
+ *
+ * Resolution chain:
+ * 1. If the repo already exists locally (sibling dir or repos.conf) → return exists.
+ * 2. If a GitHub remote exists for the alias → clone it to the sibling directory.
+ * 3. If neither exists → create the directory, git init, create the GitHub repo.
+ *
+ * @param alias - The repo alias from the TODO's Repo: field.
+ * @param projectRoot - The hub repo's root directory.
+ * @param ghOrg - GitHub org/user for repo creation (derived from hub repo's remote).
+ */
+export function bootstrapRepo(
+  alias: string,
+  projectRoot: string,
+  ghOrg?: string,
+): BootstrapResult {
+  // bootstrap: true without a Repo: field (or hub-local aliases) → no-op
+  if (!alias || alias === "self" || alias === "hub") {
+    return { status: "exists" };
+  }
+
+  // Check if the repo already exists locally
+  try {
+    resolveRepo(alias, projectRoot);
+    return { status: "exists" };
+  } catch {
+    // Not found locally — continue to bootstrap
+  }
+
+  const parentDir = dirname(projectRoot);
+  const targetPath = join(parentDir, alias);
+
+  // Detect the GitHub org from the hub repo's remote (for repo creation)
+  const org = ghOrg ?? detectGhOrg(projectRoot);
+
+  // Check if a remote repo exists on GitHub
+  const remoteExists = checkRemoteExists(org, alias);
+
+  if (remoteExists) {
+    // Clone the remote repo to the sibling directory
+    try {
+      const cloneResult = run(
+        "gh",
+        ["repo", "clone", `${org}/${alias}`, targetPath],
+        { timeout: GH_TIMEOUT },
+      );
+      if (cloneResult.exitCode !== 0) {
+        return {
+          status: "failed",
+          reason: `clone-failed: gh repo clone ${org}/${alias} failed: ${cloneResult.stderr}`,
+        };
+      }
+      return { status: "cloned", path: targetPath };
+    } catch (e) {
+      return {
+        status: "failed",
+        reason: `clone-failed: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+  }
+
+  // Neither local nor remote exists — create from scratch
+  try {
+    mkdirSync(targetPath, { recursive: true });
+
+    // git init
+    const initResult = run("git", ["init", "--quiet"], {
+      cwd: targetPath,
+      timeout: GIT_TIMEOUT,
+    });
+    if (initResult.exitCode !== 0) {
+      return {
+        status: "failed",
+        reason: `init-failed: git init failed: ${initResult.stderr}`,
+      };
+    }
+
+    // Configure git user from hub repo
+    const hubEmail = run("git", ["-C", projectRoot, "config", "user.email"]);
+    const hubName = run("git", ["-C", projectRoot, "config", "user.name"]);
+    if (hubEmail.exitCode === 0 && hubEmail.stdout) {
+      run("git", ["-C", targetPath, "config", "user.email", hubEmail.stdout]);
+    }
+    if (hubName.exitCode === 0 && hubName.stdout) {
+      run("git", ["-C", targetPath, "config", "user.name", hubName.stdout]);
+    }
+
+    // Create initial commit
+    const readmePath = join(targetPath, "README.md");
+    writeFileSync(readmePath, `# ${alias}\n`);
+    run("git", ["-C", targetPath, "add", "."], { timeout: GIT_TIMEOUT });
+    run("git", ["-C", targetPath, "commit", "-m", "Initial commit", "--quiet"], {
+      timeout: GIT_TIMEOUT,
+    });
+
+    // Rename default branch to main
+    run("git", ["-C", targetPath, "branch", "-M", "main"], {
+      timeout: GIT_TIMEOUT,
+    });
+
+    // Create GitHub repo (private by default)
+    if (org) {
+      const createResult = run(
+        "gh",
+        [
+          "repo",
+          "create",
+          `${org}/${alias}`,
+          "--private",
+          "--source",
+          targetPath,
+          "--push",
+        ],
+        { timeout: GH_TIMEOUT },
+      );
+      if (createResult.exitCode !== 0) {
+        return {
+          status: "failed",
+          reason: `gh-create-failed: gh repo create ${org}/${alias} failed: ${createResult.stderr}`,
+        };
+      }
+    }
+
+    return { status: "created", path: targetPath };
+  } catch (e) {
+    return {
+      status: "failed",
+      reason: `create-failed: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
+}
+
+/**
+ * Detect the GitHub org/user from the hub repo's remote origin URL.
+ * Supports SSH (git@github.com:org/repo.git) and HTTPS (https://github.com/org/repo).
+ * Returns empty string if detection fails.
+ */
+export function detectGhOrg(projectRoot: string): string {
+  const result = run("git", ["-C", projectRoot, "remote", "get-url", "origin"]);
+  if (result.exitCode !== 0 || !result.stdout) return "";
+
+  const url = result.stdout.trim();
+
+  // SSH: git@github.com:org/repo.git
+  const sshMatch = url.match(/github\.com[:/]([^/]+)\//);
+  if (sshMatch) return sshMatch[1]!;
+
+  // HTTPS: https://github.com/org/repo
+  const httpsMatch = url.match(/github\.com\/([^/]+)\//);
+  if (httpsMatch) return httpsMatch[1]!;
+
+  return "";
+}
+
+/**
+ * Check if a remote repo exists on GitHub.
+ * Uses `gh repo view` which returns exit code 0 if the repo exists.
+ */
+function checkRemoteExists(org: string, alias: string): boolean {
+  if (!org) return false;
+  const result = run("gh", ["repo", "view", `${org}/${alias}`, "--json", "name"], {
+    timeout: GH_TIMEOUT,
+  });
+  return result.exitCode === 0;
 }
 
 /**

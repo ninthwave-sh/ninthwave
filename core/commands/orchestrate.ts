@@ -23,7 +23,7 @@ import {
   type OrchestratorItemState,
 } from "../orchestrator.ts";
 import { parseTodos } from "../parser.ts";
-import { resolveRepo, getWorktreeInfo } from "../cross-repo.ts";
+import { resolveRepo, getWorktreeInfo, bootstrapRepo } from "../cross-repo.ts";
 import { checkPrStatus, scanExternalPRs } from "./watch.ts";
 import { launchSingleItem, launchReviewWorker, detectAiTool } from "./start.ts";
 import { getWorkerHealthStatus, computeScreenHealth, type ScreenHealthStatus } from "../worker-health.ts";
@@ -287,8 +287,8 @@ export function adaptivePollInterval(orch: Orchestrator): number {
     return 5_000;
   }
 
-  // 10s when workers active: launching or implementing
-  if (items.some((i) => i.state === "launching" || i.state === "implementing")) {
+  // 10s when workers active: bootstrapping, launching, or implementing
+  if (items.some((i) => i.state === "bootstrapping" || i.state === "launching" || i.state === "implementing")) {
     return 10_000;
   }
 
@@ -710,6 +710,7 @@ export function syncStatusLabels(
   log?: (entry: LogEntry) => void,
 ): void {
   switch (to) {
+    case "bootstrapping":
     case "launching":
     case "implementing":
       sync.addStatusLabel(itemId, "status:in-progress");
@@ -971,6 +972,18 @@ function handleActionExecution(
     success: result.success,
     error: result.error,
   });
+
+  // Bootstrap success: immediately follow up with a launch action
+  if (action.type === "bootstrap" && result.success) {
+    const orchItem = orch.getItem(action.itemId);
+    if (orchItem && orchItem.state === "launching") {
+      const launchAction: Action = { type: "launch", itemId: action.itemId };
+      if (orchItem.baseBranch) {
+        launchAction.baseBranch = orchItem.baseBranch;
+      }
+      handleActionExecution(launchAction, orch, ctx, deps, log, costData);
+    }
+  }
 
   // Structured log for retry events
   if (action.type === "retry" && result.success) {
@@ -1832,14 +1845,26 @@ export async function cmdOrchestrate(
       try {
         item.resolvedRepoRoot = resolveRepo(alias, projectRoot);
       } catch {
-        // Resolution failure is logged — item stays hub-local as fallback
-        structuredLog({
-          ts: new Date().toISOString(),
-          level: "warn",
-          event: "cross_repo_resolve_failed",
-          itemId: item.id,
-          alias,
-        });
+        // Resolution failed — if item has bootstrap: true, the orchestrator will
+        // bootstrap the repo before launch (via the bootstrap action). Log the
+        // deferred resolution. Non-bootstrap items stay hub-local as fallback.
+        if (item.todo.bootstrap) {
+          structuredLog({
+            ts: new Date().toISOString(),
+            level: "info",
+            event: "cross_repo_bootstrap_deferred",
+            itemId: item.id,
+            alias,
+          });
+        } else {
+          structuredLog({
+            ts: new Date().toISOString(),
+            level: "warn",
+            event: "cross_repo_resolve_failed",
+            itemId: item.id,
+            alias,
+          });
+        }
       }
     }
   }
@@ -1896,6 +1921,7 @@ export async function cmdOrchestrate(
       if (!result) return null;
       return { workspaceRef: result.workspaceRef };
     },
+    bootstrapRepo: (alias, projRoot) => bootstrapRepo(alias, projRoot),
     cleanReview: (itemId, reviewWorkspaceRef) => {
       // Close the review workspace
       try { mux.closeWorkspace(reviewWorkspaceRef); } catch { /* best-effort */ }

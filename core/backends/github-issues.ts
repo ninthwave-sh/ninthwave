@@ -42,6 +42,7 @@ export function issueToTodoItem(issue: GhIssueJson): TodoItem {
     rawText: issue.body ?? "",
     filePaths: [],
     testPlan: "",
+    bootstrap: false,
   };
 }
 

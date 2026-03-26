@@ -132,6 +132,7 @@ export function incidentToTodoItem(incident: PagerDutyIncident): TodoItem {
     rawText: buildRawText(incident),
     filePaths: extractFilePathsFromIncident(incident),
     testPlan: "",
+    bootstrap: false,
   };
 }
 
