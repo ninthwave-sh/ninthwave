@@ -44,6 +44,8 @@ When installed via Homebrew, the `nw` symlink is created automatically by the fo
 
 ## Architecture
 
+> For a deep-dive into the orchestrator state machine, data flow, key abstractions, and extension points, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ```
 ninthwave/                          # The repo IS the installable bundle
 ├── core/
