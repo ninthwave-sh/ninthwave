@@ -81,6 +81,8 @@ export interface OrchestratorItem {
   unchangedCount?: number;
   /** Descriptive reason for why this item failed (e.g., "launch-failed: repo not found", "ci-failed: test timeout"). Set on ci-failed/stuck states, cleared on recovery. */
   failureReason?: string;
+  /** Number of consecutive polls where isWorkerAlive returned false. Used to debounce stuck detection — a single flaky listing shouldn't kill a healthy worker. */
+  notAliveCount?: number;
 }
 
 export interface OrchestratorConfig {
@@ -498,10 +500,16 @@ export class Orchestrator {
 
       case "launching":
         if (snap?.workerAlive) {
+          item.notAliveCount = 0;
           this.transition(item, "implementing", snap?.eventTime);
           actions = [];
         } else if (snap?.workerAlive === false) {
-          actions = this.stuckOrRetry(item, "worker-crashed: session died during launch");
+          item.notAliveCount = (item.notAliveCount ?? 0) + 1;
+          if (item.notAliveCount >= 3) {
+            actions = this.stuckOrRetry(item, "worker-crashed: session died during launch");
+          } else {
+            actions = [];
+          }
         } else {
           actions = [];
         }
@@ -595,9 +603,16 @@ export class Orchestrator {
       actions.push(...this.handlePrLifecycle(item, snap));
       return actions;
     }
-    // If worker died without a PR, retry or mark stuck
+    // If worker died without a PR, retry or mark stuck.
+    // Debounce: require 3 consecutive not-alive checks to avoid false positives
+    // from transient cmux listing failures or slow workspace registration.
     if (snap && snap.workerAlive === false && !snap.prNumber) {
-      return this.stuckOrRetry(item, "worker-crashed: session died without creating PR");
+      item.notAliveCount = (item.notAliveCount ?? 0) + 1;
+      if (item.notAliveCount >= 3) {
+        return this.stuckOrRetry(item, "worker-crashed: session died without creating PR");
+      }
+    } else if (snap && snap.workerAlive === true) {
+      item.notAliveCount = 0;
     }
 
     // Time-based heartbeat: detect workers that are alive but not making progress

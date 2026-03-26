@@ -286,7 +286,9 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
     orch.processTransitions(emptySnapshot(["STUCK-1"]));
     expect(orch.getItem("STUCK-1")!.state).toBe("launching");
 
-    // Worker dies during launch — first crash triggers retry
+    // Worker dies during launch — debounce: 3 consecutive not-alive checks required
+    orch.processTransitions(snapshotWith([{ id: "STUCK-1", workerAlive: false }]));
+    orch.processTransitions(snapshotWith([{ id: "STUCK-1", workerAlive: false }]));
     let actions = orch.processTransitions(
       snapshotWith([{ id: "STUCK-1", workerAlive: false }]),
     );
@@ -296,7 +298,7 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
     expect(actions.some((a) => a.type === "retry")).toBe(true);
     expect(actions.some((a) => a.type === "launch")).toBe(true);
 
-    // Worker dies again — retries exhausted, marks stuck
+    // Worker dies again — notAliveCount carries over, triggers on next false
     actions = orch.processTransitions(
       snapshotWith([{ id: "STUCK-1", workerAlive: false }]),
     );
@@ -316,16 +318,30 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
     );
     expect(orch.getItem("STUCK-2")!.state).toBe("implementing");
 
-    // Worker dies without creating a PR
+    // Worker dies without creating a PR — requires 3 consecutive not-alive checks (debounce)
+    orch.processTransitions(
+      snapshotWith([{ id: "STUCK-2", workerAlive: false }]),
+    );
+    expect(orch.getItem("STUCK-2")!.state).toBe("implementing"); // not stuck yet (1/3)
+    orch.processTransitions(
+      snapshotWith([{ id: "STUCK-2", workerAlive: false }]),
+    );
+    expect(orch.getItem("STUCK-2")!.state).toBe("implementing"); // not stuck yet (2/3)
     let actions = orch.processTransitions(
       snapshotWith([{ id: "STUCK-2", workerAlive: false }]),
     );
-    // Should retry
+    // 3rd consecutive check — should retry
     expect(orch.getItem("STUCK-2")!.retryCount).toBe(1);
     expect(orch.getItem("STUCK-2")!.state).toBe("launching");
     expect(actions.some((a) => a.type === "retry")).toBe(true);
 
-    // Second crash — stuck
+    // Second crash — 3 more consecutive not-alive checks → stuck
+    orch.processTransitions(
+      snapshotWith([{ id: "STUCK-2", workerAlive: false }]),
+    );
+    orch.processTransitions(
+      snapshotWith([{ id: "STUCK-2", workerAlive: false }]),
+    );
     actions = orch.processTransitions(
       snapshotWith([{ id: "STUCK-2", workerAlive: false }]),
     );
