@@ -9,4 +9,4 @@ This is a recurring meta-item. When all other TODOs are complete, this item trig
 
 Acceptance: New TODO items are written to `.ninthwave/todos/`. A new vision exploration item is added depending on the new terminal items. The friction log is reviewed and actionable items are addressed. `.ninthwave/todos/` is non-empty after this item completes.
 
-Key files: `.ninthwave/todos/`, `CLAUDE.md`, `README.md`, `vision.md`
+Key files: `.ninthwave/todos/`, `CLAUDE.md`, `README.md`, `VISION.md`
