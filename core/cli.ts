@@ -286,7 +286,7 @@ switch (command) {
     cmdPartitions(partitionDir);
     break;
   case "start":
-    cmdStart(args, todosDir, worktreeDir, projectRoot);
+    await cmdStart(args, todosDir, worktreeDir, projectRoot);
     break;
   case "close-workspaces":
     cmdCloseWorkspaces();

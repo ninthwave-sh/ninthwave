@@ -12,6 +12,8 @@ export const KNOWN_CONFIG_KEYS = new Set([
   "sandbox_extra_rw_paths",
   "sandbox_extra_ro_paths",
   "sandbox_extra_hosts",
+  "proxy_policy",
+  "proxy_credentials",
   "CLICKUP_LIST_ID",
   "sentry_org",
   "sentry_project",

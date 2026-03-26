@@ -18,7 +18,7 @@ vi.mock("../core/git.ts", () => ({
   createWorktree: vi.fn(),
 }));
 
-import { detectAiTool, cmdStart, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractTodoText } from "../core/commands/start.ts";
+import { detectAiTool, cmdStart, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractTodoText, buildCaCertEnv, getSystemCaBundlePath } from "../core/commands/start.ts";
 import { parseTodos } from "../core/parser.ts";
 import { fetchOrigin, ffMerge, createWorktree, branchExists } from "../core/git.ts";
 
@@ -128,7 +128,7 @@ function setupTodosDir(repo: string): string {
   return todosDir;
 }
 
-function captureOutput(fn: () => void): string {
+async function captureOutput(fn: () => void | Promise<void>): Promise<string> {
   const lines: string[] = [];
   const origLog = console.log;
   const origError = console.error;
@@ -141,7 +141,7 @@ function captureOutput(fn: () => void): string {
   }) as never;
 
   try {
-    fn();
+    await fn();
   } catch (e: unknown) {
     if (e instanceof Error && !e.message.startsWith("EXIT:")) throw e;
   } finally {
@@ -217,37 +217,37 @@ describe("cmdStart", () => {
     cleanupTempRepos();
   });
 
-  it("dies with no arguments", () => {
+  it("dies with no arguments", async () => {
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
-    const output = captureOutput(() =>
+    const output = await captureOutput(() =>
       cmdStart([], todosDir, worktreeDir, repo),
     );
 
     expect(output).toContain("Usage");
   });
 
-  it("dies when item ID not found", () => {
+  it("dies when item ID not found", async () => {
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
-    const output = captureOutput(() =>
+    const output = await captureOutput(() =>
       cmdStart(["NONEXISTENT-1"], todosDir, worktreeDir, repo),
     );
 
     expect(output).toContain("not found");
   });
 
-  it("launches session for a valid item", () => {
+  it("launches session for a valid item", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
-    const output = captureOutput(() =>
+    const output = await captureOutput(() =>
       cmdStart(["M-CI-1"], todosDir, worktreeDir, repo, mockMux),
     );
 
@@ -255,7 +255,7 @@ describe("cmdStart", () => {
     expect(mockMux.launchWorkspace).toHaveBeenCalled();
   });
 
-  it("reports detected AI tool", () => {
+  it("reports detected AI tool", async () => {
     process.env.NINTHWAVE_AI_TOOL = "opencode";
 
     const mockMux = createMockMux();
@@ -263,7 +263,7 @@ describe("cmdStart", () => {
     const todosDir = setupTodosDir(repo);
     const worktreeDir = join(repo, ".worktrees");
 
-    const output = captureOutput(() =>
+    const output = await captureOutput(() =>
       cmdStart(["M-CI-1"], todosDir, worktreeDir, repo, mockMux),
     );
 
@@ -284,7 +284,7 @@ describe("launchSingleItem", () => {
     cleanupTempRepos();
   });
 
-  it("creates worktree and launches session for a single item", () => {
+  it("creates worktree and launches session for a single item", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -292,7 +292,7 @@ describe("launchSingleItem", () => {
     const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    const result = captureOutput(() => {
+    const result = await captureOutput(() => {
       const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("todo-M-CI-1");
@@ -303,7 +303,7 @@ describe("launchSingleItem", () => {
     expect(result).toContain("Creating worktree for M-CI-1");
   });
 
-  it("returns null when mux launch fails", () => {
+  it("returns null when mux launch fails", async () => {
     const mockMux = createMockMux();
     mockMux.launchWorkspace.mockReturnValueOnce(null);
 
@@ -313,7 +313,7 @@ describe("launchSingleItem", () => {
     const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    const result = captureOutput(() => {
+    const result = await captureOutput(() => {
       const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).toBeNull();
     });
@@ -321,7 +321,7 @@ describe("launchSingleItem", () => {
     expect(result).toContain("cmux launch failed");
   });
 
-  it("allocates a partition for the item", () => {
+  it("allocates a partition for the item", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -329,7 +329,7 @@ describe("launchSingleItem", () => {
     const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    const result = captureOutput(() => {
+    const result = await captureOutput(() => {
       launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
     });
 
@@ -337,7 +337,7 @@ describe("launchSingleItem", () => {
     expect(result).toContain("partition 1");
   });
 
-  it("ensures worktree directory is created", () => {
+  it("ensures worktree directory is created", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -346,7 +346,7 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     // worktreeDir doesn't exist yet — launchSingleItem should create it
-    captureOutput(() => {
+    await captureOutput(() => {
       launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
     });
 
@@ -354,7 +354,7 @@ describe("launchSingleItem", () => {
     expect(existsSync(worktreeDir)).toBe(true);
   });
 
-  it("logs warning when fetchOrigin fails but still creates worktree", () => {
+  it("logs warning when fetchOrigin fails but still creates worktree", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -366,7 +366,7 @@ describe("launchSingleItem", () => {
       throw new Error("network timeout");
     });
 
-    const output = captureOutput(() => {
+    const output = await captureOutput(() => {
       const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("todo-M-CI-1");
@@ -378,7 +378,7 @@ describe("launchSingleItem", () => {
     expect(mockMux.launchWorkspace).toHaveBeenCalled();
   });
 
-  it("logs warning when ffMerge fails but still creates worktree", () => {
+  it("logs warning when ffMerge fails but still creates worktree", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -390,7 +390,7 @@ describe("launchSingleItem", () => {
       throw new Error("not a fast-forward");
     });
 
-    const output = captureOutput(() => {
+    const output = await captureOutput(() => {
       const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("todo-M-CI-1");
@@ -402,7 +402,7 @@ describe("launchSingleItem", () => {
     expect(mockMux.launchWorkspace).toHaveBeenCalled();
   });
 
-  it("warning includes actionable context about stale worktree", () => {
+  it("warning includes actionable context about stale worktree", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -417,7 +417,7 @@ describe("launchSingleItem", () => {
       throw new Error("diverged branches");
     });
 
-    const output = captureOutput(() => {
+    const output = await captureOutput(() => {
       launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
     });
 
@@ -430,7 +430,7 @@ describe("launchSingleItem", () => {
     expect(output).toContain("M-CI-1");
   });
 
-  it("returns correct worktreePath for hub repo items", () => {
+  it("returns correct worktreePath for hub repo items", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -438,14 +438,14 @@ describe("launchSingleItem", () => {
     const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    captureOutput(() => {
+    await captureOutput(() => {
       const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toBe(join(worktreeDir, "todo-M-CI-1"));
     });
   });
 
-  it("creates worktree from dep branch when baseBranch is set", () => {
+  it("creates worktree from dep branch when baseBranch is set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -453,7 +453,7 @@ describe("launchSingleItem", () => {
     const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    captureOutput(() => {
+    await captureOutput(() => {
       const res = launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux, {
         baseBranch: "todo/H-1-1",
       });
@@ -469,7 +469,7 @@ describe("launchSingleItem", () => {
     );
   });
 
-  it("fetches dep branch instead of main when baseBranch is set", () => {
+  it("fetches dep branch instead of main when baseBranch is set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -477,7 +477,7 @@ describe("launchSingleItem", () => {
     const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    const output = captureOutput(() => {
+    const output = await captureOutput(() => {
       launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux, {
         baseBranch: "todo/H-1-1",
       });
@@ -493,7 +493,7 @@ describe("launchSingleItem", () => {
     expect(output).toContain("Fetching dependency branch todo/H-1-1");
   });
 
-  it("includes BASE_BRANCH in system prompt when baseBranch is set", () => {
+  it("includes BASE_BRANCH in system prompt when baseBranch is set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -502,7 +502,7 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     // Use opencode so the full system prompt is sent via sendMessage (not --append-system-prompt)
-    captureOutput(() => {
+    await captureOutput(() => {
       launchSingleItem(item, todosDir, worktreeDir, repo, "opencode", mockMux, {
         baseBranch: "todo/H-1-1",
       });
@@ -515,7 +515,7 @@ describe("launchSingleItem", () => {
     expect(sentPrompt).toContain("BASE_BRANCH: todo/H-1-1");
   });
 
-  it("does not include BASE_BRANCH in system prompt when baseBranch is not set", () => {
+  it("does not include BASE_BRANCH in system prompt when baseBranch is not set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -524,7 +524,7 @@ describe("launchSingleItem", () => {
     const item = items.find((i) => i.id === "M-CI-1")!;
 
     // Use opencode so the full system prompt is sent via sendMessage
-    captureOutput(() => {
+    await captureOutput(() => {
       launchSingleItem(item, todosDir, worktreeDir, repo, "opencode", mockMux);
     });
 
@@ -535,7 +535,7 @@ describe("launchSingleItem", () => {
     expect(sentPrompt).not.toContain("BASE_BRANCH:");
   });
 
-  it("non-stacked launch still fetches main and calls ffMerge", () => {
+  it("non-stacked launch still fetches main and calls ffMerge", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -543,7 +543,7 @@ describe("launchSingleItem", () => {
     const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    captureOutput(() => {
+    await captureOutput(() => {
       launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
     });
 
@@ -822,7 +822,7 @@ describe("launchSingleItem agentName default", () => {
     cleanupTempRepos();
   });
 
-  it("launches with --agent todo-worker by default", () => {
+  it("launches with --agent todo-worker by default", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
     const todosDir = setupTodosDir(repo);
@@ -830,7 +830,7 @@ describe("launchSingleItem agentName default", () => {
     const items = parseTodos(todosDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    captureOutput(() => {
+    await captureOutput(() => {
       launchSingleItem(item, todosDir, worktreeDir, repo, "claude", mockMux);
     });
 
@@ -854,11 +854,11 @@ describe("launchReviewWorker", () => {
     cleanupTempRepos();
   });
 
-  it("off mode does not create a worktree and returns worktreePath null", () => {
+  it("off mode does not create a worktree and returns worktreePath null", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
-    const result = captureOutput(() => {
+    const result = await captureOutput(() => {
       const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toBeNull();
@@ -877,11 +877,11 @@ describe("launchReviewWorker", () => {
     expect(result).toContain("off mode");
   });
 
-  it("direct mode creates worktree from todo/{id} branch", () => {
+  it("direct mode creates worktree from todo/{id} branch", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
-    const result = captureOutput(() => {
+    const result = await captureOutput(() => {
       const res = launchReviewWorker(42, "H-RVW-1", "direct", repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("review-H-RVW-1");
@@ -901,11 +901,11 @@ describe("launchReviewWorker", () => {
     expect(result).toContain("Creating review worktree for H-RVW-1");
   });
 
-  it("pr mode creates worktree same as direct mode", () => {
+  it("pr mode creates worktree same as direct mode", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
-    captureOutput(() => {
+    await captureOutput(() => {
       const res = launchReviewWorker(42, "H-RVW-1", "pr", repo, "claude", mockMux);
       expect(res).not.toBeNull();
       expect(res!.worktreePath).toContain("review-H-RVW-1");
@@ -921,12 +921,12 @@ describe("launchReviewWorker", () => {
     );
   });
 
-  it("system prompt contains correct YOUR_REVIEW_PR and AUTO_FIX_MODE", () => {
+  it("system prompt contains correct YOUR_REVIEW_PR and AUTO_FIX_MODE", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
     // Use opencode so the system prompt is sent via sendMessage
-    captureOutput(() => {
+    await captureOutput(() => {
       launchReviewWorker(99, "H-RVW-2", "direct", repo, "opencode", mockMux);
     });
 
@@ -940,11 +940,11 @@ describe("launchReviewWorker", () => {
     expect(sentPrompt).toContain(`REPO_ROOT: ${repo}`);
   });
 
-  it("system prompt contains AUTO_FIX_MODE off for off mode", () => {
+  it("system prompt contains AUTO_FIX_MODE off for off mode", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
-    captureOutput(() => {
+    await captureOutput(() => {
       launchReviewWorker(50, "H-RVW-3", "off", repo, "opencode", mockMux);
     });
 
@@ -955,11 +955,11 @@ describe("launchReviewWorker", () => {
     expect(sentPrompt).toContain("AUTO_FIX_MODE: off");
   });
 
-  it("includes BASE_BRANCH in system prompt when baseBranch is set", () => {
+  it("includes BASE_BRANCH in system prompt when baseBranch is set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
-    captureOutput(() => {
+    await captureOutput(() => {
       launchReviewWorker(42, "H-RVW-1", "off", repo, "opencode", mockMux, {
         baseBranch: "todo/H-DEP-1",
       });
@@ -971,11 +971,11 @@ describe("launchReviewWorker", () => {
     expect(sentPrompt).toContain("BASE_BRANCH: todo/H-DEP-1");
   });
 
-  it("does not include BASE_BRANCH when baseBranch is not set", () => {
+  it("does not include BASE_BRANCH when baseBranch is not set", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
-    captureOutput(() => {
+    await captureOutput(() => {
       launchReviewWorker(42, "H-RVW-1", "off", repo, "opencode", mockMux);
     });
 
@@ -985,13 +985,13 @@ describe("launchReviewWorker", () => {
     expect(sentPrompt).not.toContain("BASE_BRANCH:");
   });
 
-  it("launches with --agent review-worker for all modes", () => {
+  it("launches with --agent review-worker for all modes", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
     for (const mode of ["off", "direct", "pr"] as const) {
       vi.clearAllMocks();
-      captureOutput(() => {
+      await captureOutput(() => {
         launchReviewWorker(42, "H-RVW-1", mode, repo, "claude", mockMux);
       });
 
@@ -1003,7 +1003,7 @@ describe("launchReviewWorker", () => {
     }
   });
 
-  it("returns null when fetch fails in direct mode", () => {
+  it("returns null when fetch fails in direct mode", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
@@ -1011,7 +1011,7 @@ describe("launchReviewWorker", () => {
       throw new Error("branch not found");
     });
 
-    const result = captureOutput(() => {
+    const result = await captureOutput(() => {
       const res = launchReviewWorker(42, "H-RVW-1", "direct", repo, "claude", mockMux);
       expect(res).toBeNull();
     });
@@ -1020,12 +1020,12 @@ describe("launchReviewWorker", () => {
     expect(mockMux.launchWorkspace).not.toHaveBeenCalled();
   });
 
-  it("returns null when mux launch fails", () => {
+  it("returns null when mux launch fails", async () => {
     const mockMux = createMockMux();
     mockMux.launchWorkspace.mockReturnValueOnce(null);
     const repo = setupTempRepo();
 
-    captureOutput(() => {
+    await captureOutput(() => {
       const res = launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux);
       expect(res).toBeNull();
     });
@@ -1033,17 +1033,84 @@ describe("launchReviewWorker", () => {
     expect(mockMux.launchWorkspace).toHaveBeenCalled();
   });
 
-  it("deletes stale review branch before creating worktree", () => {
+  it("deletes stale review branch before creating worktree", async () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();
 
     (branchExists as Mock).mockReturnValueOnce(true);
 
-    captureOutput(() => {
+    await captureOutput(() => {
       launchReviewWorker(42, "H-RVW-1", "direct", repo, "claude", mockMux);
     });
 
     const { deleteBranch } = require("../core/git.ts");
     expect(deleteBranch).toHaveBeenCalledWith(repo, "review/H-RVW-1");
+  });
+});
+
+describe("buildCaCertEnv", () => {
+  afterEach(() => {
+    cleanupTempRepos();
+  });
+
+  it("returns null when session CA does not exist", () => {
+    const result = buildCaCertEnv("/nonexistent/ca.pem", "/tmp/session");
+    expect(result).toBeNull();
+  });
+
+  it("sets NODE_EXTRA_CA_CERTS to session CA path", () => {
+    const sessionDir = setupTempRepo();
+    const caPath = join(sessionDir, "ca.pem");
+    writeFileSync(caPath, "-----BEGIN CERTIFICATE-----\nFAKE_CA\n-----END CERTIFICATE-----\n");
+
+    const env = buildCaCertEnv(caPath, sessionDir);
+    expect(env).not.toBeNull();
+    expect(env!.NODE_EXTRA_CA_CERTS).toBe(caPath);
+  });
+
+  it("sets GIT_SSL_CAINFO to session CA path", () => {
+    const sessionDir = setupTempRepo();
+    const caPath = join(sessionDir, "ca.pem");
+    writeFileSync(caPath, "-----BEGIN CERTIFICATE-----\nFAKE_CA\n-----END CERTIFICATE-----\n");
+
+    const env = buildCaCertEnv(caPath, sessionDir);
+    expect(env).not.toBeNull();
+    expect(env!.GIT_SSL_CAINFO).toBe(caPath);
+  });
+
+  it("sets SSL_CERT_FILE to concatenated bundle when system CAs exist", () => {
+    const sessionDir = setupTempRepo();
+    const caPath = join(sessionDir, "ca.pem");
+    const sessionCa = "-----BEGIN CERTIFICATE-----\nSESSION_CA\n-----END CERTIFICATE-----\n";
+    writeFileSync(caPath, sessionCa);
+
+    const env = buildCaCertEnv(caPath, sessionDir);
+    expect(env).not.toBeNull();
+    // SSL_CERT_FILE should point to a bundle path (either concatenated or just session CA)
+    expect(env!.SSL_CERT_FILE).toBeTruthy();
+
+    // If system CAs are available, the bundle should be in the session dir
+    if (getSystemCaBundlePath()) {
+      const bundlePath = join(sessionDir, "ca-bundle.pem");
+      expect(env!.SSL_CERT_FILE).toBe(bundlePath);
+      // Bundle should contain both system CAs and session CA
+      const { readFileSync } = require("fs");
+      const bundleContent = readFileSync(bundlePath, "utf-8");
+      expect(bundleContent).toContain("SESSION_CA");
+    } else {
+      // No system CAs — falls back to just session CA
+      expect(env!.SSL_CERT_FILE).toBe(caPath);
+    }
+  });
+});
+
+describe("getSystemCaBundlePath", () => {
+  it("returns a string path or null", () => {
+    const result = getSystemCaBundlePath();
+    // On CI/macOS /etc/ssl/cert.pem should exist; on some Linux it may not
+    if (result !== null) {
+      expect(typeof result).toBe("string");
+      expect(result).toMatch(/\.pem$|\.crt$/);
+    }
   });
 });

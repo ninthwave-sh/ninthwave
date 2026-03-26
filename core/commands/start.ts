@@ -2,7 +2,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, copyFileSync } from "fs";
 import { join, basename, dirname } from "path";
-import { tmpdir } from "os";
+import { tmpdir, platform } from "os";
 import { parseTodos } from "../parser.ts";
 import { die, warn, info, GREEN, RESET } from "../output.ts";
 import { splitIds } from "../todo-utils.ts";
@@ -31,6 +31,9 @@ import { cmdConflicts } from "./conflicts.ts";
 import { readTodo } from "../todo-files.ts";
 import { wrapWithSandbox } from "../sandbox.ts";
 import { applyGithubToken } from "../gh.ts";
+import { loadConfig } from "../config.ts";
+import { isProxyAvailable, warnOnceNoProxy, startProxy } from "../proxy-launcher.ts";
+import type { ProxyHandle } from "../proxy-launcher.ts";
 import type { TodoItem } from "../types.ts";
 
 /**
@@ -159,7 +162,7 @@ export function launchAiSession(
   safeTitle: string,
   promptFile: string,
   mux: Multiplexer,
-  options: { noSandbox?: boolean; projectRoot?: string; agentName?: string } = {},
+  options: { noSandbox?: boolean; projectRoot?: string; agentName?: string; upstreamProxyPort?: number } = {},
 ): string | null {
   const agentName = options.agentName ?? "todo-worker";
   let cmd = "";
@@ -187,6 +190,7 @@ export function launchAiSession(
   if (options.projectRoot) {
     cmd = wrapWithSandbox(cmd, worktreePath, options.projectRoot, {
       disabled: options.noSandbox,
+      upstreamProxyPort: options.upstreamProxyPort,
     });
   }
 
@@ -245,7 +249,7 @@ export function launchSingleItem(
   projectRoot: string,
   aiTool: string,
   mux: Multiplexer = getMux(),
-  options: { noSandbox?: boolean; baseBranch?: string } = {},
+  options: { noSandbox?: boolean; baseBranch?: string; upstreamProxyPort?: number } = {},
 ): LaunchResult | null {
   let targetRepo: string;
   try {
@@ -377,7 +381,7 @@ ${todoText}`;
       safeTitle,
       promptFile,
       mux,
-      { noSandbox: options.noSandbox, projectRoot },
+      { noSandbox: options.noSandbox, projectRoot, upstreamProxyPort: options.upstreamProxyPort },
     );
     if (!workspaceRef) return null;
     return { worktreePath, workspaceRef };
@@ -512,13 +516,74 @@ ${baseBranchLine}${securityLine}`;
   }
 }
 
-export function cmdStart(
+/**
+ * Locate the system CA certificate bundle.
+ * Returns the path to the system CA bundle, or null if not found.
+ */
+export function getSystemCaBundlePath(): string | null {
+  const candidates =
+    platform() === "darwin"
+      ? ["/etc/ssl/cert.pem"]
+      : [
+          "/etc/ssl/certs/ca-certificates.crt", // Debian/Ubuntu
+          "/etc/pki/tls/certs/ca-bundle.crt", // RHEL/CentOS/Fedora
+          "/etc/ssl/ca-bundle.pem", // OpenSUSE
+          "/etc/ssl/cert.pem", // Alpine/fallback
+        ];
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * Build CA certificate environment variables for worker processes.
+ *
+ * Workers behind the MITM policy proxy need to trust the proxy's session CA.
+ * - NODE_EXTRA_CA_CERTS → session CA cert (Node/Bun trusts it on top of system CAs)
+ * - GIT_SSL_CAINFO → session CA cert (git trusts it for HTTPS operations)
+ * - SSL_CERT_FILE → concatenated bundle (system CAs + session CA, for general use)
+ *
+ * @param sessionCaPath - Path to the proxy's session CA certificate
+ * @param sessionDir - Directory for writing the concatenated bundle
+ * @returns env var map, or null if the session CA doesn't exist
+ */
+export function buildCaCertEnv(
+  sessionCaPath: string,
+  sessionDir: string,
+): Record<string, string> | null {
+  if (!existsSync(sessionCaPath)) return null;
+
+  const sessionCa = readFileSync(sessionCaPath, "utf-8");
+
+  // NODE_EXTRA_CA_CERTS and GIT_SSL_CAINFO point directly to the session CA
+  const env: Record<string, string> = {
+    NODE_EXTRA_CA_CERTS: sessionCaPath,
+    GIT_SSL_CAINFO: sessionCaPath,
+  };
+
+  // SSL_CERT_FILE needs the full chain: system CAs + session CA
+  const systemCaPath = getSystemCaBundlePath();
+  if (systemCaPath) {
+    const systemCas = readFileSync(systemCaPath, "utf-8");
+    const bundlePath = join(sessionDir, "ca-bundle.pem");
+    writeFileSync(bundlePath, systemCas + "\n" + sessionCa);
+    env.SSL_CERT_FILE = bundlePath;
+  } else {
+    // No system bundle found — use session CA alone
+    env.SSL_CERT_FILE = sessionCaPath;
+  }
+
+  return env;
+}
+
+export async function cmdStart(
   args: string[],
   todosDir: string,
   worktreeDir: string,
   projectRoot: string,
   muxOverride?: Multiplexer,
-): void {
+): Promise<void> {
   // Parse flags before treating remaining args as IDs
   const rawIds: string[] = [];
   let noSandbox = false;
@@ -621,12 +686,53 @@ export function cmdStart(
     getWorktreeInfo(todoId, crossRepoIndex, worktreeDir),
   );
 
+  // ── Policy proxy setup ──────────────────────────────────────────
+  // If proxy_policy is configured, start the MITM policy proxy before
+  // launching workers so they route traffic through it via --upstream-proxy.
+  const config = loadConfig(projectRoot);
+  let proxyHandle: ProxyHandle | null = null;
+  let upstreamProxyPort: number | undefined;
+
+  if (config.proxy_policy) {
+    if (!isProxyAvailable()) {
+      warn(
+        "proxy_policy is configured but ninthwave-proxy binary is not installed. Workers will run without policy proxy.",
+      );
+    } else {
+      const credentialsPath = config.proxy_credentials ?? "";
+      try {
+        proxyHandle = await startProxy({
+          policyFile: config.proxy_policy,
+          credentialsConfig: credentialsPath,
+        });
+        upstreamProxyPort = proxyHandle.port;
+        info(`Policy proxy started on port ${proxyHandle.port}`);
+
+        // Inject CA cert env vars so workers trust the proxy's session CA.
+        // By convention, the proxy writes its CA to <session-dir>/ca.pem.
+        const proxySessionDir = join(tmpdir(), `ninthwave-proxy-${proxyHandle.port}`);
+        const sessionCaPath = join(proxySessionDir, "ca.pem");
+        const caEnv = buildCaCertEnv(sessionCaPath, proxySessionDir);
+        if (caEnv) {
+          for (const [key, val] of Object.entries(caEnv)) {
+            process.env[key] = val;
+          }
+          info("CA cert env vars set for worker processes");
+        }
+      } catch (err) {
+        warn(
+          `Failed to start policy proxy: ${err instanceof Error ? err.message : err}. Workers will run without policy proxy.`,
+        );
+      }
+    }
+  }
+
   const mux = muxOverride ?? getMux();
   const launched: string[] = [];
 
   for (const id of ids) {
     const item = itemMap.get(id)!;
-    launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux, { noSandbox });
+    launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux, { noSandbox, upstreamProxyPort });
     launched.push(id);
   }
 

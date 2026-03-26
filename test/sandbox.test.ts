@@ -16,6 +16,7 @@ import {
   findProfile,
   validateWithDryRun,
   wrapWithSandbox,
+  SANDBOX_CONFIG_KEYS,
   type SandboxConfig,
 } from "../core/sandbox.ts";
 import type { RunResult } from "../core/types.ts";
@@ -506,5 +507,109 @@ describe("wrapWithSandbox", () => {
       runner: nonoInstalled(),
     });
     expect(result).not.toContain("--allow-domain");
+  });
+
+  it("includes --upstream-proxy when upstreamProxyPort is provided (fallback mode)", () => {
+    const repo = setupTempRepo();
+
+    const result = wrapWithSandbox("claude --agent", "/tmp/worktree", repo, {
+      runner: nonoInstalled(),
+      upstreamProxyPort: 8443,
+    });
+    expect(result).toMatch(/^nono run /);
+    expect(result).toContain("--upstream-proxy 127.0.0.1:8443");
+    expect(result).toContain("-- claude --agent");
+  });
+
+  it("includes --upstream-proxy when upstreamProxyPort is provided (profile mode)", () => {
+    const repo = setupTempRepo();
+    const profileDir = join(repo, ".nono", "profiles");
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(join(profileDir, "claude-worker.json"), "{}");
+
+    const result = wrapWithSandbox("claude --agent", "/tmp/worktree", repo, {
+      runner: nonoInstalled(),
+      upstreamProxyPort: 9001,
+    });
+    expect(result).toContain("--profile");
+    expect(result).toContain("--upstream-proxy 127.0.0.1:9001");
+    expect(result).toContain("-- claude --agent");
+  });
+
+  it("does not include --upstream-proxy when upstreamProxyPort is not provided", () => {
+    const repo = setupTempRepo();
+
+    const result = wrapWithSandbox("claude --agent", "/tmp/worktree", repo, {
+      runner: nonoInstalled(),
+    });
+    expect(result).not.toContain("--upstream-proxy");
+  });
+});
+
+describe("buildProfileCommand upstream proxy", () => {
+  it("adds --upstream-proxy flag when port is provided", () => {
+    const result = buildProfileCommand(
+      "/proj/.nono/profiles/claude-worker.json",
+      "/tmp/worktree",
+      "/proj",
+      "claude --agent todo-worker",
+      { upstreamProxyPort: 8443 },
+    );
+    expect(result).toContain("--upstream-proxy 127.0.0.1:8443");
+    // Flag should appear before the -- separator
+    const parts = result.split(" -- ");
+    expect(parts[0]).toContain("--upstream-proxy 127.0.0.1:8443");
+  });
+
+  it("does not add --upstream-proxy when no port provided", () => {
+    const result = buildProfileCommand(
+      "/proj/.nono/profiles/claude-worker.json",
+      "/tmp/worktree",
+      "/proj",
+      "claude --agent todo-worker",
+    );
+    expect(result).not.toContain("--upstream-proxy");
+  });
+});
+
+describe("buildSandboxCommand upstream proxy", () => {
+  it("adds --upstream-proxy flag when port is provided", () => {
+    const config: SandboxConfig = {
+      enabled: true,
+      paths: { readWrite: ["/tmp/worktree"], readOnly: ["/proj"] },
+      network: { allowHosts: [] },
+    };
+
+    const result = buildSandboxCommand(config, "claude --agent", {
+      upstreamProxyPort: 7777,
+    });
+    expect(result).toContain("--upstream-proxy 127.0.0.1:7777");
+    // Flag should appear before the -- separator
+    const parts = result.split(" -- ");
+    expect(parts[0]).toContain("--upstream-proxy 127.0.0.1:7777");
+  });
+
+  it("does not add --upstream-proxy when no port provided", () => {
+    const config: SandboxConfig = {
+      enabled: true,
+      paths: { readWrite: [], readOnly: [] },
+      network: { allowHosts: [] },
+    };
+
+    const result = buildSandboxCommand(config, "cmd");
+    expect(result).not.toContain("--upstream-proxy");
+  });
+});
+
+describe("SANDBOX_CONFIG_KEYS", () => {
+  it("includes proxy_policy and proxy_credentials", () => {
+    expect(SANDBOX_CONFIG_KEYS).toContain("proxy_policy");
+    expect(SANDBOX_CONFIG_KEYS).toContain("proxy_credentials");
+  });
+
+  it("still includes existing sandbox keys", () => {
+    expect(SANDBOX_CONFIG_KEYS).toContain("sandbox_extra_rw_paths");
+    expect(SANDBOX_CONFIG_KEYS).toContain("sandbox_extra_ro_paths");
+    expect(SANDBOX_CONFIG_KEYS).toContain("sandbox_extra_hosts");
   });
 });

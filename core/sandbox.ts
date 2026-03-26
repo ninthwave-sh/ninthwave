@@ -226,12 +226,15 @@ export function findProfile(projectRoot: string, home?: string): string | null {
  *
  * Uses --profile for the policy, --workdir for the worktree (gets RW access
  * via the profile's workdir.access=readwrite), and --read for the project root.
+ * When upstreamProxyPort is provided, adds --upstream-proxy to route traffic
+ * through the policy proxy.
  */
 export function buildProfileCommand(
   profilePath: string,
   worktreePath: string,
   projectRoot: string,
   command: string,
+  options?: { upstreamProxyPort?: number },
 ): string {
   const parts: string[] = [
     "nono", "run", "-s",
@@ -242,6 +245,11 @@ export function buildProfileCommand(
   // Grant read-only access to the main project root (different from worktree)
   if (projectRoot !== worktreePath) {
     parts.push("--read", projectRoot);
+  }
+
+  // Route traffic through the policy proxy when available
+  if (options?.upstreamProxyPort) {
+    parts.push("--upstream-proxy", `127.0.0.1:${options.upstreamProxyPort}`);
   }
 
   parts.push("--", command);
@@ -256,13 +264,18 @@ export function buildProfileCommand(
  * Using --allow-domain triggers nono's network proxy which adds latency
  * and can hang; filesystem isolation is the right default.
  *
+ * When upstreamProxyPort is provided, adds --upstream-proxy to route traffic
+ * through the policy proxy.
+ *
  * @param config - The sandbox configuration
  * @param command - The original command to wrap
+ * @param options - Optional settings (upstreamProxyPort for policy proxy)
  * @returns The sandboxed command string
  */
 export function buildSandboxCommand(
   config: SandboxConfig,
   command: string,
+  options?: { upstreamProxyPort?: number },
 ): string {
   const parts: string[] = ["nono", "run", "-s", "--allow-cwd"];
 
@@ -271,6 +284,11 @@ export function buildSandboxCommand(
   }
   for (const ro of config.paths.readOnly) {
     parts.push("--read", ro);
+  }
+
+  // Route traffic through the policy proxy when available
+  if (options?.upstreamProxyPort) {
+    parts.push("--upstream-proxy", `127.0.0.1:${options.upstreamProxyPort}`);
   }
 
   parts.push("--", command);
@@ -353,9 +371,12 @@ export function wrapWithSandbox(
     disabled?: boolean;
     runner?: ShellRunner;
     warnFn?: (msg: string) => void;
+    /** Port of the upstream policy proxy. When set, adds --upstream-proxy to nono. */
+    upstreamProxyPort?: number;
   } = {},
 ): string {
-  const { disabled = false, runner, warnFn } = options;
+  const { disabled = false, runner, warnFn, upstreamProxyPort } = options;
+  const proxyOpts = upstreamProxyPort ? { upstreamProxyPort } : undefined;
 
   // --no-sandbox opt-out
   if (disabled) return command;
@@ -369,7 +390,7 @@ export function wrapWithSandbox(
   // Try profile-based sandboxing first
   const profilePath = findProfile(projectRoot);
   if (profilePath) {
-    const sandboxed = buildProfileCommand(profilePath, worktreePath, projectRoot, command);
+    const sandboxed = buildProfileCommand(profilePath, worktreePath, projectRoot, command, proxyOpts);
 
     // Validate with dry-run before first use
     if (validateWithDryRun(sandboxed, runner, warnFn)) {
@@ -382,7 +403,7 @@ export function wrapWithSandbox(
   // Fallback: manual flag-building (no profile found)
   const config = buildDefaultConfig(worktreePath, projectRoot);
   const finalConfig = applySandboxOverrides(projectRoot, config);
-  const sandboxed = buildSandboxCommand(finalConfig, command);
+  const sandboxed = buildSandboxCommand(finalConfig, command, proxyOpts);
 
   // Validate fallback command too
   if (validateWithDryRun(sandboxed, runner, warnFn)) {
@@ -396,4 +417,6 @@ export const SANDBOX_CONFIG_KEYS = [
   "sandbox_extra_rw_paths",
   "sandbox_extra_ro_paths",
   "sandbox_extra_hosts",
+  "proxy_policy",
+  "proxy_credentials",
 ];
