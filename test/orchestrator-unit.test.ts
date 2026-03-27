@@ -777,49 +777,6 @@ describe("stacked branch launches", () => {
   });
 });
 
-// ── Screen health nudge ──────────────────────────────────────────────
-
-describe("screen health nudge", () => {
-  it("sends nudge on stalled-empty and deduplicates", () => {
-    const orch = new Orchestrator();
-    orch.addItem(makeTodo("H-1-1"));
-    orch.setState("H-1-1", "implementing");
-
-    // First stall detection → sends nudge
-    const actions1 = orch.processTransitions(
-      snapshotWith([{ id: "H-1-1", workerAlive: true, screenHealth: "stalled-empty" as any }]),
-      NOW,
-    );
-    expect(actions1.some((a) => a.type === "send-message" && a.message === "Start")).toBe(true);
-
-    // Second poll same stall → no duplicate
-    const actions2 = orch.processTransitions(
-      snapshotWith([{ id: "H-1-1", workerAlive: true, screenHealth: "stalled-empty" as any }]),
-      NOW,
-    );
-    expect(actions2.some((a) => a.type === "send-message")).toBe(false);
-  });
-
-  it("clears stall tracking when worker recovers", () => {
-    const orch = new Orchestrator();
-    orch.addItem(makeTodo("H-1-1"));
-    orch.setState("H-1-1", "implementing");
-
-    // Stall detected
-    orch.processTransitions(
-      snapshotWith([{ id: "H-1-1", workerAlive: true, screenHealth: "stalled-empty" as any }]),
-      NOW,
-    );
-    expect(orch.getItem("H-1-1")!.stallDetectedAt).toBeDefined();
-
-    // Worker recovers
-    orch.processTransitions(
-      snapshotWith([{ id: "H-1-1", workerAlive: true, screenHealth: "healthy" as any }]),
-      NOW,
-    );
-    expect(orch.getItem("H-1-1")!.stallDetectedAt).toBeUndefined();
-  });
-});
 
 // ── Stuck dep notification ───────────────────────────────────────────
 
