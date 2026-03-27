@@ -21,6 +21,8 @@ import {
 } from "../core/supervisor.ts";
 import {
   orchestrateLoop,
+  sendSupervisorEvent,
+  buildSupervisorHeartbeat,
   type LogEntry,
   type OrchestrateLoopDeps,
   type OrchestrateLoopConfig,
@@ -784,188 +786,23 @@ describe("shouldActivateSupervisor", () => {
   });
 });
 
-// ── Tick interval logic in orchestrateLoop ───────────────────────────
+// ── Supervisor session events in orchestrateLoop ────────────────────
 
-describe("orchestrateLoop with supervisor", () => {
-  it("invokes supervisor tick at configured interval", async () => {
+describe("orchestrateLoop with supervisor session", () => {
+  it("sends supervisor events on state transitions", async () => {
     const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
     orch.addItem(makeTodo("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
-    let currentTime = new Date("2026-03-24T12:00:00Z");
-
-    const callLLM = vi.fn(() => JSON.stringify({
-      anomalies: ["test anomaly"],
-      interventions: [],
-      frictionObservations: [],
-      processImprovements: [],
-    }));
-
-    const supervisorDeps: SupervisorDeps = {
-      callLLM,
-      now: () => currentTime,
-      log: (entry) => logs.push(entry),
-      writeFile: vi.fn(),
-      mkdirSync: vi.fn(),
-    };
-
-    const buildSnapshot = (): PollSnapshot => {
-      cycle++;
-      if (cycle <= 3) {
-        // Advance time by 2 minutes each cycle
-        currentTime = new Date(currentTime.getTime() + 120_000);
-        return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: ["T-1-1"] };
-      }
-      // Cycle 4+: advance time past the 5-min interval and show PR merged
-      currentTime = new Date(currentTime.getTime() + 120_000);
-      return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
-    };
-
-    const deps: OrchestrateLoopDeps = {
-      buildSnapshot,
-      sleep: () => Promise.resolve(),
-      log: (entry) => logs.push(entry),
-      actionDeps: mockActionDeps(),
-      supervisorDeps,
-    };
-
-    const config: OrchestrateLoopConfig = {
-      supervisor: {
-        intervalMs: 300_000, // 5 minutes
-        maxLogEntries: 50,
-      },
-    };
-
-    await orchestrateLoop(orch, defaultCtx, deps, { ...config, maxIterations: 200 });
-
-    // Supervisor should have been called at least once (after 5+ min elapsed)
-    expect(callLLM).toHaveBeenCalled();
-
-    // Should have supervisor_tick events in logs
-    expect(logs.some((l) => l.event === "supervisor_tick")).toBe(true);
-  });
-
-  it("does not invoke supervisor when not configured", async () => {
-    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
-
-    let cycle = 0;
-    const logs: LogEntry[] = [];
-
-    const buildSnapshot = (): PollSnapshot => {
-      cycle++;
-      if (cycle === 1) return { items: [], readyIds: ["T-1-1"] };
-      if (cycle === 2) return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
-      if (cycle === 3) return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
-      return { items: [], readyIds: [] };
-    };
-
-    const deps: OrchestrateLoopDeps = {
-      buildSnapshot,
-      sleep: () => Promise.resolve(),
-      log: (entry) => logs.push(entry),
-      actionDeps: mockActionDeps(),
-      // no supervisorDeps
-    };
-
-    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 200 });
-
-    // No supervisor events
-    expect(logs.some((l) => l.event === "supervisor_tick")).toBe(false);
-  });
-
-  it("continues running when supervisor call fails", async () => {
-    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
-
-    let cycle = 0;
-    const logs: LogEntry[] = [];
-    let currentTime = new Date("2026-03-24T12:00:00Z");
-
-    const callLLM = vi.fn(() => {
-      throw new Error("LLM service unavailable");
-    });
-
-    const supervisorDeps: SupervisorDeps = {
-      callLLM,
-      now: () => currentTime,
-      log: (entry) => logs.push(entry),
-      writeFile: vi.fn(),
-      mkdirSync: vi.fn(),
-    };
-
-    const buildSnapshot = (): PollSnapshot => {
-      cycle++;
-      // Advance time past supervisor interval each cycle
-      currentTime = new Date(currentTime.getTime() + 400_000);
-      if (cycle === 1) return { items: [], readyIds: ["T-1-1"] };
-      if (cycle === 2) return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
-      if (cycle === 3) return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
-      return { items: [], readyIds: [] };
-    };
-
-    const deps: OrchestrateLoopDeps = {
-      buildSnapshot,
-      sleep: () => Promise.resolve(),
-      log: (entry) => logs.push(entry),
-      actionDeps: mockActionDeps(),
-      supervisorDeps,
-    };
-
-    const config: OrchestrateLoopConfig = {
-      supervisor: {
-        intervalMs: 60_000, // 1 minute (so it triggers)
-        maxLogEntries: 50,
-      },
-    };
-
-    // Should not throw — daemon continues
-    await orchestrateLoop(orch, defaultCtx, deps, { ...config, maxIterations: 200 });
-
-    // Item should still complete
-    expect(orch.getItem("T-1-1")!.state).toBe("done");
-
-    // Supervisor LLM failure was logged (caught inside supervisorTick, not the outer catch)
-    expect(logs.some((l) => l.event === "supervisor_tick" && l.status === "llm_call_failed")).toBe(true);
-    // Error message should be included
-    expect(logs.some((l) => l.error === "LLM service unavailable")).toBe(true);
-  });
-
-  it("sends worker messages when supervisor suggests intervention", async () => {
-    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
-
-    let cycle = 0;
-    const logs: LogEntry[] = [];
-    let currentTime = new Date("2026-03-24T12:00:00Z");
     const sendMessage = vi.fn(() => true);
 
-    const callLLM = vi.fn(() => JSON.stringify({
-      anomalies: ["Worker stuck"],
-      interventions: [
-        { type: "send-message", itemId: "T-1-1", message: "Check if you're blocked" },
-      ],
-      frictionObservations: [],
-      processImprovements: [],
-    }));
-
-    const supervisorDeps: SupervisorDeps = {
-      callLLM,
-      now: () => currentTime,
-      log: (entry) => logs.push(entry),
-      writeFile: vi.fn(),
-      mkdirSync: vi.fn(),
-    };
-
     const buildSnapshot = (): PollSnapshot => {
       cycle++;
-      // Advance time past supervisor interval
-      currentTime = new Date(currentTime.getTime() + 400_000);
-      if (cycle <= 2) {
-        return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: ["T-1-1"] };
-      }
-      return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+      if (cycle === 1) return { items: [], readyIds: ["T-1-1"] };
+      if (cycle === 2) return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
+      if (cycle === 3) return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+      return { items: [], readyIds: [] };
     };
 
     const actionDeps = mockActionDeps({ sendMessage });
@@ -975,50 +812,35 @@ describe("orchestrateLoop with supervisor", () => {
       sleep: () => Promise.resolve(),
       log: (entry) => logs.push(entry),
       actionDeps,
-      supervisorDeps,
     };
 
     const config: OrchestrateLoopConfig = {
-      supervisor: {
-        intervalMs: 60_000,
-        maxLogEntries: 50,
-      },
+      supervisorSessionRef: "workspace:supervisor",
+      supervisorHeartbeatMs: 999_999, // disable heartbeat for this test
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { ...config, maxIterations: 200 });
 
-    // Supervisor action should have been logged
-    expect(logs.some((l) => l.event === "supervisor_action" && l.actionType === "send-message")).toBe(true);
+    // Supervisor should have received item-launched and item-merged events
+    const supervisorCalls = sendMessage.mock.calls.filter(
+      (call: [string, string]) => call[0] === "workspace:supervisor",
+    );
+    expect(supervisorCalls.length).toBeGreaterThan(0);
+    const messages = supervisorCalls.map((c: [string, string]) => c[1]);
+    expect(messages.some((m: string) => m.includes('"type":"item-launched"'))).toBe(true);
+    expect(messages.some((m: string) => m.includes('"type":"item-merged"'))).toBe(true);
   });
 
-  it("writes friction files to friction dir when configured", async () => {
+  it("does not send supervisor events when not configured", async () => {
     const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
     orch.addItem(makeTodo("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
-    let currentTime = new Date("2026-03-24T12:00:00Z");
-    const writeFile = vi.fn();
-    const mkdir = vi.fn();
-
-    const callLLM = vi.fn(() => JSON.stringify({
-      anomalies: [],
-      interventions: [],
-      frictionObservations: ["CI is slow"],
-      processImprovements: ["Cache node_modules"],
-    }));
-
-    const supervisorDeps: SupervisorDeps = {
-      callLLM,
-      now: () => currentTime,
-      log: (entry) => logs.push(entry),
-      writeFile,
-      mkdirSync: mkdir,
-    };
+    const sendMessage = vi.fn(() => true);
 
     const buildSnapshot = (): PollSnapshot => {
       cycle++;
-      currentTime = new Date(currentTime.getTime() + 400_000);
       if (cycle === 1) return { items: [], readyIds: ["T-1-1"] };
       if (cycle === 2) return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
       if (cycle === 3) return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
@@ -1029,26 +851,65 @@ describe("orchestrateLoop with supervisor", () => {
       buildSnapshot,
       sleep: () => Promise.resolve(),
       log: (entry) => logs.push(entry),
-      actionDeps: mockActionDeps(),
-      supervisorDeps,
+      actionDeps: mockActionDeps({ sendMessage }),
+      // no supervisorSessionRef in config
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 200 });
+
+    // No [ORCHESTRATOR] messages should have been sent
+    const supervisorCalls = sendMessage.mock.calls.filter(
+      (call: [string, string]) => typeof call[1] === "string" && call[1].startsWith("[ORCHESTRATOR]"),
+    );
+    expect(supervisorCalls.length).toBe(0);
+  });
+
+  it("sends heartbeat at configured interval", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
+    orch.addItem(makeTodo("T-1-1"));
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+    const sendMessage = vi.fn(() => true);
+    const originalNow = Date.now;
+    let fakeTime = Date.now();
+
+    // Override Date.now to control heartbeat timing
+    Date.now = () => fakeTime;
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      // Advance fake time past heartbeat interval (10ms)
+      fakeTime += 20;
+      if (cycle <= 3) {
+        return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: ["T-1-1"] };
+      }
+      return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps({ sendMessage }),
     };
 
     const config: OrchestrateLoopConfig = {
-      supervisor: {
-        intervalMs: 60_000,
-        maxLogEntries: 50,
-        frictionDir: "/tmp/friction",
-      },
+      supervisorSessionRef: "workspace:supervisor",
+      supervisorHeartbeatMs: 10, // Very short interval for testing
     };
 
-    await orchestrateLoop(orch, defaultCtx, deps, { ...config, maxIterations: 200 });
+    try {
+      await orchestrateLoop(orch, defaultCtx, deps, { ...config, maxIterations: 200 });
+    } finally {
+      Date.now = originalNow; // lint-ignore: no-unreset-globals
+    }
 
-    // Friction files should have been written
-    expect(writeFile).toHaveBeenCalled();
-    const written = writeFile.mock.calls.some(
-      (call: [string, string]) => call[1].includes("[friction]") || call[1].includes("[improvement]"),
+    // Should have heartbeat messages
+    const supervisorCalls = sendMessage.mock.calls.filter(
+      (call: [string, string]) => call[0] === "workspace:supervisor" && call[1].includes('"type":"heartbeat"'),
     );
-    expect(written).toBe(true);
+    expect(supervisorCalls.length).toBeGreaterThan(0);
   });
 
   it("logs supervisorActive in orchestrate_start event", async () => {
@@ -1066,18 +927,15 @@ describe("orchestrateLoop with supervisor", () => {
       return { items: [], readyIds: [] };
     };
 
-    const supervisorDeps = mockSupervisorDeps();
-
     const deps: OrchestrateLoopDeps = {
       buildSnapshot,
       sleep: () => Promise.resolve(),
       log: (entry) => logs.push(entry),
       actionDeps: mockActionDeps(),
-      supervisorDeps,
     };
 
     const config: OrchestrateLoopConfig = {
-      supervisor: { intervalMs: 999_999, maxLogEntries: 50 },
+      supervisorSessionRef: "workspace:supervisor",
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { ...config, maxIterations: 200 });
@@ -1087,161 +945,56 @@ describe("orchestrateLoop with supervisor", () => {
     expect(startEvent!.supervisorActive).toBe(true);
   });
 
-  it("uses backoff interval after consecutive failures", async () => {
+  it("sends ci-failed event with details", async () => {
     const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
     orch.addItem(makeTodo("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
-    let currentTime = new Date("2026-03-24T12:00:00Z");
-    let llmCallCount = 0;
-
-    // Fail first 4 calls, then succeed
-    const callLLM = vi.fn(() => {
-      llmCallCount++;
-      if (llmCallCount <= 4) {
-        throw new Error(`failure ${llmCallCount}`);
-      }
-      return JSON.stringify({
-        anomalies: [],
-        interventions: [],
-        frictionObservations: [],
-        processImprovements: [],
-      });
-    });
-
-    const supervisorDeps: SupervisorDeps = {
-      callLLM,
-      now: () => currentTime,
-      log: (entry) => logs.push(entry),
-      writeFile: vi.fn(),
-      mkdirSync: vi.fn(),
-    };
+    const sendMessage = vi.fn(() => true);
 
     const buildSnapshot = (): PollSnapshot => {
       cycle++;
-      // Advance by 2 minutes each cycle — enough for base interval (1 min)
-      // but after 3 failures, backoff doubles to 2 min, so some ticks get skipped
-      currentTime = new Date(currentTime.getTime() + 120_000);
-      if (cycle <= 10) {
-        return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: ["T-1-1"] };
-      }
-      return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+      if (cycle === 1) return { items: [], readyIds: ["T-1-1"] };
+      if (cycle === 2) return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
+      // CI fails
+      if (cycle === 3) return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "fail" }], readyIds: [] };
+      // Then passes and merges
+      if (cycle === 4) return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+      return { items: [], readyIds: [] };
     };
 
     const deps: OrchestrateLoopDeps = {
       buildSnapshot,
       sleep: () => Promise.resolve(),
       log: (entry) => logs.push(entry),
-      actionDeps: mockActionDeps(),
-      supervisorDeps,
+      actionDeps: mockActionDeps({ sendMessage }),
     };
 
     const config: OrchestrateLoopConfig = {
-      supervisor: {
-        intervalMs: 60_000, // 1 minute base
-        maxLogEntries: 50,
-      },
+      supervisorSessionRef: "workspace:supervisor",
+      supervisorHeartbeatMs: 999_999,
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { ...config, maxIterations: 200 });
 
-    // Verify backoff was applied — after 3 failures, interval should double
-    // meaning fewer ticks than if base interval was always used
-    const failLogs = logs.filter(
-      (l) => l.event === "supervisor_tick" && l.status === "llm_call_failed",
+    const supervisorCalls = sendMessage.mock.calls.filter(
+      (call: [string, string]) => call[0] === "workspace:supervisor",
     );
-    expect(failLogs.length).toBeGreaterThanOrEqual(1);
-    // After failures, backoff should increase the interval
-    const firstFail = failLogs.find((l) => (l.consecutiveFailures as number) >= BACKOFF_THRESHOLD);
-    expect(firstFail).toBeDefined();
+    const messages = supervisorCalls.map((c: [string, string]) => c[1]);
+    expect(messages.some((m: string) => m.includes('"type":"ci-failed"'))).toBe(true);
   });
 
-  it("disables supervisor after DISABLE_THRESHOLD failures in loop", async () => {
+  it("supervisor sendMessage failure does not block orchestrate loop", async () => {
     const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
     orch.addItem(makeTodo("T-1-1"));
 
     let cycle = 0;
     const logs: LogEntry[] = [];
-    let currentTime = new Date("2026-03-24T12:00:00Z");
-
-    // Always fail
-    const callLLM = vi.fn(() => {
-      throw new Error("persistent failure");
-    });
-
-    const supervisorDeps: SupervisorDeps = {
-      callLLM,
-      now: () => currentTime,
-      log: (entry) => logs.push(entry),
-      writeFile: vi.fn(),
-      mkdirSync: vi.fn(),
-    };
+    const sendMessage = vi.fn(() => false); // Always fail
 
     const buildSnapshot = (): PollSnapshot => {
       cycle++;
-      // Advance time significantly each cycle to always trigger supervisor
-      currentTime = new Date(currentTime.getTime() + MAX_BACKOFF_INTERVAL_MS + 60_000);
-      if (cycle <= 15) {
-        return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: ["T-1-1"] };
-      }
-      return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
-    };
-
-    const deps: OrchestrateLoopDeps = {
-      buildSnapshot,
-      sleep: () => Promise.resolve(),
-      log: (entry) => logs.push(entry),
-      actionDeps: mockActionDeps(),
-      supervisorDeps,
-    };
-
-    const config: OrchestrateLoopConfig = {
-      supervisor: {
-        intervalMs: 60_000,
-        maxLogEntries: 50,
-      },
-    };
-
-    await orchestrateLoop(orch, defaultCtx, deps, { ...config, maxIterations: 200 });
-
-    // Should have a supervisor_disabled event
-    const disabledLog = logs.find((l) => l.event === "supervisor_disabled");
-    expect(disabledLog).toBeDefined();
-
-    // After disabling, no more LLM calls should happen
-    // The total calls should be exactly DISABLE_THRESHOLD
-    expect(callLLM).toHaveBeenCalledTimes(DISABLE_THRESHOLD);
-  });
-
-  it("supervisor does not tick before interval elapses", async () => {
-    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "asap" });
-    orch.addItem(makeTodo("T-1-1"));
-
-    let cycle = 0;
-    const logs: LogEntry[] = [];
-    // Time advances slowly — never reaches the 10-minute interval
-    let currentTime = new Date("2026-03-24T12:00:00Z");
-
-    const callLLM = vi.fn(() => JSON.stringify({
-      anomalies: [],
-      interventions: [],
-      frictionObservations: [],
-      processImprovements: [],
-    }));
-
-    const supervisorDeps: SupervisorDeps = {
-      callLLM,
-      now: () => currentTime,
-      log: (entry) => logs.push(entry),
-      writeFile: vi.fn(),
-      mkdirSync: vi.fn(),
-    };
-
-    const buildSnapshot = (): PollSnapshot => {
-      cycle++;
-      // Advance by only 30s each cycle — never reaches 10-min threshold
-      currentTime = new Date(currentTime.getTime() + 30_000);
       if (cycle === 1) return { items: [], readyIds: ["T-1-1"] };
       if (cycle === 2) return { items: [{ id: "T-1-1", workerAlive: true }], readyIds: [] };
       if (cycle === 3) return { items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
@@ -1252,21 +1005,22 @@ describe("orchestrateLoop with supervisor", () => {
       buildSnapshot,
       sleep: () => Promise.resolve(),
       log: (entry) => logs.push(entry),
-      actionDeps: mockActionDeps(),
-      supervisorDeps,
+      actionDeps: mockActionDeps({ sendMessage }),
     };
 
     const config: OrchestrateLoopConfig = {
-      supervisor: {
-        intervalMs: 600_000, // 10 minutes
-        maxLogEntries: 50,
-      },
+      supervisorSessionRef: "workspace:supervisor",
+      supervisorHeartbeatMs: 999_999,
     };
 
+    // Should not throw — daemon continues despite supervisor send failures
     await orchestrateLoop(orch, defaultCtx, deps, { ...config, maxIterations: 200 });
 
-    // LLM should NOT have been called (time never reached 10 min)
-    expect(callLLM).not.toHaveBeenCalled();
+    // Item should still complete
+    expect(orch.getItem("T-1-1")!.state).toBe("done");
+
+    // Warning should be logged
+    expect(logs.some((l) => l.event === "supervisor_send_failed")).toBe(true);
   });
 });
 
@@ -1314,5 +1068,178 @@ describe("DEFAULT_SUPERVISOR_CONFIG", () => {
 
   it("has 100 max log entries", () => {
     expect(DEFAULT_SUPERVISOR_CONFIG.maxLogEntries).toBe(100);
+  });
+});
+
+// ── sendSupervisorEvent ─────────────────────────────────────────────
+
+describe("sendSupervisorEvent", () => {
+  it("sends formatted JSON message to supervisor workspace", () => {
+    const sendMessage = vi.fn(() => true);
+    const logs: LogEntry[] = [];
+    const log = (entry: LogEntry) => logs.push(entry);
+
+    sendSupervisorEvent("workspace:sup", sendMessage, { type: "item-launched", itemId: "T-1" }, log);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]![0]).toBe("workspace:sup");
+    const msg = sendMessage.mock.calls[0]![1] as string;
+    expect(msg.startsWith("[ORCHESTRATOR]")).toBe(true);
+    expect(msg).toContain('"type":"item-launched"');
+    expect(msg).toContain('"itemId":"T-1"');
+  });
+
+  it("does nothing when supervisorRef is undefined", () => {
+    const sendMessage = vi.fn(() => true);
+    const logs: LogEntry[] = [];
+    sendSupervisorEvent(undefined, sendMessage, { type: "heartbeat" }, (e) => logs.push(e));
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(logs.length).toBe(0);
+  });
+
+  it("logs warning when sendMessage returns false", () => {
+    const sendMessage = vi.fn(() => false);
+    const logs: LogEntry[] = [];
+    sendSupervisorEvent("workspace:sup", sendMessage, { type: "ci-failed" }, (e) => logs.push(e));
+
+    expect(logs.some((l) => l.event === "supervisor_send_failed")).toBe(true);
+  });
+
+  it("does not throw when sendMessage throws", () => {
+    const sendMessage = vi.fn(() => { throw new Error("mux dead"); });
+    const logs: LogEntry[] = [];
+    expect(() => {
+      sendSupervisorEvent("workspace:sup", sendMessage, { type: "heartbeat" }, (e) => logs.push(e));
+    }).not.toThrow();
+  });
+});
+
+// ── buildSupervisorHeartbeat ────────────────────────────────────────
+
+describe("buildSupervisorHeartbeat", () => {
+  it("includes all items with their states", () => {
+    const items = [
+      makeItem("T-1", "implementing"),
+      makeItem("T-2", "ci-pending"),
+    ];
+    items[0]!.workspaceRef = "workspace:1";
+    items[0]!.prNumber = 42;
+    items[1]!.ciFailCount = 2;
+
+    const heartbeat = buildSupervisorHeartbeat(items);
+
+    expect(heartbeat.type).toBe("heartbeat");
+    expect(heartbeat.timestamp).toBeDefined();
+    const hbItems = heartbeat.items as Array<Record<string, unknown>>;
+    expect(hbItems).toHaveLength(2);
+    expect(hbItems[0]!.id).toBe("T-1");
+    expect(hbItems[0]!.state).toBe("implementing");
+    expect(hbItems[0]!.workspaceRef).toBe("workspace:1");
+    expect(hbItems[0]!.prNumber).toBe(42);
+    expect(hbItems[1]!.ciFailCount).toBe(2);
+  });
+
+  it("handles empty items array", () => {
+    const heartbeat = buildSupervisorHeartbeat([]);
+    expect(heartbeat.type).toBe("heartbeat");
+    expect(heartbeat.items).toEqual([]);
+  });
+});
+
+// ── Supervisor session launch helpers ───────────────────────────────
+
+import {
+  seedSupervisorAgent,
+  buildSupervisorInitialMessage,
+  type SupervisorContext,
+} from "../core/commands/start.ts";
+import { mkdirSync as fsMkdirSync, existsSync as fsExistsSync, readFileSync as fsReadFileSync, writeFileSync as fsWriteFileSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+
+describe("seedSupervisorAgent", () => {
+  it("copies supervisor.md to .claude/agents/ in projectRoot", () => {
+    const dir = join(tmpdir(), `nw-test-seed-${Date.now()}`);
+    const hubDir = join(dir, "hub");
+    const projDir = join(dir, "proj");
+    fsMkdirSync(join(hubDir, "agents"), { recursive: true });
+    fsMkdirSync(projDir, { recursive: true });
+    fsWriteFileSync(join(hubDir, "agents", "supervisor.md"), "# Supervisor Agent\ntest content");
+
+    seedSupervisorAgent(projDir, hubDir);
+
+    expect(fsExistsSync(join(projDir, ".claude", "agents", "supervisor.md"))).toBe(true);
+    const content = fsReadFileSync(join(projDir, ".claude", "agents", "supervisor.md"), "utf-8");
+    expect(content).toContain("test content");
+
+    rmSync(dir, { recursive: true });
+  });
+
+  it("skips seeding if already present", () => {
+    const dir = join(tmpdir(), `nw-test-seed-skip-${Date.now()}`);
+    const hubDir = join(dir, "hub");
+    const projDir = join(dir, "proj");
+    fsMkdirSync(join(hubDir, "agents"), { recursive: true });
+    fsMkdirSync(join(projDir, ".claude", "agents"), { recursive: true });
+    fsWriteFileSync(join(hubDir, "agents", "supervisor.md"), "new content");
+    fsWriteFileSync(join(projDir, ".claude", "agents", "supervisor.md"), "existing content");
+
+    seedSupervisorAgent(projDir, hubDir);
+
+    const content = fsReadFileSync(join(projDir, ".claude", "agents", "supervisor.md"), "utf-8");
+    expect(content).toBe("existing content"); // not overwritten
+
+    rmSync(dir, { recursive: true });
+  });
+
+  it("skips if source agent file does not exist", () => {
+    const dir = join(tmpdir(), `nw-test-seed-nosrc-${Date.now()}`);
+    const hubDir = join(dir, "hub");
+    const projDir = join(dir, "proj");
+    fsMkdirSync(hubDir, { recursive: true });
+    fsMkdirSync(projDir, { recursive: true });
+
+    seedSupervisorAgent(projDir, hubDir); // should not throw
+    expect(fsExistsSync(join(projDir, ".claude", "agents", "supervisor.md"))).toBe(false);
+
+    rmSync(dir, { recursive: true });
+  });
+});
+
+describe("buildSupervisorInitialMessage", () => {
+  it("includes all required context", () => {
+    const ctx: SupervisorContext = {
+      items: [
+        { id: "T-1", state: "implementing", workspaceRef: "workspace:1", prNumber: 42, title: "Fix auth" },
+        { id: "T-2", state: "queued", title: "Add tests" },
+      ],
+      mergeStrategy: "squash",
+      wipLimit: 5,
+      frictionDir: ".ninthwave/friction",
+    };
+
+    const msg = buildSupervisorInitialMessage(ctx);
+
+    expect(msg).toContain("T-1");
+    expect(msg).toContain("implementing");
+    expect(msg).toContain("workspace:1");
+    expect(msg).toContain("PR=#42");
+    expect(msg).toContain("T-2");
+    expect(msg).toContain("queued");
+    expect(msg).toContain("squash");
+    expect(msg).toContain("WIP limit: 5");
+    expect(msg).toContain(".ninthwave/friction");
+  });
+
+  it("handles empty items", () => {
+    const ctx: SupervisorContext = {
+      items: [],
+      mergeStrategy: "asap",
+      wipLimit: 3,
+    };
+
+    const msg = buildSupervisorInitialMessage(ctx);
+    expect(msg).toContain("(no items)");
+    expect(msg).toContain("(no active workspaces)");
   });
 });
