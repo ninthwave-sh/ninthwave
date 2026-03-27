@@ -7,6 +7,11 @@
 # Legacy CLI shim (no longer created by setup)
 .ninthwave/work
 
+# Orchestrator runtime files (ephemeral, created/deleted during runs)
+.ninthwave/orchestrator.state.json
+.ninthwave/health-samples.jsonl
+.ninthwave/version
+
 # Claude Code per-user data (created in worktrees by workers)
 .claude/projects/
 
