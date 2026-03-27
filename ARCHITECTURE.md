@@ -14,7 +14,6 @@ See also: [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and coding co
 4. [Extension Points](#extension-points)
 5. [Supervisor Architecture](#supervisor-architecture)
 6. [Worker Lifecycle](#worker-lifecycle)
-7. [Sandbox Tiers](#sandbox-tiers)
 
 ---
 
@@ -92,7 +91,6 @@ User runs /work
             ├─ git worktree create .worktrees/todo-<ID>
             ├─ allocate partition (port/DB isolation) via core/partitions.ts
             ├─ seed agent files into worktree (core/commands/start.ts seedAgentFiles)
-            ├─ optionally wrap AI command with nono (core/sandbox.ts wrapWithSandbox)
             └─ launch AI session in multiplexer workspace, send worker prompt
 
 Worker session (per TODO)
@@ -146,43 +144,6 @@ interface Multiplexer {
 
 Concrete implementations: `CmuxAdapter`, `TmuxAdapter`, `ZellijAdapter`. Auto-detection via `getMux()` checks `NINTHWAVE_MUX` env var first, then detects the active session type, then falls back by binary availability.
 
-### `TaskBackend` — `core/types.ts`
-
-Abstracts external work-item sources (Sentry issues, PagerDuty incidents, ClickUp tasks) so they can feed into the same orchestration pipeline as local TODO files.
-
-```typescript
-interface TaskBackend {
-  list(): TodoItem[];
-  read(id: string): TodoItem | undefined;
-  markDone(id: string): boolean;
-}
-```
-
-Backends live in `core/backends/`. Discovery is handled by `discoverBackends()` in [`core/backend-registry.ts`](core/backend-registry.ts), which reads env vars and `.ninthwave/config`.
-
-### `StatusSync` — `core/types.ts`
-
-Synchronises orchestrator progress back to external backends (e.g., add `status:in-progress` label to a ClickUp task, close it when done). Operations are idempotent.
-
-```typescript
-interface StatusSync {
-  addStatusLabel(id: string, label: string): boolean;
-  removeStatusLabel(id: string, label: string): boolean;
-  markDone(id: string): boolean;
-}
-```
-
-### `SessionUrlProvider` — `core/session-server.ts`
-
-Provides a public URL for the orchestrator dashboard when running behind a tunnel or in CI. The dashboard server (`startDashboard`) accepts an optional `SessionUrlProvider`; when present, the public URL is posted to PRs.
-
-```typescript
-interface SessionUrlProvider {
-  getPublicUrl(localPort: number, token: string): Promise<string | null>;
-  cleanup(): Promise<void>;
-}
-```
-
 ---
 
 ## Extension Points
@@ -197,17 +158,6 @@ interface SessionUrlProvider {
 3. Add detection logic in `detectMuxType()` — check an env var or binary.
 4. Add a `case "mymux"` branch in the `getMux()` switch.
 5. Add tests in `test/mux.test.ts`.
-
-### Adding a New Task Backend
-
-1. Create `core/backends/mybackend.ts` implementing `TaskBackend` (follow `core/backends/clickup.ts`).
-2. Export a `resolveMyBackendConfig(getter)` function that reads env vars / config keys and returns the config or `null` when not configured.
-3. Register in `core/backend-registry.ts` inside `discoverBackends()`:
-   ```typescript
-   const myConfig = resolveMyBackendConfig(getter);
-   if (myConfig) backends.push({ name: "mybackend", backend: new MyBackend(...) });
-   ```
-4. Add config key docs to `core/docs/todos-format.md`.
 
 ### Adding a New CLI Command
 
@@ -270,9 +220,8 @@ Each TODO item gets an isolated AI coding session managed as follows:
 1. `git worktree add .worktrees/todo-<ID> -b todo/<ID>` — isolated checkout.
 2. `allocatePartition(id)` — assigns a unique port range and DB prefix for test isolation.
 3. `seedAgentFiles(worktreePath, hubRoot)` — copies `todo-worker.md` to `.claude/agents/`, `.opencode/agents/`, `.github/agents/` inside the worktree.
-4. `wrapWithSandbox(command, ...)` — optionally wraps the AI tool command with nono.
-5. `mux.launchWorkspace(worktreePath, command, todoId)` — spawns the session; returns a workspace ref (e.g., `"workspace:1"` for cmux, `"nw-H-1-1-3"` for tmux).
-6. `sendWithReadyWait(mux, ref, prompt, ...)` — waits for the AI prompt, sends the todo-worker instructions, verifies the worker starts processing.
+4. `mux.launchWorkspace(worktreePath, command, todoId)` — spawns the session; returns a workspace ref (e.g., `"workspace:1"` for cmux, `"nw-H-1-1-3"` for tmux).
+5. `sendWithReadyWait(mux, ref, prompt, ...)` — waits for the AI prompt, sends the todo-worker instructions, verifies the worker starts processing.
 
 The workspace ref is stored in `OrchestratorItem.workspaceRef` for later messaging and cleanup.
 
@@ -292,46 +241,3 @@ Timeout thresholds (configurable via `OrchestratorConfig`): 30 minutes for a wor
 1. `mux.closeWorkspace(workspaceRef)` — closes the terminal session.
 2. `git worktree remove .worktrees/todo-<ID>` — removes the checkout.
 3. `releasePartition(id)` — frees the port/DB allocation.
-
----
-
-## Sandbox Tiers
-
-Workers run in a nested sandbox stack. Each tier is optional and degrades gracefully when unavailable.
-
-### Tier 1 — nono (process-level)
-
-[`core/sandbox.ts`](core/sandbox.ts) wraps the AI tool command with [nono](https://github.com/always-further/nono):
-
-- **macOS:** Apple Seatbelt (`sandbox-exec`) — kernel-enforced filesystem policies.
-- **Linux:** Landlock LSM — filesystem restriction without root.
-- **Zero startup latency** — no VM or container overhead.
-- The worker gets read-write access to its worktree only; everything else is read-only or denied.
-- Profile lookup order: `.nono/profiles/claude-worker.json` in the project, then `~/.nono/profiles/claude-worker.json`. Falls back to flag-based config when no profile is found.
-- Disabled via `--no-sandbox`; gracefully skipped when nono is not installed.
-
-### Tier 2 — Policy Proxy (network-level)
-
-[`core/proxy-launcher.ts`](core/proxy-launcher.ts) manages a `ninthwave-proxy` subprocess:
-
-- MITM HTTP/HTTPS proxy with [Cedar](https://www.cedarpolicy.com/) policy language.
-- Intercepts all worker network traffic and enforces allow/deny rules.
-- nono's `--upstream-proxy` flag routes worker traffic through the proxy when both tiers are active.
-- Health-checked every 30 seconds; auto-restarts on failure.
-- Gracefully skipped when `ninthwave-proxy` is not installed.
-
-### Tier 3 — Firecracker (future)
-
-VM-level isolation (planned). Each worker would run inside a microVM with a dedicated kernel. Tiers 1 and 2 would still apply inside the VM for defence in depth.
-
-### Sandbox Configuration
-
-Override defaults in `.ninthwave/config`:
-
-```
-sandbox_extra_rw_paths = /path/to/shared/cache
-sandbox_extra_ro_paths = /path/to/shared/lib
-sandbox_extra_hosts    = registry.company.internal
-proxy_policy           = .ninthwave/proxy-policy.cedar
-proxy_credentials      = .ninthwave/proxy-credentials.json
-```

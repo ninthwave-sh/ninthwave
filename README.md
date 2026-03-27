@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://github.com/ninthwave-sh/ninthwave/stargazers"><img src="https://img.shields.io/github/stars/ninthwave-sh/ninthwave?style=flat" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.1.0-green" alt="Version" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.2.0-green" alt="Version" /></a>
   <a href="https://agentskills.io"><img src="https://img.shields.io/badge/Agent%20Skills-standard-purple" alt="Agent Skills" /></a>
 </p>
 
@@ -189,7 +189,7 @@ One developer runs setup. The team gets everything via `git pull`.
 
 **Deterministic orchestration.** One session per work item, dependency-ordered and conflict-checked. Workers idle after opening a PR — no polling, no redundant calls. The orchestrator wakes them for CI fixes or review feedback. Every step is visible and auditable.
 
-**Bring your own agent.** Keep your billing, your interface, your API keys. Workers read your project instructions for conventions — same coding standards, same test commands, same architecture guardrails. No new billing layer, no proxy, no vendor lock-in. Works with Claude Code, OpenCode, Copilot CLI, and anything supporting the [Agent Skills standard](https://agentskills.io).
+**Bring your own agent.** Keep your billing, your interface, your API keys. Workers read your project instructions for conventions — same coding standards, same test commands, same architecture guardrails. No vendor lock-in. Works with Claude Code, OpenCode, Copilot CLI, and anything supporting the [Agent Skills standard](https://agentskills.io).
 
 **Cross-repo by convention.** Work items can target different repositories via a `Repo:` field. Sibling directories resolve automatically — no config file required.
 
@@ -221,58 +221,13 @@ export NINTHWAVE_MUX=tmux
 
 All orchestration features work identically — the only difference is the UI.
 
-## Remote Dashboard
-
-The orchestrator includes a built-in web dashboard for monitoring worker sessions remotely. It's off by default and secure by default.
-
-### Enable
-
-```bash
-# Via CLI flag
-nw orchestrate --items C-UO-1,H-UO-2 --remote
-
-# Via project config (persists)
-echo "remote_sessions=true" >> .ninthwave/config
-```
-
-When enabled, the dashboard starts on a random localhost port with an auto-generated bearer token:
-
-```
-Dashboard: http://localhost:54321?token=abc123...
-```
-
-### What you see
-
-- **Overview** — all items with color-coded states (queued, implementing, ci-passing, merged, etc.), PR links, and age
-- **Session drill-down** — click into any worker to see its terminal output
-- **Auto-refresh** — dashboard updates every 2 seconds
-
-### Expose remotely
-
-The dashboard binds to localhost only. To access it from another machine, use any tunneling tool you prefer:
-
-```bash
-# cloudflared (Cloudflare)
-cloudflared tunnel --url http://localhost:54321
-
-# ngrok
-ngrok http 54321
-
-# SSH tunnel
-ssh -R 80:localhost:54321 your-server
-```
-
-ninthwave doesn't manage tunnels — you bring your own. The dashboard token provides authentication regardless of which tunnel you use.
-
-> **Note:** cloudflared is **not** a prerequisite for ninthwave. It's one of several tunneling options. `nw doctor` lists it as an optional dependency.
-
 ### Verify your setup
 
 ```bash
 nw doctor
 ```
 
-Checks required tools (gh, AI tool, multiplexer, git config), recommended config (project setup, sandbox, pre-commit hook), and optional dependencies (cloudflared for remote access, webhook URL for notifications).
+Checks required tools (gh, AI tool, multiplexer, git config) and recommended config (project setup, pre-commit hook).
 
 ## Reference
 
@@ -302,7 +257,7 @@ All commands work with both `nw` and `ninthwave` (identical behavior):
 
 | Command | Description |
 |---------|-------------|
-| `list [--ready] [--priority P] [--domain D] [--feature F] [--backend B]` | List and filter work items |
+| `list [--ready] [--priority P] [--domain D] [--feature F]` | List and filter work items |
 | `deps <ID>` | Show dependency chain and dependents |
 | `conflicts <ID1> <ID2> ...` | Check file-level and domain overlaps |
 | `batch-order <ID1> [ID2] ...` | Group items into dependency-ordered batches |
@@ -347,8 +302,6 @@ All commands work with both `nw` and `ninthwave` (identical behavior):
 |---------|-------------|
 | `repos` | List discovered repos (sibling dirs + repos.conf) |
 | `analytics [--all]` | Show orchestration performance trends |
-| `migrate-todos` | Migrate TODOS.md to file-per-todo format |
-| `generate-todos` | Generate TODOS.md from individual todo files |
 
 ### Expected skills (bring your own)
 
@@ -362,24 +315,6 @@ Workers reference these skill names during execution. If available, they're used
 | `/plan-eng-review` | Architecture validation | Skipped |
 
 [gstack](https://github.com/garrytan/gstack) provides all four out of the box. Or bring your own: any skill with the matching name and the [SKILL.md standard](https://agentskills.io) will work.
-
-### Work item backends
-
-**Project management:**
-
-| Backend | When to use |
-|---------|-------------|
-| `.ninthwave/todos/` (built-in) | Solo devs, quick projects, everything in markdown |
-| GitHub Issues | Lightweight project tracking |
-| ClickUp | Teams with existing task management |
-| Linear, Jira (planned) | Coming soon |
-
-**Observability:**
-
-| Backend | When to use |
-|---------|-------------|
-| Sentry | Turn unresolved errors into work items automatically |
-| PagerDuty | Turn incidents into work items, resolve on merge |
 
 <details>
 <summary><strong>What gets installed</strong></summary>

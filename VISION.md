@@ -85,6 +85,8 @@ v0.1.0 shipped March 2026. Nine grind cycles (0-8) have shipped since then.
 
 **Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 25+ issues across 9+ grind cycles, driving improvements from poll interval tuning to the file-per-todo migration to deterministic worker health monitoring to multiplexer reliability fixes to public repo readiness. The L-VIS recurring item in `.ninthwave/todos/` keeps the self-improvement loop running.
 
+**0.2.0 scope reduction (grind cycle 10).** Narrowed focus to the core orchestration pipeline. Removed: external task backends (GitHub Issues, ClickUp, Sentry, PagerDuty, StatusSync), sandboxing (nono wrapper, policy proxy, proxy-launcher), remote dashboard server and SessionUrlProvider, webhook notifications, and legacy migration commands (migrate-todos, generate-todos). These features were working but added surface area beyond the narrowest wedge. Work items come from `.ninthwave/todos/` only. The vision for external integrations, sandboxing, and remote access remains — they may return as separate packages or plugins once the core pipeline is battle-tested at scale.
+
 **Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching. Agent Teams is complementary (intra-task collaboration on one item) while ninthwave is inter-task orchestration (N workers on N items).
 
 ## Principles
@@ -181,7 +183,7 @@ An optional advisory layer on top of the deterministic daemon.
 
 ### E. Expand the Surface Area
 
-- **External task backends.** Two categories: (1) Project management — GitHub Issues adapter shipped (GHI-1, GHI-2), ClickUp shipped (CKU-1), Linear remaining. Work items created by humans or planning tools. (2) Observability/alerting — Sentry shipped (SNT-1), PagerDuty shipped (PGD-1), CloudWatch remaining. Work items created by production signals. Both use the same three-operation interface: list items, read item, mark done. `.ninthwave/todos/` is the built-in default.
+- **External task backends** *(removed in 0.2.0, future plugin candidates).* Two categories were previously shipped: (1) Project management — GitHub Issues (GHI-1, GHI-2), ClickUp (CKU-1). (2) Observability — Sentry (SNT-1), PagerDuty (PGD-1). Removed to narrow focus to `.ninthwave/todos/` as the sole work item source. May return as separate packages.
 - **GitHub Action for CI/CD failures.** ~~`ninthwave-sh/create-todo` — a thin GitHub Action that creates a todo file in `.ninthwave/todos/` when a CD workflow fails.~~ Done (GHA-1).
 - **Multiplexer abstraction.** ~~tmux~~ Done (MUX-3, MUX-4). ~~zellij~~ Done (ZLJ-1). cmux remains the default.
 - **Smarter resource management.** ~~Memory-aware WIP limits based on available RAM.~~ Done (WIP-1). Adaptive scaling under load. Each worker consumes ~1GB (revised down from initial 2.5GB estimate after measurement).
@@ -203,7 +205,7 @@ What ninthwave will not become:
 
 6. **Not a monolithic agent.** Many small workers plus a deterministic orchestrator is the architecture. It's not a stepping stone to a single agent that handles everything in one session. Decomposition and parallel execution is the point.
 
-7. **Not a monitoring system.** ninthwave doesn't collect metrics, set alert thresholds, or evaluate production health. It accepts work items from systems that do — via task backend adapters (Sentry, PagerDuty) or the `create-todo` GitHub Action for CI/CD failures. Production signals flow through your existing tools into ninthwave's work queue.
+7. **Not a monitoring system.** ninthwave doesn't collect metrics, set alert thresholds, or evaluate production health. Work items come from `.ninthwave/todos/` files or the `create-todo` GitHub Action for CI/CD failures. External backend adapters (Sentry, PagerDuty, etc.) were previously available but removed in 0.2.0 to narrow focus — they may return as separate packages.
 
 ## Feature-Completeness
 
@@ -213,12 +215,12 @@ ninthwave is feature-complete when:
 - The pipeline handles all common failure modes automatically: CI failures, merge conflicts, review feedback, worker crashes, dependency ordering. *(Achieved — CI failure detection, rebase on conflicts, review dispatch, heartbeat monitoring, crash recovery, worker retry: RET-1.)*
 - Works with 3+ AI coding tools. *(Achieved: Claude Code, OpenCode, Copilot CLI.)*
 - Works with 2+ terminal multiplexers. *(Achieved: cmux + tmux + zellij: ZLJ-1.)*
-- Connects to 2+ task backends. *(Achieved: GitHub Issues: GHI-1, GHI-2. ClickUp: CKU-1.)*
-- Connects to 2+ observability/alerting backends. *(Achieved: Sentry: SNT-1. PagerDuty: PGD-1.)*
+- Connects to 2+ task backends. *(Previously achieved: GitHub Issues: GHI-1, GHI-2. ClickUp: CKU-1. Removed in 0.2.0 scope reduction — may return as separate packages.)*
+- Connects to 2+ observability/alerting backends. *(Previously achieved: Sentry: SNT-1. PagerDuty: PGD-1. Removed in 0.2.0 scope reduction — may return as separate packages.)*
 - GitHub Action bridges CI/CD failures into todo files. *(Achieved: GHA-1.)*
 - Every decomposed work item has a test plan with tracked outcomes. *(Achieved — test plan field required since v0.1.0. Analytics tracks outcomes per run: ANL-1, ANL-2. Cost/token tracking: ANL-4.)*
-- Workers run sandboxed by default. *(Achieved — nono kernel-level sandboxing via Seatbelt/Landlock: SBX-1.)*
-- Remote session links posted on PRs with auth. *(Partially achieved — auth-secured local dashboard with session drill-down shipped: H-REM-1, H-REM-2. Managed domains and automatic PR link posting deferred to cloud product: C-beta.)*
+- Workers run sandboxed by default. *(Previously achieved — nono kernel-level sandboxing via Seatbelt/Landlock: SBX-1. Removed in 0.2.0 scope reduction — may return as a separate package.)*
+- Remote session links posted on PRs with auth. *(Previously partially achieved — auth-secured local dashboard with session drill-down shipped: H-REM-1, H-REM-2. Removed in 0.2.0 scope reduction.)*
 - Resource management is automatic — memory-aware WIP, no manual tuning. *(Achieved: WIP-1.)*
 - Install to working parallel session in under 10 minutes. *(Achieved — `ninthwave init` with auto-detection ships zero-config onboarding.)*
 
