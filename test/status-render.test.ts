@@ -9,6 +9,7 @@ import {
   truncateTitle,
   formatAge,
   formatDuration,
+  formatTelemetrySuffix,
   pad,
   formatItemRow,
   formatQueuedItemRow,
@@ -190,6 +191,94 @@ describe("formatDuration", () => {
     });
     expect(formatDuration(item)).toBe("5m");
   });
+
+  it("returns dash for queued items", () => {
+    const item = makeStatusItem({
+      state: "queued",
+      ageMs: 10 * 60_000,
+      startedAt: "2026-01-01T00:00:00Z",
+    });
+    expect(formatDuration(item)).toBe("-");
+  });
+
+  it("returns real duration for implementing items", () => {
+    const item = makeStatusItem({
+      state: "implementing",
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: "2026-01-01T00:45:00Z",
+    });
+    expect(formatDuration(item)).toBe("45m");
+  });
+
+  it("returns real duration for ci-pending items", () => {
+    const item = makeStatusItem({
+      state: "ci-pending",
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: "2026-01-01T02:00:00Z",
+    });
+    expect(formatDuration(item)).toBe("2h");
+  });
+
+  it("returns real duration for merged items", () => {
+    const item = makeStatusItem({
+      state: "merged",
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: "2026-01-01T00:05:00Z",
+    });
+    expect(formatDuration(item)).toBe("5m");
+  });
+});
+
+describe("formatTelemetrySuffix", () => {
+  it("returns empty string for active items (no elapsed)", () => {
+    const item = makeStatusItem({
+      state: "implementing",
+      startedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+    });
+    expect(formatTelemetrySuffix(item)).toBe("");
+  });
+
+  it("returns empty string for bootstrapping items", () => {
+    const item = makeStatusItem({
+      state: "bootstrapping",
+      startedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+    });
+    expect(formatTelemetrySuffix(item)).toBe("");
+  });
+
+  it("includes exit code for ci-failed items", () => {
+    const item = makeStatusItem({
+      state: "ci-failed",
+      exitCode: 1,
+    });
+    const result = stripAnsi(formatTelemetrySuffix(item));
+    expect(result).toContain("exit: 1");
+  });
+
+  it("includes stderr for ci-failed items", () => {
+    const item = makeStatusItem({
+      state: "ci-failed",
+      stderrTail: "Error: module not found",
+    });
+    const result = stripAnsi(formatTelemetrySuffix(item));
+    expect(result).toContain("stderr: Error: module not found");
+  });
+
+  it("includes both exit and stderr for ci-failed items", () => {
+    const item = makeStatusItem({
+      state: "ci-failed",
+      exitCode: 2,
+      stderrTail: "Segfault",
+    });
+    const result = stripAnsi(formatTelemetrySuffix(item));
+    expect(result).toContain("exit: 2");
+    expect(result).toContain("stderr: Segfault");
+  });
+
+  it("returns empty string for merged items", () => {
+    const item = makeStatusItem({ state: "merged" });
+    expect(formatTelemetrySuffix(item)).toBe("");
+  });
 });
 
 describe("pad", () => {
@@ -328,6 +417,23 @@ describe("formatStatusTable", () => {
     const table = stripAnsi(formatStatusTable(items, 80));
     expect(table).toContain("DURATION");
     expect(table).not.toContain(" AGE ");
+  });
+
+  it("shows dash in duration column for queued rows", () => {
+    const items = [
+      makeStatusItem({ id: "A-1", state: "implementing", ageMs: 10 * 60_000 }),
+      makeStatusItem({ id: "B-2", state: "queued", ageMs: 5 * 60_000 }),
+    ];
+    const table = stripAnsi(formatStatusTable(items, 100));
+    const lines = table.split("\n");
+    const queuedLine = lines.find(l => l.includes("B-2"));
+    expect(queuedLine).toBeDefined();
+    // Queued row should show "-" in the duration column, not a time value
+    expect(queuedLine).toMatch(/\b-\b/);
+    // Active row should still show a real duration
+    const activeLine = lines.find(l => l.includes("A-1"));
+    expect(activeLine).toBeDefined();
+    expect(activeLine).toContain("10m");
   });
 
   it("separator width matches data row content width across terminal widths", () => {

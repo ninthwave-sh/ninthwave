@@ -272,7 +272,7 @@ describe("formatTelemetrySuffix", () => {
     expect(formatTelemetrySuffix(item)).toBe("");
   });
 
-  it("shows elapsed duration for active workers with startedAt", () => {
+  it("does not show elapsed duration for active workers (shown in duration column instead)", () => {
     const now = new Date();
     const item: StatusItem = {
       id: "T-1-1",
@@ -283,8 +283,8 @@ describe("formatTelemetrySuffix", () => {
       repoLabel: "",
       startedAt: new Date(now.getTime() - 5 * 60 * 1000).toISOString(),
     };
-    const suffix = stripAnsi(formatTelemetrySuffix(item));
-    expect(suffix).toContain("elapsed: 5m");
+    const suffix = formatTelemetrySuffix(item);
+    expect(suffix).toBe("");
   });
 
   it("shows exit code for ci-failed items", () => {
@@ -331,7 +331,7 @@ describe("formatTelemetrySuffix", () => {
 });
 
 describe("formatItemRow includes telemetry", () => {
-  it("shows telemetry suffix in formatted row", () => {
+  it("does not show elapsed suffix for active items", () => {
     const now = new Date();
     const item: StatusItem = {
       id: "T-1-1",
@@ -343,7 +343,21 @@ describe("formatItemRow includes telemetry", () => {
       startedAt: new Date(now.getTime() - 5 * 60 * 1000).toISOString(),
     };
     const row = stripAnsi(formatItemRow(item, 30));
-    expect(row).toContain("elapsed: 5m");
+    expect(row).not.toContain("elapsed:");
+  });
+
+  it("shows exit code suffix for failed items", () => {
+    const item: StatusItem = {
+      id: "T-1-1",
+      title: "Test item",
+      state: "ci-failed",
+      prNumber: 42,
+      ageMs: 60_000,
+      repoLabel: "",
+      exitCode: 1,
+    };
+    const row = stripAnsi(formatItemRow(item, 30));
+    expect(row).toContain("exit: 1");
   });
 });
 

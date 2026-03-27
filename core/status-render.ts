@@ -238,6 +238,7 @@ export function formatElapsed(item: StatusItem): string {
  * for the worktree-scan path where startedAt is not set.
  */
 export function formatDuration(item: StatusItem): string {
+  if (item.state === "queued") return "-";
   if (item.startedAt) {
     const elapsed = formatElapsed(item);
     if (elapsed) return elapsed;
@@ -247,20 +248,10 @@ export function formatDuration(item: StatusItem): string {
 
 /**
  * Format telemetry suffix for an item row.
- * Active workers: show elapsed duration.
  * Failed workers: show exit code and stderr tail.
  */
 export function formatTelemetrySuffix(item: StatusItem): string {
   const parts: string[] = [];
-
-  // Show elapsed duration for active workers
-  const isActive = item.state === "implementing" || item.state === "bootstrapping" || item.state === "in-progress";
-  if (isActive && item.startedAt) {
-    const elapsed = formatElapsed(item);
-    if (elapsed) {
-      parts.push(`elapsed: ${elapsed}`);
-    }
-  }
 
   // Show exit code for failed/stuck workers
   if (item.state === "ci-failed" && item.exitCode != null) {
