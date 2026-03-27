@@ -1142,6 +1142,41 @@ export class Orchestrator {
     const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
     const merged = deps.prMerge(repoRoot, prNum);
     if (!merged) {
+      // Check if the failure is due to merge conflicts (another PR merged to main while CI ran).
+      // If conflicting, rebase and re-enter CI instead of blindly retrying the same failing merge.
+      const isMergeable = deps.checkPrMergeable?.(repoRoot, prNum) ?? true;
+      if (!isMergeable) {
+        // Conflict-caused failure — rebase instead of retrying.
+        // Do NOT increment mergeFailCount since this isn't a genuine merge failure.
+        item.rebaseRequested = false; // Reset so the rebase path works correctly
+        if (deps.daemonRebase) {
+          const indexPath = join(ctx.worktreeDir, ".cross-repo-index");
+          const wtInfo = getWorktreeInfo(item.id, indexPath, ctx.worktreeDir);
+          const wtRepoRoot = wtInfo?.repoRoot ?? item.resolvedRepoRoot ?? ctx.projectRoot;
+          const worktreePath = wtInfo?.worktreePath ?? join(wtRepoRoot, ".worktrees", `todo-${item.id}`);
+          const branch = `todo/${item.id}`;
+          try {
+            const rebaseSuccess = deps.daemonRebase(worktreePath, branch);
+            if (rebaseSuccess) {
+              this.transition(item, "ci-pending");
+              return { success: false, error: `Merge failed for PR #${prNum} due to conflicts, rebased and waiting for CI` };
+            }
+          } catch {
+            // Daemon rebase failed — fall through to worker rebase
+          }
+        }
+        // Daemon rebase unavailable or failed — send worker a rebase message
+        if (item.workspaceRef) {
+          deps.sendMessage(
+            item.workspaceRef,
+            `[ORCHESTRATOR] Rebase Required: merge failed due to conflicts with main. Please rebase onto latest main and push.`,
+          );
+        }
+        this.transition(item, "ci-pending");
+        return { success: false, error: `Merge failed for PR #${prNum} due to conflicts, rebase requested` };
+      }
+
+      // Non-conflict merge failure — normal retry behavior
       item.mergeFailCount = (item.mergeFailCount ?? 0) + 1;
       if (item.mergeFailCount >= this.config.maxMergeRetries) {
         this.transition(item, "stuck");
