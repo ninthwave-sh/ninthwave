@@ -87,6 +87,13 @@ v0.1.0 shipped March 2026. Nine grind cycles (0-8) have shipped since then.
 
 **0.2.0 scope reduction (grind cycle 10).** Narrowed focus to the core orchestration pipeline. Removed: external task backends (GitHub Issues, ClickUp, Sentry, PagerDuty, StatusSync), sandboxing (nono wrapper, policy proxy, proxy-launcher), remote dashboard server and SessionUrlProvider, webhook notifications, and legacy migration commands (migrate-todos, generate-todos). These features were working but added surface area beyond the narrowest wedge. Work items come from `.ninthwave/todos/` only. The vision for external integrations, sandboxing, and remote access remains — they may return as separate packages or plugins once the core pipeline is battle-tested at scale.
 
+**Shipped in grind cycle 11 (daemon TUI + supervisor pivot + monorepo foundation):**
+- **Daemon TUI rendering (H-TUI-1).** Status rendered on daemon stdout in TUI mode.
+- **Keyboard shortcuts and status pane removal (H-TUI-2).** Replaced separate status pane with inline keyboard-triggered overlays.
+- **Supervisor agent prompt (H-SUP-1).** Created `agents/supervisor.md` for the session-based supervisor.
+- **Monorepo workspace detection (H-MNR-1).** `ninthwave init` detects pnpm/yarn/npm workspaces and stores package configs in `.ninthwave/config.json`.
+- **Vision exploration (L-VIS-12).** Reviewed friction log — one actionable item (Copilot CLI trust prompt blocking workers). Identified next theme: pipeline reliability and tool integration polish. Decomposed into 4 items: pre-flight validation (H-PFV-1), Copilot CLI trusted folders (M-CPT-1), orchestrator state machine unit tests (M-TST-6), Copilot integration docs (L-DOC-1).
+
 **Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching. Agent Teams is complementary (intra-task collaboration on one item) while ninthwave is inter-task orchestration (N workers on N items).
 
 ## Principles
