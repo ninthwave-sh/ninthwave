@@ -12,6 +12,7 @@ import {
   ffMerge,
   branchExists,
   deleteBranch,
+  deleteRemoteBranch,
   createWorktree,
 } from "../git.ts";
 import { type Multiplexer, getMux, waitForReady } from "../mux.ts";
@@ -30,6 +31,7 @@ import {
 import { cmdConflicts } from "./conflicts.ts";
 import { readTodo } from "../todo-files.ts";
 import { applyGithubToken, prList } from "../gh.ts";
+import { prTitleMatchesTodo } from "../todo-utils.ts";
 import type { TodoItem } from "../types.ts";
 
 /**
@@ -251,6 +253,93 @@ export function launchAiSession(
   return wsRef;
 }
 
+// ── Stale branch cleanup for reused TODO IDs ────────────────────────
+
+/** Dependencies for stale branch cleanup, injectable for testing. */
+export interface StaleBranchCleanupDeps {
+  prList: (repoRoot: string, branch: string, state: string) => Array<{ number: number; title: string }>;
+  branchExists: (repoRoot: string, branch: string) => boolean;
+  deleteBranch: (repoRoot: string, branch: string) => void;
+  deleteRemoteBranch: (repoRoot: string, branch: string) => void;
+  warn: (msg: string) => void;
+  info: (msg: string) => void;
+}
+
+const defaultStaleBranchDeps: StaleBranchCleanupDeps = {
+  prList,
+  branchExists,
+  deleteBranch,
+  deleteRemoteBranch,
+  warn,
+  info,
+};
+
+/**
+ * Clean up stale branches when a TODO ID is reused with different work.
+ *
+ * When a TODO ID is reused (same ID, different title), the old `todo/*` branch
+ * may still exist with a merged PR. Workers launched on this branch detect the
+ * existing merged PR and immediately exit, falsely marking the item as "done".
+ *
+ * This function checks if merged PRs exist for the branch with titles that
+ * don't match the current TODO title. If so, it deletes both local and remote
+ * branches so the worker starts fresh with a new branch and PR.
+ *
+ * @returns true if stale branches were cleaned, false if no cleanup needed
+ */
+export function cleanStaleBranchForReuse(
+  todoId: string,
+  todoTitle: string,
+  targetRepo: string,
+  deps: StaleBranchCleanupDeps = defaultStaleBranchDeps,
+): boolean {
+  const branchName = `todo/${todoId}`;
+
+  // Check for merged PRs on this branch
+  const mergedPrs = deps.prList(targetRepo, branchName, "merged");
+  if (mergedPrs.length === 0) {
+    return false; // No merged PRs — nothing to clean
+  }
+
+  // Check if any merged PR title matches the current TODO title
+  const hasMatchingTitle = mergedPrs.some((pr) =>
+    prTitleMatchesTodo(pr.title, todoTitle),
+  );
+  if (hasMatchingTitle) {
+    return false; // Title matches — same work, normal flow
+  }
+
+  // Title mismatch — stale branch from a previous cycle with different work
+  deps.warn(
+    `Stale branch detected: ${branchName} has ${mergedPrs.length} merged PR(s) from a previous cycle. ` +
+    `Old PR: "${mergedPrs[0]!.title}", new TODO: "${todoTitle}". Deleting stale branches.`,
+  );
+
+  // Delete local branch if it exists
+  if (deps.branchExists(targetRepo, branchName)) {
+    try {
+      deps.deleteBranch(targetRepo, branchName);
+      deps.info(`Deleted local branch ${branchName}`);
+    } catch (e) {
+      deps.warn(
+        `Failed to delete local branch ${branchName}: ${e instanceof Error ? e.message : e}`,
+      );
+    }
+  }
+
+  // Delete remote branch (deleteRemoteBranch treats "already gone" as success)
+  try {
+    deps.deleteRemoteBranch(targetRepo, branchName);
+    deps.info(`Deleted remote branch ${branchName}`);
+  } catch (e) {
+    deps.warn(
+      `Failed to delete remote branch ${branchName}: ${e instanceof Error ? e.message : e}`,
+    );
+  }
+
+  return true;
+}
+
 /**
  * Extract full TODO text for an item from its individual todo file.
  * Looks for a file matching `*--{targetId}.md` in todosDir.
@@ -283,16 +372,11 @@ export function launchSingleItem(
   }
   const branchName = `todo/${item.id}`;
 
-  // Collision detection: check if merged PRs exist for this branch name.
-  // This indicates a TODO ID was reused from a previous cycle. The title comparison
-  // in reconstructState/buildSnapshot/reconcile prevents false completion (H-MID-1).
-  const mergedPrs = prList(targetRepo, branchName, "merged");
-  if (mergedPrs.length > 0) {
-    warn(
-      `Branch ${branchName} has ${mergedPrs.length} merged PR(s) from a previous cycle. ` +
-      `Title comparison will prevent false completion. Old PR: "${mergedPrs[0]!.title}"`,
-    );
-  }
+  // Stale branch cleanup: if the orchestrator didn't already clean it (e.g.,
+  // called from `ninthwave start` directly), clean up stale branches now.
+  // This is a safety net — the orchestrator calls cleanStaleBranch before
+  // launching, but direct `ninthwave start` callers bypass executeLaunch.
+  cleanStaleBranchForReuse(item.id, item.title, targetRepo);
 
   // Ensure worktree directory exists
   mkdirSync(worktreeDir, { recursive: true });

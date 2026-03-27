@@ -7,6 +7,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   Orchestrator,
   type OrchestratorItem,
+  type OrchestratorDeps,
+  type ExecutionContext,
   type PollSnapshot,
   type ItemSnapshot,
   type Action,
@@ -15,6 +17,10 @@ import {
   buildSnapshot,
   reconstructState,
 } from "../core/commands/orchestrate.ts";
+import {
+  cleanStaleBranchForReuse,
+  type StaleBranchCleanupDeps,
+} from "../core/commands/start.ts";
 import type { TodoItem, Priority } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -912,5 +918,216 @@ describe("handleReviewing", () => {
     // merged → done next cycle
     orch.processTransitions(emptySnapshot());
     expect(orch.getItem("H-1-1")!.state).toBe("done");
+  });
+});
+
+// ── Stale branch cleanup for reused TODO IDs (H-ORC-4) ──────────────
+
+function makeStaleBranchDeps(overrides: Partial<StaleBranchCleanupDeps> = {}): StaleBranchCleanupDeps {
+  return {
+    prList: () => [],
+    branchExists: () => false,
+    deleteBranch: () => {},
+    deleteRemoteBranch: () => {},
+    warn: () => {},
+    info: () => {},
+    ...overrides,
+  };
+}
+
+describe("cleanStaleBranchForReuse", () => {
+  it("deletes local and remote branch when merged PR has different title", () => {
+    const deletedLocal: string[] = [];
+    const deletedRemote: string[] = [];
+
+    const deps = makeStaleBranchDeps({
+      prList: (_repo, _branch, state) => {
+        if (state === "merged") return [{ number: 10, title: "fix: old work (H-1-1)" }];
+        return [];
+      },
+      branchExists: () => true,
+      deleteBranch: (_repo, branch) => { deletedLocal.push(branch); },
+      deleteRemoteBranch: (_repo, branch) => { deletedRemote.push(branch); },
+    });
+
+    const cleaned = cleanStaleBranchForReuse("H-1-1", "New different work", "/tmp/repo", deps);
+
+    expect(cleaned).toBe(true);
+    expect(deletedLocal).toEqual(["todo/H-1-1"]);
+    expect(deletedRemote).toEqual(["todo/H-1-1"]);
+  });
+
+  it("does not delete when merged PR title matches current TODO title", () => {
+    let deleteCalled = false;
+
+    const deps = makeStaleBranchDeps({
+      prList: (_repo, _branch, state) => {
+        if (state === "merged") return [{ number: 10, title: "feat: add feature X (H-1-1)" }];
+        return [];
+      },
+      branchExists: () => true,
+      deleteBranch: () => { deleteCalled = true; },
+      deleteRemoteBranch: () => { deleteCalled = true; },
+    });
+
+    const cleaned = cleanStaleBranchForReuse("H-1-1", "Add feature X", "/tmp/repo", deps);
+
+    expect(cleaned).toBe(false);
+    expect(deleteCalled).toBe(false);
+  });
+
+  it("does nothing when no merged PRs exist", () => {
+    let deleteCalled = false;
+
+    const deps = makeStaleBranchDeps({
+      prList: () => [],
+      deleteBranch: () => { deleteCalled = true; },
+      deleteRemoteBranch: () => { deleteCalled = true; },
+    });
+
+    const cleaned = cleanStaleBranchForReuse("H-1-1", "Some work", "/tmp/repo", deps);
+
+    expect(cleaned).toBe(false);
+    expect(deleteCalled).toBe(false);
+  });
+
+  it("continues gracefully when branch deletion fails", () => {
+    const warnings: string[] = [];
+    let remoteDeleteAttempted = false;
+
+    const deps = makeStaleBranchDeps({
+      prList: (_repo, _branch, state) => {
+        if (state === "merged") return [{ number: 10, title: "fix: old work" }];
+        return [];
+      },
+      branchExists: () => true,
+      deleteBranch: () => { throw new Error("branch locked"); },
+      deleteRemoteBranch: () => { remoteDeleteAttempted = true; },
+      warn: (msg) => { warnings.push(msg); },
+    });
+
+    const cleaned = cleanStaleBranchForReuse("H-1-1", "New work", "/tmp/repo", deps);
+
+    expect(cleaned).toBe(true);
+    // Local deletion failed but remote was still attempted
+    expect(remoteDeleteAttempted).toBe(true);
+    // Warning logged for the local deletion failure
+    expect(warnings.some((w) => w.includes("Failed to delete local branch"))).toBe(true);
+  });
+
+  it("skips local delete when branch does not exist locally", () => {
+    let localDeleteCalled = false;
+    let remoteDeleteCalled = false;
+
+    const deps = makeStaleBranchDeps({
+      prList: (_repo, _branch, state) => {
+        if (state === "merged") return [{ number: 10, title: "fix: old work" }];
+        return [];
+      },
+      branchExists: () => false,
+      deleteBranch: () => { localDeleteCalled = true; },
+      deleteRemoteBranch: () => { remoteDeleteCalled = true; },
+    });
+
+    const cleaned = cleanStaleBranchForReuse("H-1-1", "New work", "/tmp/repo", deps);
+
+    expect(cleaned).toBe(true);
+    expect(localDeleteCalled).toBe(false);
+    expect(remoteDeleteCalled).toBe(true);
+  });
+
+  it("handles remote deletion failure gracefully", () => {
+    const warnings: string[] = [];
+
+    const deps = makeStaleBranchDeps({
+      prList: (_repo, _branch, state) => {
+        if (state === "merged") return [{ number: 10, title: "fix: old work" }];
+        return [];
+      },
+      branchExists: () => false,
+      deleteRemoteBranch: () => { throw new Error("network error"); },
+      warn: (msg) => { warnings.push(msg); },
+    });
+
+    const cleaned = cleanStaleBranchForReuse("H-1-1", "New work", "/tmp/repo", deps);
+
+    expect(cleaned).toBe(true);
+    expect(warnings.some((w) => w.includes("Failed to delete remote branch"))).toBe(true);
+  });
+});
+
+describe("executeLaunch stale branch cleanup", () => {
+  function makeMinimalDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
+    return {
+      launchSingleItem: () => ({ worktreePath: "/tmp/wt", workspaceRef: "workspace:1" }),
+      cleanSingleWorktree: () => true,
+      prMerge: () => true,
+      prComment: () => true,
+      sendMessage: () => true,
+      closeWorkspace: () => true,
+      fetchOrigin: () => {},
+      ffMerge: () => {},
+      ...overrides,
+    };
+  }
+
+  const ctx: ExecutionContext = {
+    projectRoot: "/tmp/proj",
+    worktreeDir: "/tmp/proj/.worktrees",
+    todosDir: "/tmp/proj/.ninthwave/todos",
+    aiTool: "claude",
+  };
+
+  it("calls cleanStaleBranch before launchSingleItem", () => {
+    const callOrder: string[] = [];
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "launching");
+
+    const deps = makeMinimalDeps({
+      cleanStaleBranch: () => { callOrder.push("clean"); },
+      launchSingleItem: () => {
+        callOrder.push("launch");
+        return { worktreePath: "/tmp/wt", workspaceRef: "workspace:1" };
+      },
+    });
+
+    const result = orch.executeAction({ type: "launch", itemId: "H-1-1" }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    expect(callOrder).toEqual(["clean", "launch"]);
+  });
+
+  it("proceeds with launch when cleanStaleBranch throws", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "launching");
+
+    const warnings: string[] = [];
+    const deps = makeMinimalDeps({
+      cleanStaleBranch: () => { throw new Error("cleanup explosion"); },
+      warn: (msg) => { warnings.push(msg); },
+      launchSingleItem: () => ({ worktreePath: "/tmp/wt", workspaceRef: "workspace:1" }),
+    });
+
+    const result = orch.executeAction({ type: "launch", itemId: "H-1-1" }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    expect(warnings.some((w) => w.includes("cleanup explosion"))).toBe(true);
+  });
+
+  it("launches normally when cleanStaleBranch is not provided", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "launching");
+
+    const deps = makeMinimalDeps({
+      // cleanStaleBranch intentionally omitted
+    });
+
+    const result = orch.executeAction({ type: "launch", itemId: "H-1-1" }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    expect(orch.getItem("H-1-1")!.workspaceRef).toBe("workspace:1");
   });
 });

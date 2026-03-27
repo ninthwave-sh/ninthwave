@@ -232,6 +232,13 @@ export interface OrchestratorDeps {
    */
   syncStackComments?: (baseBranch: string, stack: Array<{ prNumber: number; title: string }>) => void;
   /**
+   * Clean up stale branches when a TODO ID is reused with different work.
+   * Called before launching a worker. Checks for merged PRs with title mismatches
+   * and deletes both local and remote branches so the worker starts fresh.
+   * Non-fatal — launch proceeds even if cleanup fails.
+   */
+  cleanStaleBranch?: (todo: TodoItem, projectRoot: string) => void;
+  /**
    * Bootstrap a target repo (clone from remote or create new).
    * Called before launch when a cross-repo TODO has bootstrap: true and the repo doesn't exist locally.
    * Returns the resolved repo path on success, or an error string on failure.
@@ -1047,6 +1054,19 @@ export class Orchestrator {
     ctx: ExecutionContext,
     deps: OrchestratorDeps,
   ): ActionResult {
+    // Clean stale branches before launching (H-ORC-4).
+    // When a TODO ID is reused with different work, the old branch may have
+    // merged PRs that cause workers to falsely exit as "done".
+    if (deps.cleanStaleBranch) {
+      try {
+        deps.cleanStaleBranch(item.todo, ctx.projectRoot);
+      } catch (e) {
+        // Non-fatal — log and attempt launch anyway
+        const msg = e instanceof Error ? e.message : String(e);
+        deps.warn?.(`cleanStaleBranch failed for ${item.id}: ${msg}`);
+      }
+    }
+
     try {
       const result = deps.launchSingleItem(
         item.todo,

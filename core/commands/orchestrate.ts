@@ -24,7 +24,7 @@ import {
 import { parseTodos } from "../parser.ts";
 import { resolveRepo, getWorktreeInfo, bootstrapRepo } from "../cross-repo.ts";
 import { checkPrStatus, scanExternalPRs } from "./watch.ts";
-import { launchSingleItem, launchReviewWorker, detectAiTool } from "./start.ts";
+import { launchSingleItem, launchReviewWorker, detectAiTool, cleanStaleBranchForReuse } from "./start.ts";
 import { getWorkerHealthStatus } from "../worker-health.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken } from "../gh.ts";
@@ -1752,6 +1752,15 @@ export async function cmdOrchestrate(
   const actionDeps: OrchestratorDeps = {
     launchSingleItem: (item, todosDir, worktreeDir, projectRoot, aiTool, baseBranch) =>
       launchSingleItem(item, todosDir, worktreeDir, projectRoot, aiTool, mux, { baseBranch }),
+    cleanStaleBranch: (todo, projRoot) => {
+      let targetRepo: string;
+      try {
+        targetRepo = resolveRepo(todo.repoAlias, projRoot);
+      } catch {
+        return; // Can't resolve repo — launchSingleItem will handle the error
+      }
+      cleanStaleBranchForReuse(todo.id, todo.title, targetRepo);
+    },
     cleanSingleWorktree,
     prMerge: (repoRoot, prNumber) => prMerge(repoRoot, prNumber),
     prComment: (repoRoot, prNumber, body) => prComment(repoRoot, prNumber, body),
