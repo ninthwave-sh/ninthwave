@@ -1,6 +1,5 @@
 // Worker health utilities: screen-parsing for detecting worker state.
-// Used by the launch code (ready detection, post-send verification) and
-// the orchestrator polling loop (stall detection).
+// Used by the launch code (ready detection, post-send verification).
 //
 // All functions are pure or accept their collaborators via arguments
 // (dependency injection) — no vi.mock needed for testing.
@@ -16,15 +15,6 @@ export type WorkerHealthStatus =
   | "processing"  // Worker is actively processing (spinner, tool output, etc.)
   | "stalled"     // Has content but no recognizable activity indicators
   | "error";      // Error indicators detected on screen
-
-/** Stall-detection health status derived from worker screen content. */
-export type ScreenHealthStatus =
-  | "healthy"             // Worker is actively processing or just started
-  | "stalled-empty"       // Prompt visible with no input — worker idle
-  | "stalled-permission"  // Permission prompt (Y/n dialog) waiting for approval
-  | "stalled-error"       // Error or crash output detected
-  | "stalled-unchanged"   // Screen content unchanged across consecutive polls
-  | "unknown";            // readScreen unavailable or threw
 
 /** Sleep function signature for dependency injection. */
 export type Sleeper = (ms: number) => void;
@@ -77,25 +67,6 @@ const ERROR_INDICATORS = [
   "spawn Unknown system error",
 ];
 
-/**
- * Strong dialog indicators — patterns that are specific to actual interactive
- * permission/approval dialogs (e.g., Claude Code's tool approval prompts).
- *
- * Generic words like "permission", "approve", and bare "Allow " are excluded
- * because they frequently appear in normal file content and tool output,
- * causing false positives when workers are actively reading/searching. See M-SUP-3.
- *
- * Only checked in the last few lines of screen content (the active terminal area),
- * not the full scroll buffer, to avoid matching documentation or code that
- * happens to contain these patterns.
- */
-const PERMISSION_INDICATORS = [
-  "(Y/n)",
-  "(y/N)",
-  "Yes / No",
-  "(Y)es / (N)o",
-];
-
 // ── Pure screen-parsing functions ────────────────────────────────────
 
 /**
@@ -127,111 +98,6 @@ export function isWorkerInError(screenContent: string): boolean {
   return ERROR_INDICATORS.some((indicator) =>
     screenContent.includes(indicator),
   );
-}
-
-/**
- * Detect if a permission/approval dialog is visible on screen.
- *
- * Only checks the last few lines of screen content (the active terminal area)
- * to avoid false positives from documentation, code, or tool output that
- * happens to contain dialog-like patterns in scroll history. Real permission
- * prompts appear at the bottom of the screen. See M-SUP-3.
- */
-export function isPermissionPrompt(screenContent: string): boolean {
-  if (!screenContent.trim()) return false;
-  // Check only the last 5 lines — permission dialogs appear at the active prompt,
-  // not buried in scroll history from previous tool output
-  const lines = screenContent.split("\n");
-  const activeArea = lines.slice(-5).join("\n");
-  return PERMISSION_INDICATORS.some((indicator) =>
-    activeArea.includes(indicator),
-  );
-}
-
-/**
- * Simple string hash for comparing screen content across polls.
- * Not cryptographic — just needs to detect changes.
- */
-export function simpleHash(str: string): string {
-  let hash = 0;
-  const trimmed = str.trim();
-  for (let i = 0; i < trimmed.length; i++) {
-    hash = ((hash << 5) - hash + trimmed.charCodeAt(i)) | 0;
-  }
-  return hash.toString(36);
-}
-
-/**
- * Compute screen health status for stall detection.
- *
- * Uses the screen content + orchestrator item state to classify the
- * worker's health into actionable categories. Mutates orchItem to track
- * unchanged screen state across polls.
- *
- * Priority order: error > permission > processing (healthy) > prompt > unchanged > healthy.
- * Permission detection uses tightened heuristics (M-SUP-3):
- * - Only strong dialog indicators (Y/n, y/N, etc.) — not generic words like "permission"
- * - Only checked in the last few lines of screen content (the active terminal area)
- * - Requires multiple consecutive polls (permissionThreshold) before flagging
- *
- * These changes prevent false positives when workers are actively reading/searching
- * files whose content contains permission-related words.
- *
- * @param screenContent - Raw screen content from readScreen
- * @param orchItem - The orchestrator item (mutated: lastScreenHash, unchangedCount, permissionCount)
- * @param unchangedThreshold - Number of consecutive unchanged polls before declaring stalled (default 3)
- * @param permissionThreshold - Number of consecutive permission-detected polls before declaring stalled (default 2)
- */
-export function computeScreenHealth(
-  screenContent: string,
-  orchItem: { lastScreenHash?: string; unchangedCount?: number; permissionCount?: number },
-  unchangedThreshold: number = 3,
-  permissionThreshold: number = 2,
-): ScreenHealthStatus {
-  if (!screenContent.trim()) return "unknown";
-
-  // Check error first (highest priority)
-  if (isWorkerInError(screenContent)) return "stalled-error";
-
-  // Check permission prompt — uses tightened detection that only checks
-  // strong dialog patterns in the last few lines of screen content.
-  // Requires multiple consecutive polls to avoid flagging transient content.
-  if (isPermissionPrompt(screenContent)) {
-    orchItem.permissionCount = (orchItem.permissionCount ?? 0) + 1;
-    if (orchItem.permissionCount >= permissionThreshold) {
-      return "stalled-permission";
-    }
-    // Not yet at threshold — treat as healthy for now
-    return "healthy";
-  } else {
-    // No permission indicators — reset the counter
-    orchItem.permissionCount = 0;
-  }
-
-  // If actively processing, worker is healthy
-  if (isWorkerProcessing(screenContent)) {
-    orchItem.lastScreenHash = simpleHash(screenContent);
-    orchItem.unchangedCount = 0;
-    return "healthy";
-  }
-
-  // If prompt visible with no processing indicators, worker is idle
-  if (isInputPromptVisible(screenContent)) return "stalled-empty";
-
-  // Check for unchanged screen across polls
-  const hash = simpleHash(screenContent);
-  if (orchItem.lastScreenHash === hash) {
-    orchItem.unchangedCount = (orchItem.unchangedCount ?? 0) + 1;
-    if (orchItem.unchangedCount >= unchangedThreshold) {
-      return "stalled-unchanged";
-    }
-  } else {
-    orchItem.lastScreenHash = hash;
-    orchItem.unchangedCount = 0;
-  }
-
-  // Has content, not recognizable as stalled — assume healthy
-  return "healthy";
 }
 
 /**

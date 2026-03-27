@@ -26,7 +26,7 @@ import { parseTodos } from "../parser.ts";
 import { resolveRepo, getWorktreeInfo, bootstrapRepo } from "../cross-repo.ts";
 import { checkPrStatus, scanExternalPRs } from "./watch.ts";
 import { launchSingleItem, launchReviewWorker, detectAiTool, launchSupervisorSession } from "./start.ts";
-import { getWorkerHealthStatus, computeScreenHealth } from "../worker-health.ts";
+import { getWorkerHealthStatus } from "../worker-health.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken } from "../gh.ts";
 import { fetchOrigin, ffMerge, hasChanges, getStagedFiles, gitAdd, gitCommit, gitReset, daemonRebase } from "../git.ts";
@@ -273,12 +273,11 @@ export function buildSnapshot(
     // Check worker alive, health, and commit freshness for active items
     if (orchItem.state === "launching" || orchItem.state === "implementing" || orchItem.state === "ci-failed") {
       snap.workerAlive = isWorkerAlive(orchItem, mux);
-      // Screen-based health check: read once, derive both workerHealth and screenHealth
+      // Screen-based health check for workerHealth (used by delivery verification)
       if (orchItem.workspaceRef) {
         try {
           const rawScreen = mux.readScreen(orchItem.workspaceRef, 30);
           snap.workerHealth = getWorkerHealthStatus(rawScreen);
-          snap.screenHealth = computeScreenHealth(rawScreen, orchItem);
           // Record screen samples for health-check tuning (best-effort, separate try/catch)
           try {
             if (rawScreen.trim()) {
@@ -289,7 +288,6 @@ export function buildSnapshot(
                 id: orchItem.id,
                 state: orchItem.state,
                 health: snap.workerHealth,
-                screenHealth: snap.screenHealth,
                 alive: snap.workerAlive,
                 lines: rawScreen.split("\n").filter((l: string) => l.trim()).length,
                 screen: rawScreen.slice(0, 2000),
@@ -299,7 +297,6 @@ export function buildSnapshot(
           } catch { /* best-effort — don't break polling */ }
         } catch {
           // readScreen threw — graceful degradation
-          snap.screenHealth = "unknown";
         }
       }
       const commitTime = getLastCommitTime(repoRoot, `todo/${orchItem.id}`);
@@ -1211,7 +1208,6 @@ export async function orchestrateLoop(
   let __lastSnapshot: PollSnapshot | undefined;
   let __lastActions: import("../orchestrator.ts").Action[] = [];
   let __lastTransitionIter = 0;
-  const prevScreenHealth = new Map<string, string>();
   const __mergedEventEmitted = new Set<string>();
   while (true) {
     __iterations++;
@@ -1335,25 +1331,7 @@ export async function orchestrateLoop(
     const snapshot = deps.buildSnapshot(orch, ctx.projectRoot, ctx.worktreeDir);
     __lastSnapshot = snapshot;
 
-    // Detect and report worker health changes to supervisor
-    if (config.supervisorSessionRef && snapshot) {
-      for (const snapItem of snapshot.items) {
-        if (snapItem.screenHealth) {
-          const prev = prevScreenHealth.get(snapItem.id);
-          if (prev && prev !== snapItem.screenHealth) {
-            sendSupervisorEvent(config.supervisorSessionRef, deps.actionDeps.sendMessage, {
-              type: "worker-health-change",
-              itemId: snapItem.id,
-              from: prev,
-              to: snapItem.screenHealth,
-            }, log);
-          }
-          prevScreenHealth.set(snapItem.id, snapItem.screenHealth);
-        }
-      }
-    }
-
-    // Process transitions (pure state machine)
+// Process transitions (pure state machine)
     const actions = orch.processTransitions(snapshot);
     __lastActions = actions;
 

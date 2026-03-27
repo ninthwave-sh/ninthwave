@@ -5,7 +5,6 @@
 import { join } from "path";
 import type { TodoItem, Priority, WorktreeInfo } from "./types.ts";
 import { getWorktreeInfo, listCrossRepoEntries } from "./cross-repo.ts";
-import type { ScreenHealthStatus } from "./worker-health.ts";
 
 // ── Priority rank for merge queue ordering (lower = higher priority) ─
 
@@ -73,15 +72,7 @@ export interface OrchestratorItem {
   reviewWorkspaceRef?: string;
   /** Whether this item's review has been completed (approved). Resets on CI regression. */
   reviewCompleted?: boolean;
-  /** ISO timestamp of when a stall was first detected. Used to deduplicate nudge messages — only one nudge per stall detection. */
-  stallDetectedAt?: string;
-  /** Hash of the last screen content, for detecting unchanged screens across polls. */
-  lastScreenHash?: string;
-  /** Number of consecutive polls where screen content was unchanged. */
-  unchangedCount?: number;
-  /** Number of consecutive polls where a permission prompt was detected without active processing. */
-  permissionCount?: number;
-  /** Descriptive reason for why this item failed (e.g., "launch-failed: repo not found", "ci-failed: test timeout"). Set on ci-failed/stuck states, cleared on recovery. */
+/** Descriptive reason for why this item failed (e.g., "launch-failed: repo not found", "ci-failed: test timeout"). Set on ci-failed/stuck states, cleared on recovery. */
   failureReason?: string;
   /** ISO timestamp of when the worker was launched (set on transition to implementing). */
   startedAt?: string;
@@ -124,9 +115,6 @@ export interface OrchestratorConfig {
   maxMergeRetries: number;
 }
 
-// Re-export ScreenHealthStatus from worker-health (canonical definition lives there)
-export type { ScreenHealthStatus } from "./worker-health.ts";
-
 // ── Poll snapshot ────────────────────────────────────────────────────
 
 /** External state for a single item, gathered from gh/cmux polling. */
@@ -145,9 +133,7 @@ export interface ItemSnapshot {
   workerAlive?: boolean;
   /** Worker health status from screen inspection (loading, prompt, processing, stalled, error). */
   workerHealth?: "loading" | "prompt" | "processing" | "stalled" | "error";
-  /** Stall-detection health status from screen content analysis. */
-  screenHealth?: ScreenHealthStatus;
-  /** ISO timestamp of the most recent commit on the worktree branch, or null if none beyond base. */
+/** ISO timestamp of the most recent commit on the worktree branch, or null if none beyond base. */
   lastCommitTime?: string | null;
   /** Timestamp from the external system for the current state (ISO string).
    *  e.g., GitHub's completedAt for CI checks, mergedAt for merges, updatedAt for PR changes. */
@@ -656,63 +642,10 @@ export class Orchestrator {
       }
     }
 
-    // Screen-based stall detection: nudge workers that are alive but stalled
-    const actions = this.handleScreenHealthNudge(item, snap, now);
-    if (actions.length > 0) return actions;
-
     return [];
   }
 
-  /**
-   * Screen-based stall detection: when screenHealth indicates a stalled worker,
-   * emit a send-message nudge. Uses stallDetectedAt for deduplication — only one
-   * nudge is sent per stall detection. Clears stallDetectedAt when worker recovers.
-   */
-  private handleScreenHealthNudge(
-    item: OrchestratorItem,
-    snap: ItemSnapshot | undefined,
-    _now: Date,
-  ): Action[] {
-    const health = snap?.screenHealth;
-    if (!health) return [];
-
-    // Worker recovered — clear stall tracking
-    if (health === "healthy" || health === "unknown") {
-      item.stallDetectedAt = undefined;
-      return [];
-    }
-
-    // Stall detected — but only nudge once per stall episode
-    if (item.stallDetectedAt) {
-      // Already sent a nudge for this stall — wait for recovery
-      return [];
-    }
-
-    // First detection of this stall — record timestamp and send nudge
-    item.stallDetectedAt = new Date().toISOString();
-
-    let message: string;
-    switch (health) {
-      case "stalled-empty":
-        message = "Start";
-        break;
-      case "stalled-permission":
-        message = "[ORCHESTRATOR] Permission prompt detected — worker is waiting for approval. Please respond to the permission dialog.";
-        break;
-      case "stalled-error":
-        message = "[ORCHESTRATOR] Error detected on worker screen. Please investigate and recover.";
-        break;
-      case "stalled-unchanged":
-        message = "[ORCHESTRATOR] Worker screen has not changed across multiple polls. Are you still making progress?";
-        break;
-      default:
-        return [];
-    }
-
-    return [{ type: "send-message", itemId: item.id, message }];
-  }
-
-  /**
+/**
    * Check if an item should be retried or permanently stuck.
    * When retries remain, cleans the old worktree and transitions to ready for relaunch.
    * Returns retry action when retrying, empty array when permanently stuck.
