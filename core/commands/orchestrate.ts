@@ -39,8 +39,6 @@ import { prTitleMatchesTodo } from "../todo-utils.ts";
 import { loadConfig } from "../config.ts";
 import {
   shouldActivateSupervisor,
-  DEFAULT_SUPERVISOR_CONFIG,
-  type SupervisorConfig,
 } from "../supervisor.ts";
 import {
   collectRunMetrics,
@@ -1178,7 +1176,7 @@ export async function orchestrateLoop(
 
   // Supervisor heartbeat tracking
   let lastSupervisorHeartbeat = Date.now();
-  const supervisorHeartbeatMs = config.supervisorHeartbeatMs ?? DEFAULT_SUPERVISOR_CONFIG.intervalMs;
+  const supervisorHeartbeatMs = config.supervisorHeartbeatMs ?? 300_000;
 
   // Initialize external review state from persisted file
   let externalReviews: ExternalReviewItem[] = [];
@@ -1935,7 +1933,7 @@ export async function cmdOrchestrate(
   const supervisorActive = shouldActivateSupervisor(supervisorFlag, projectRoot);
   const supervisorHeartbeatMs = supervisorIntervalSecs
     ? supervisorIntervalSecs * 1000
-    : DEFAULT_SUPERVISOR_CONFIG.intervalMs;
+    : 300_000;
 
   // Launch or recover supervisor session
   let supervisorSessionRef: string | undefined;
