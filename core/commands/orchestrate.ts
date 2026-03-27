@@ -332,10 +332,11 @@ export function isWorkerAlive(item: OrchestratorItem, mux: Multiplexer): boolean
  * Sync cmux sidebar display for all active workers.
  * Sets status pill (text, icon, color) and progress bar from heartbeat data.
  *
- * Progress bar logic:
- * - implementing/ci-failed: use worker-reported progress/label from heartbeat
- * - ci-pending/ci-passed/merging: progress 1.0 with contextual label
- * - other active states: use heartbeat if available, else no progress update
+ * Ownership split:
+ * - Status pill (orchestrator-owned): lifecycle state text/icon/color
+ * - Progress bar (worker-primary, orchestrator-fallback):
+ *   - Worker-active states (implementing, launching, ci-failed): heartbeat pass-through, default 0%
+ *   - Worker-idle states (ci-pending, pr-open, ci-passed, review-pending, merging): 100%, no label
  */
 export function syncWorkerDisplay(
   orch: Orchestrator,
@@ -350,6 +351,11 @@ export function syncWorkerDisplay(
   const activeStates = new Set<OrchestratorItemState>([
     "launching", "implementing", "pr-open", "ci-pending",
     "ci-passed", "ci-failed", "review-pending", "merging",
+  ]);
+
+  // Worker-active states: heartbeat pass-through, default to 0% when no heartbeat
+  const workerActiveStates = new Set<OrchestratorItemState>([
+    "implementing", "launching", "ci-failed",
   ]);
 
   for (const item of orch.getAllItems()) {
@@ -370,17 +376,16 @@ export function syncWorkerDisplay(
     const heartbeat = snap?.lastHeartbeat;
 
     try {
-      if (item.state === "implementing" || item.state === "launching" || item.state === "ci-failed") {
-        // Use worker-reported progress if available
+      if (workerActiveStates.has(item.state)) {
+        // Worker is active: use heartbeat progress/label, default to 0% with no label
         if (heartbeat) {
           mux.setProgress(item.workspaceRef, Math.round(heartbeat.progress * 100), heartbeat.label);
+        } else {
+          mux.setProgress(item.workspaceRef, 0);
         }
-      } else if (item.state === "ci-pending") {
-        mux.setProgress(item.workspaceRef, 100, "CI running");
-      } else if (item.state === "ci-passed" || item.state === "review-pending") {
-        mux.setProgress(item.workspaceRef, 100, "Awaiting review");
-      } else if (item.state === "merging") {
-        mux.setProgress(item.workspaceRef, 100, "Merging");
+      } else {
+        // Worker is idle: 100%, no label — status pill carries the message
+        mux.setProgress(item.workspaceRef, 100);
       }
     } catch { /* best-effort */ }
   }
