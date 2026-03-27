@@ -3,8 +3,10 @@
 // executeAction bridges the pure state machine to external dependencies via injected deps.
 
 import { join } from "path";
+import { existsSync, unlinkSync } from "fs";
 import type { TodoItem, Priority, WorktreeInfo } from "./types.ts";
 import { getWorktreeInfo, listCrossRepoEntries } from "./cross-repo.ts";
+import { heartbeatFilePath } from "./daemon.ts";
 
 // ── Priority rank for merge queue ordering (lower = higher priority) ─
 
@@ -146,6 +148,8 @@ export interface ItemSnapshot {
   eventTime?: string;
   /** New trusted PR comments since last check. */
   newComments?: Array<{ body: string; author: string; createdAt: string }>;
+  /** Worker heartbeat data read from the heartbeat file. Null if no heartbeat file exists. */
+  lastHeartbeat?: import("./daemon.ts").WorkerProgress | null;
 }
 
 export interface PollSnapshot {
@@ -332,6 +336,44 @@ export const STACKABLE_STATES: Set<OrchestratorItemState> = new Set([
   "review-pending",
   "merging",
 ]);
+
+// ── Status display mapping ──────────────────────────────────────────
+
+/** Cmux status pill properties for a given orchestrator state. */
+export interface StatusDisplay {
+  text: string;
+  icon: string;
+  color: string;
+}
+
+/**
+ * Map an orchestrator item state to cmux status pill properties (text, icon, color).
+ * Matches the status table rendering in core/status-render.ts.
+ */
+export function statusDisplayForState(state: OrchestratorItemState): StatusDisplay {
+  switch (state) {
+    case "implementing":
+    case "launching":
+      return { text: "Implementing", icon: "hammer.fill", color: "#b45309" };
+    case "ci-pending":
+      return { text: "CI Pending", icon: "clock.fill", color: "#06b6d4" };
+    case "ci-failed":
+      return { text: "CI Failed", icon: "xmark.circle", color: "#ef4444" };
+    case "ci-passed":
+      return { text: "CI Passed", icon: "checkmark.circle", color: "#22c55e" };
+    case "review-pending":
+      return { text: "In Review", icon: "eye.fill", color: "#7c3aed" };
+    case "merging":
+      return { text: "Merging", icon: "arrow.triangle.merge", color: "#22c55e" };
+    case "done":
+    case "merged":
+      return { text: "Done", icon: "checkmark.seal.fill", color: "#22c55e" };
+    case "stuck":
+      return { text: "Stuck", icon: "exclamationmark.triangle", color: "#ef4444" };
+    default:
+      return { text: "Working", icon: "hammer.fill", color: "#b45309" };
+  }
+}
 
 // ── Orchestrator class ───────────────────────────────────────────────
 
@@ -1507,6 +1549,14 @@ export class Orchestrator {
     const repoRoot = wtInfo?.repoRoot ?? item.resolvedRepoRoot ?? ctx.projectRoot;
     const worktreeDir = repoRoot !== ctx.projectRoot ? join(repoRoot, ".worktrees") : ctx.worktreeDir;
     const worktreeCleaned = deps.cleanSingleWorktree(item.id, worktreeDir, repoRoot);
+
+    // Clean up heartbeat file (best-effort)
+    try {
+      const hbPath = heartbeatFilePath(ctx.projectRoot, item.id);
+      if (existsSync(hbPath)) {
+        unlinkSync(hbPath);
+      }
+    } catch { /* best-effort — heartbeat cleanup failure doesn't block clean */ }
 
     // Partial cleanup (one of two succeeds) is still OK.
     // Fail only when every attempted operation failed.

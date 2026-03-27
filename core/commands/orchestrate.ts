@@ -12,6 +12,7 @@ import { run } from "../shell.ts";
 import {
   Orchestrator,
   calculateMemoryWipLimit,
+  statusDisplayForState,
   type Action,
   type MergeStrategy,
   type PollSnapshot,
@@ -59,6 +60,7 @@ import {
   archiveStateFile,
   readExternalReviews,
   writeExternalReviews,
+  readHeartbeat,
   logFilePath,
   stateFilePath,
   userStateDir,
@@ -180,6 +182,7 @@ export function buildSnapshot(
 ): PollSnapshot {
   const items: ItemSnapshot[] = [];
   const readyIds: string[] = [];
+  const heartbeatStates = new Set(["launching", "implementing", "ci-failed", "ci-pending", "ci-passed", "review-pending", "merging", "pr-open"]);
 
   for (const orchItem of orch.getAllItems()) {
     // Compute readyIds for queued items
@@ -307,6 +310,13 @@ export function buildSnapshot(
       orchItem.lastCommitTime = commitTime;
     }
 
+    // Read heartbeat file for active items
+    if (heartbeatStates.has(orchItem.state)) {
+      try {
+        snap.lastHeartbeat = readHeartbeat(projectRoot, orchItem.id) ?? null;
+      } catch { /* best-effort — heartbeat read failure doesn't block polling */ }
+    }
+
     // Fetch new trusted PR comments for items with open PRs in active states
     if (orchItem.prNumber && fetchComments) {
       const commentRelayStates = new Set(["pr-open", "ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing"]);
@@ -339,6 +349,66 @@ export function isWorkerAlive(item: OrchestratorItem, mux: Multiplexer): boolean
   return workspaces.split("\n").some(
     (line) => refRe.test(line) || idRe.test(line),
   );
+}
+
+// ── Sidebar display sync ──────────────────────────────────────────
+
+/**
+ * Sync cmux sidebar display for all active workers.
+ * Sets status pill (text, icon, color) and progress bar from heartbeat data.
+ *
+ * Progress bar logic:
+ * - implementing/ci-failed: use worker-reported progress/label from heartbeat
+ * - ci-pending/ci-passed/merging: progress 1.0 with contextual label
+ * - other active states: use heartbeat if available, else no progress update
+ */
+export function syncWorkerDisplay(
+  orch: Orchestrator,
+  snapshot: PollSnapshot,
+  mux: Multiplexer,
+): void {
+  const heartbeatMap = new Map<string, ItemSnapshot>();
+  for (const snap of snapshot.items) {
+    heartbeatMap.set(snap.id, snap);
+  }
+
+  const activeStates = new Set<OrchestratorItemState>([
+    "launching", "implementing", "pr-open", "ci-pending",
+    "ci-passed", "ci-failed", "review-pending", "merging",
+  ]);
+
+  for (const item of orch.getAllItems()) {
+    // Only sync display for items with a workspace ref and active state
+    if (!item.workspaceRef) continue;
+    if (!activeStates.has(item.state)) continue;
+
+    const display = statusDisplayForState(item.state);
+    const statusKey = `todo-${item.id}`;
+
+    // Set status pill (best-effort)
+    try {
+      mux.setStatus(item.workspaceRef, statusKey, display.text, display.icon, display.color);
+    } catch { /* best-effort */ }
+
+    // Set progress bar
+    const snap = heartbeatMap.get(item.id);
+    const heartbeat = snap?.lastHeartbeat;
+
+    try {
+      if (item.state === "implementing" || item.state === "launching" || item.state === "ci-failed") {
+        // Use worker-reported progress if available
+        if (heartbeat) {
+          mux.setProgress(item.workspaceRef, Math.round(heartbeat.progress * 100), heartbeat.label);
+        }
+      } else if (item.state === "ci-pending") {
+        mux.setProgress(item.workspaceRef, 100, "CI running");
+      } else if (item.state === "ci-passed" || item.state === "review-pending") {
+        mux.setProgress(item.workspaceRef, 100, "Awaiting review");
+      } else if (item.state === "merging") {
+        mux.setProgress(item.workspaceRef, 100, "Merging");
+      }
+    } catch { /* best-effort */ }
+  }
 }
 
 // ── Adaptive poll interval ─────────────────────────────────────────
@@ -1095,6 +1165,8 @@ export interface OrchestrateLoopDeps {
   readScreen?: (ref: string, lines?: number) => string;
   /** Called after each poll cycle with current items. Used for daemon state persistence. */
   onPollComplete?: (items: OrchestratorItem[]) => void;
+  /** Sync cmux sidebar display for active workers after each poll cycle. */
+  syncDisplay?: (orch: Orchestrator, snapshot: PollSnapshot) => void;
   /** Dependencies for external PR review processing. When present and reviewExternal is enabled, external PRs are scanned and reviewed. */
   externalReviewDeps?: ExternalReviewDeps;
   /** Scan for TODO files. Required for watch mode — re-scans the todos directory to discover new items. */
@@ -1327,6 +1399,11 @@ export async function orchestrateLoop(
     for (const action of actions) {
       handleActionExecution(action, orch, ctx, deps, log, costData);
     }
+
+    // Sync cmux sidebar display for active workers
+    try {
+      deps.syncDisplay?.(orch, snapshot);
+    } catch { /* best-effort — display sync failure shouldn't block the orchestrator */ }
 
     // Log state summary
     const states: Record<string, string[]> = {};
@@ -1927,6 +2004,7 @@ export async function cmdOrchestrate(
     analyticsCommit: { hasChanges, gitAdd, getStagedFiles, gitCommit, gitReset },
     readScreen: (ref, lines) => mux.readScreen(ref, lines),
     onPollComplete,
+    syncDisplay: (o, snap) => syncWorkerDisplay(o, snap, mux),
     externalReviewDeps,
     ...(watchMode ? { scanTodos: () => parseTodos(todosDir, worktreeDir) } : {}),
   };

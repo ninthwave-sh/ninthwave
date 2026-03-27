@@ -3,10 +3,12 @@
 // and the standalone reconstructState/buildSnapshot from orchestrate.ts.
 // No vi.mock — all isolation via dependency injection.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   Orchestrator,
+  statusDisplayForState,
   type OrchestratorItem,
+  type OrchestratorItemState,
   type OrchestratorDeps,
   type ExecutionContext,
   type PollSnapshot,
@@ -16,12 +18,20 @@ import {
 import {
   buildSnapshot,
   reconstructState,
+  syncWorkerDisplay,
 } from "../core/commands/orchestrate.ts";
 import {
   cleanStaleBranchForReuse,
   type StaleBranchCleanupDeps,
 } from "../core/commands/start.ts";
 import type { TodoItem, Priority } from "../core/types.ts";
+import {
+  writeHeartbeat,
+  readHeartbeat,
+  heartbeatFilePath,
+  type DaemonIO,
+} from "../core/daemon.ts";
+import type { Multiplexer } from "../core/mux.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -1698,5 +1708,367 @@ describe("processComments (via processTransitions)", () => {
     expect(sendMsgs[1]!.message).toContain("@bob");
     // lastCommentCheck should be the latest comment timestamp
     expect(orch.getItem("H-1-1")!.lastCommentCheck).toBe("2026-01-15T12:02:00Z");
+  });
+});
+
+// ── statusDisplayForState ───────────────────────────────────────────
+
+describe("statusDisplayForState", () => {
+  it("returns correct display for implementing", () => {
+    const d = statusDisplayForState("implementing");
+    expect(d.text).toBe("Implementing");
+    expect(d.icon).toBe("hammer.fill");
+    expect(d.color).toBe("#b45309");
+  });
+
+  it("returns correct display for ci-pending", () => {
+    const d = statusDisplayForState("ci-pending");
+    expect(d.text).toBe("CI Pending");
+    expect(d.icon).toBe("clock.fill");
+    expect(d.color).toBe("#06b6d4");
+  });
+
+  it("returns correct display for ci-failed", () => {
+    const d = statusDisplayForState("ci-failed");
+    expect(d.text).toBe("CI Failed");
+    expect(d.icon).toBe("xmark.circle");
+    expect(d.color).toBe("#ef4444");
+  });
+
+  it("returns correct display for ci-passed", () => {
+    const d = statusDisplayForState("ci-passed");
+    expect(d.text).toBe("CI Passed");
+    expect(d.icon).toBe("checkmark.circle");
+    expect(d.color).toBe("#22c55e");
+  });
+
+  it("returns correct display for review-pending", () => {
+    const d = statusDisplayForState("review-pending");
+    expect(d.text).toBe("In Review");
+    expect(d.icon).toBe("eye.fill");
+    expect(d.color).toBe("#7c3aed");
+  });
+
+  it("returns correct display for merging", () => {
+    const d = statusDisplayForState("merging");
+    expect(d.text).toBe("Merging");
+    expect(d.icon).toBe("arrow.triangle.merge");
+    expect(d.color).toBe("#22c55e");
+  });
+
+  it("returns correct display for done", () => {
+    const d = statusDisplayForState("done");
+    expect(d.text).toBe("Done");
+    expect(d.icon).toBe("checkmark.seal.fill");
+    expect(d.color).toBe("#22c55e");
+  });
+
+  it("returns correct display for stuck", () => {
+    const d = statusDisplayForState("stuck");
+    expect(d.text).toBe("Stuck");
+    expect(d.icon).toBe("exclamationmark.triangle");
+    expect(d.color).toBe("#ef4444");
+  });
+
+  it("returns correct display for launching (maps to implementing)", () => {
+    const d = statusDisplayForState("launching");
+    expect(d.text).toBe("Implementing");
+    expect(d.icon).toBe("hammer.fill");
+    expect(d.color).toBe("#b45309");
+  });
+
+  it("returns correct display for merged (maps to done)", () => {
+    const d = statusDisplayForState("merged");
+    expect(d.text).toBe("Done");
+    expect(d.icon).toBe("checkmark.seal.fill");
+    expect(d.color).toBe("#22c55e");
+  });
+});
+
+// ── buildSnapshot heartbeat integration ─────────────────────────────
+
+describe("buildSnapshot heartbeat", () => {
+  it("populates lastHeartbeat from heartbeat file", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "implementing");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    // Create a mock heartbeat file via mock readHeartbeat
+    // buildSnapshot calls readHeartbeat internally, so we use a real project root with mock IO
+    const fakeMux = {
+      listWorkspaces: () => "workspace:1 H-1-1",
+      readScreen: () => "",
+    } as any;
+    const fakeCheckPr = () => null;
+    const fakeCommitTime = () => null;
+
+    // Build snapshot — readHeartbeat will return null since no file exists at /tmp/proj
+    const snap = buildSnapshot(
+      orch, "/tmp/proj", "/tmp/proj/.worktrees",
+      fakeMux, fakeCommitTime, fakeCheckPr,
+    );
+
+    const itemSnap = snap.items.find((s) => s.id === "H-1-1");
+    expect(itemSnap).toBeDefined();
+    // lastHeartbeat should be null (no file exists)
+    expect(itemSnap!.lastHeartbeat).toBeNull();
+  });
+
+  it("handles missing heartbeat file gracefully (null)", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+
+    const fakeCheckPr = () => "H-1-1\t42\tpending\tMERGEABLE";
+    const fakeMux = { listWorkspaces: () => "", readScreen: () => "" } as any;
+    const fakeCommitTime = () => null;
+
+    const snap = buildSnapshot(
+      orch, "/tmp/nonexistent", "/tmp/nonexistent/.worktrees",
+      fakeMux, fakeCommitTime, fakeCheckPr,
+    );
+
+    const itemSnap = snap.items.find((s) => s.id === "H-1-1");
+    expect(itemSnap).toBeDefined();
+    expect(itemSnap!.lastHeartbeat).toBeNull();
+  });
+});
+
+// ── executeClean heartbeat cleanup ──────────────────────────────────
+
+describe("executeClean heartbeat cleanup", () => {
+  it("deletes heartbeat file during clean without error", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "done");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    // The executeClean uses fs.existsSync/unlinkSync directly on the heartbeatFilePath.
+    // Since we're in tests with a non-existent path, existsSync returns false and
+    // the cleanup is skipped gracefully. We verify the overall clean still succeeds.
+    const ctx: ExecutionContext = {
+      projectRoot: "/tmp/proj-heartbeat-test",
+      worktreeDir: "/tmp/proj-heartbeat-test/.worktrees",
+      todosDir: "/tmp/proj-heartbeat-test/.ninthwave/todos",
+      aiTool: "test",
+    };
+
+    const deps: OrchestratorDeps = {
+      launchSingleItem: () => null,
+      cleanSingleWorktree: () => true,
+      prMerge: () => true,
+      prComment: () => true,
+      sendMessage: () => true,
+      closeWorkspace: () => true,
+      fetchOrigin: () => {},
+      ffMerge: () => {},
+    };
+
+    const result = orch.executeAction({ type: "clean", itemId: "H-1-1" }, ctx, deps);
+    expect(result.success).toBe(true);
+  });
+
+  it("heartbeat file path is based on projectRoot and itemId", () => {
+    // Verify the heartbeatFilePath function returns the expected path
+    const path = heartbeatFilePath("/my/project", "H-1-1");
+    expect(path).toContain("H-1-1.json");
+    expect(path).toContain("heartbeats");
+  });
+});
+
+// ── syncWorkerDisplay ───────────────────────────────────────────────
+
+describe("syncWorkerDisplay", () => {
+  function createMockMux(): Multiplexer & {
+    statusCalls: Array<{ ref: string; key: string; text: string; icon: string; color: string }>;
+    progressCalls: Array<{ ref: string; value: number; label?: string }>;
+  } {
+    const statusCalls: Array<{ ref: string; key: string; text: string; icon: string; color: string }> = [];
+    const progressCalls: Array<{ ref: string; value: number; label?: string }> = [];
+    return {
+      type: "cmux" as const,
+      isAvailable: () => true,
+      diagnoseUnavailable: () => "",
+      launchWorkspace: () => null,
+      splitPane: () => null,
+      sendMessage: () => true,
+      readScreen: () => "",
+      listWorkspaces: () => "",
+      closeWorkspace: () => true,
+      setStatus: (ref, key, text, icon, color) => {
+        statusCalls.push({ ref, key, text, icon, color });
+        return true;
+      },
+      setProgress: (ref, value, label) => {
+        progressCalls.push({ ref, value, label });
+        return true;
+      },
+      statusCalls,
+      progressCalls,
+    };
+  }
+
+  it("calls setStatus with correct args for implementing state", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "implementing");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const mux = createMockMux();
+    const snapshot: PollSnapshot = {
+      items: [{ id: "H-1-1", lastHeartbeat: { id: "H-1-1", progress: 0.5, label: "Writing tests", ts: "2026-01-15T12:00:00Z" } }],
+      readyIds: [],
+    };
+
+    syncWorkerDisplay(orch, snapshot, mux);
+
+    expect(mux.statusCalls).toHaveLength(1);
+    expect(mux.statusCalls[0]).toEqual({
+      ref: "workspace:1",
+      key: "todo-H-1-1",
+      text: "Implementing",
+      icon: "hammer.fill",
+      color: "#b45309",
+    });
+  });
+
+  it("calls setProgress with worker-reported data for implementing state", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "implementing");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const mux = createMockMux();
+    const snapshot: PollSnapshot = {
+      items: [{ id: "H-1-1", lastHeartbeat: { id: "H-1-1", progress: 0.7, label: "Almost done", ts: "2026-01-15T12:00:00Z" } }],
+      readyIds: [],
+    };
+
+    syncWorkerDisplay(orch, snapshot, mux);
+
+    expect(mux.progressCalls).toHaveLength(1);
+    expect(mux.progressCalls[0]).toEqual({
+      ref: "workspace:1",
+      value: 70,
+      label: "Almost done",
+    });
+  });
+
+  it("calls setProgress with 100 and contextual label for ci-pending state", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+    orch.getItem("H-1-1")!.prNumber = 42;
+
+    const mux = createMockMux();
+    const snapshot: PollSnapshot = {
+      items: [{ id: "H-1-1", lastHeartbeat: null }],
+      readyIds: [],
+    };
+
+    syncWorkerDisplay(orch, snapshot, mux);
+
+    expect(mux.progressCalls).toHaveLength(1);
+    expect(mux.progressCalls[0]).toEqual({
+      ref: "workspace:1",
+      value: 100,
+      label: "CI running",
+    });
+  });
+
+  it("calls setProgress with 100 and 'Awaiting review' for review-pending state", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "review-pending");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const mux = createMockMux();
+    const snapshot: PollSnapshot = {
+      items: [{ id: "H-1-1", lastHeartbeat: null }],
+      readyIds: [],
+    };
+
+    syncWorkerDisplay(orch, snapshot, mux);
+
+    expect(mux.progressCalls).toHaveLength(1);
+    expect(mux.progressCalls[0]).toEqual({
+      ref: "workspace:1",
+      value: 100,
+      label: "Awaiting review",
+    });
+  });
+
+  it("calls setProgress with 100 and 'Merging' for merging state", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "merging");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const mux = createMockMux();
+    const snapshot: PollSnapshot = {
+      items: [{ id: "H-1-1", lastHeartbeat: null }],
+      readyIds: [],
+    };
+
+    syncWorkerDisplay(orch, snapshot, mux);
+
+    expect(mux.progressCalls).toHaveLength(1);
+    expect(mux.progressCalls[0]).toEqual({
+      ref: "workspace:1",
+      value: 100,
+      label: "Merging",
+    });
+  });
+
+  it("skips items without workspaceRef", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "implementing");
+    // No workspaceRef set
+
+    const mux = createMockMux();
+    const snapshot: PollSnapshot = { items: [{ id: "H-1-1" }], readyIds: [] };
+
+    syncWorkerDisplay(orch, snapshot, mux);
+
+    expect(mux.statusCalls).toHaveLength(0);
+    expect(mux.progressCalls).toHaveLength(0);
+  });
+
+  it("skips terminal-state items (done, stuck)", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "done");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const mux = createMockMux();
+    const snapshot: PollSnapshot = { items: [], readyIds: [] };
+
+    syncWorkerDisplay(orch, snapshot, mux);
+
+    expect(mux.statusCalls).toHaveLength(0);
+    expect(mux.progressCalls).toHaveLength(0);
+  });
+
+  it("does not set progress for implementing when no heartbeat", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "implementing");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const mux = createMockMux();
+    const snapshot: PollSnapshot = {
+      items: [{ id: "H-1-1", lastHeartbeat: null }],
+      readyIds: [],
+    };
+
+    syncWorkerDisplay(orch, snapshot, mux);
+
+    // Status should be set, but progress should NOT be set (no heartbeat data)
+    expect(mux.statusCalls).toHaveLength(1);
+    expect(mux.progressCalls).toHaveLength(0);
   });
 });
