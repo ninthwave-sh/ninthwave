@@ -53,6 +53,47 @@ export interface TreeNode {
   children: TreeNode[];
 }
 
+// ─── Blocked-by computation ──────────────────────────────────────────────────
+
+/**
+ * Compute unresolved (non-merged) dependencies for each item.
+ * Returns a Map from item ID to an array of blocking dep IDs.
+ */
+export function computeBlockedBy(
+  items: StatusItem[],
+): Map<string, string[]> {
+  const stateMap = new Map<string, ItemState>();
+  for (const item of items) {
+    stateMap.set(item.id, item.state);
+  }
+
+  const result = new Map<string, string[]>();
+  for (const item of items) {
+    const deps = item.dependencies ?? [];
+    const blockers = deps.filter((depId) => {
+      const depState = stateMap.get(depId);
+      return depState !== undefined && depState !== "merged";
+    });
+    result.set(item.id, blockers);
+  }
+  return result;
+}
+
+/**
+ * Sort items: blocked-by count ascending, then ID alphanumeric.
+ */
+export function sortByBlockedThenId(
+  items: StatusItem[],
+  blockedBy: Map<string, string[]>,
+): StatusItem[] {
+  return [...items].sort((a, b) => {
+    const aCount = (blockedBy.get(a.id) ?? []).length;
+    const bCount = (blockedBy.get(b.id) ?? []).length;
+    if (aCount !== bCount) return aCount - bCount;
+    return a.id.localeCompare(b.id);
+  });
+}
+
 // ─── Pure formatting functions (testable) ────────────────────────────────────
 
 /** Map state to ANSI color code. */
@@ -214,20 +255,22 @@ export function formatTelemetrySuffix(item: StatusItem): string {
 /**
  * Format a single item row for the status table.
  * Returns a string with ANSI color codes.
+ * When blockedByStr is provided, it's displayed as the BLOCKED BY column.
  */
-export function formatItemRow(item: StatusItem, titleWidth: number): string {
+export function formatItemRow(item: StatusItem, titleWidth: number, blockedByStr?: string): string {
   const icon = stateIcon(item.state);
   const id = pad(item.id, 12);
   const color = stateColor(item.state);
   const label = pad(stateLabel(item.state), 14);
   const pr = item.prNumber ? pad(`#${item.prNumber}`, 7) : pad("-", 7);
   const age = pad(formatAge(item.ageMs), 8);
+  const blockedCol = blockedByStr !== undefined ? pad(blockedByStr, 13) : "";
   const title = truncateTitle(item.title || item.id, titleWidth);
   const repo = item.repoLabel ? ` ${DIM}[${item.repoLabel}]${RESET}` : "";
   const reason = item.failureReason ? ` ${DIM}(${item.failureReason})${RESET}` : "";
   const telemetry = formatTelemetrySuffix(item);
 
-  return `  ${color}${icon}${RESET} ${id}${color}${label}${RESET} ${pr} ${age} ${title}${repo}${reason}${telemetry}`;
+  return `  ${color}${icon}${RESET} ${id}${color}${label}${RESET} ${pr} ${age} ${blockedCol}${title}${repo}${reason}${telemetry}`;
 }
 
 /**
@@ -289,16 +332,17 @@ export function formatSummary(items: StatusItem[]): string {
  * Format a fully dimmed item row for the queue section.
  * Returns a string with DIM applied to the entire row.
  */
-export function formatQueuedItemRow(item: StatusItem, titleWidth: number): string {
+export function formatQueuedItemRow(item: StatusItem, titleWidth: number, blockedByStr?: string): string {
   const icon = stateIcon(item.state);
   const id = pad(item.id, 12);
   const label = pad(stateLabel(item.state), 14);
   const pr = item.prNumber ? pad(`#${item.prNumber}`, 7) : pad("-", 7);
   const age = pad(formatAge(item.ageMs), 8);
+  const blockedCol = blockedByStr !== undefined ? pad(blockedByStr, 13) : "";
   const title = truncateTitle(item.title || item.id, titleWidth);
   const repo = item.repoLabel ? ` [${item.repoLabel}]` : "";
 
-  return `  ${DIM}${icon} ${id}${label} ${pr} ${age} ${title}${repo}${RESET}`;
+  return `  ${DIM}${icon} ${id}${label} ${pr} ${age} ${blockedCol}${title}${repo}${RESET}`;
 }
 
 // ─── Dependency tree building ─────────────────────────────────────────────────
@@ -429,6 +473,9 @@ export function formatTreeRows(
  * Format the complete status table from a list of StatusItems.
  * Returns a multi-line string ready for console output.
  * When wipLimit is provided, shows WIP slot usage in the queue header.
+ *
+ * When items have dependencies, renders a flat list sorted by blocked-by count
+ * (ascending) then ID alphanumeric, with a BLOCKED BY column showing unresolved deps.
  */
 export function formatStatusTable(
   items: StatusItem[],
@@ -450,50 +497,50 @@ export function formatStatusTable(
     return lines.join("\n");
   }
 
-  // Column widths: 2 indent + 2 icon+space + 12 ID + 14 state + 1 + 7 PR + 1 + 8 age + 1 + title
-  // = 48 fixed + title
-  const fixedWidth = 48;
+  // Check if any items have dependency relationships
+  const hasDeps = !flat && items.some((i) => (i.dependencies ?? []).length > 0);
+
+  // Column widths — add BLOCKED BY column (13 chars) when deps exist
+  // Base: 2 indent + 2 icon+space + 12 ID + 14 state + 1 + 7 PR + 1 + 8 age + 1 = 48
+  const blockedColWidth = hasDeps ? 13 : 0;
+  const fixedWidth = 48 + blockedColWidth;
   const titleWidth = Math.max(10, termWidth - fixedWidth);
 
-  // Header (2-space placeholder for icon column)
-  const header = `  ${DIM}  ${pad("ID", 12)}${pad("STATE", 14)} ${pad("PR", 7)} ${pad("AGE", 8)} TITLE${RESET}`;
+  // Header
+  const blockedHeader = hasDeps ? `${pad("BLOCKED BY", 13)}` : "";
+  const header = `  ${DIM}  ${pad("ID", 12)}${pad("STATE", 14)} ${pad("PR", 7)} ${pad("AGE", 8)} ${blockedHeader}TITLE${RESET}`;
   lines.push(header);
 
   // Separator
   const sep = `  ${DIM}${"─".repeat(Math.min(termWidth - 2, 78))}${RESET}`;
   lines.push(sep);
 
-  // Check if any items have dependency relationships
-  const hasDeps = !flat && items.some((i) => (i.dependencies ?? []).length > 0);
-
   if (hasDeps) {
-    // Tree mode: render items with dependency relationships as trees,
-    // and items without dependencies as a flat list
-    const { trees, flat: flatItems } = buildDependencyTree(items);
+    // Flat blocked-by mode: sort by blocked count asc, then ID alpha
+    const blockedBy = computeBlockedBy(items);
+    const sorted = sortByBlockedThenId(items, blockedBy);
 
-    // Render dependency trees
-    if (trees.length > 0) {
-      lines.push(...formatTreeRows(trees, termWidth));
+    const activeItems = sorted.filter((i) => i.state !== "queued" && i.state !== "merged");
+    const mergedItems = sorted.filter((i) => i.state === "merged");
+    const queuedItems = sorted.filter((i) => i.state === "queued");
+
+    for (const item of activeItems) {
+      const blockers = blockedBy.get(item.id) ?? [];
+      const blockedStr = blockers.length > 0 ? blockers.join(", ") : "-";
+      lines.push(formatItemRow(item, titleWidth, blockedStr));
+    }
+    for (const item of mergedItems) {
+      const blockers = blockedBy.get(item.id) ?? [];
+      const blockedStr = blockers.length > 0 ? blockers.join(", ") : "-";
+      lines.push(formatItemRow(item, titleWidth, blockedStr));
     }
 
-    // Render flat items (no dependency relationships) in grouped format
-    const flatActive = flatItems.filter((i) => i.state !== "queued" && i.state !== "merged");
-    const flatMerged = flatItems.filter((i) => i.state === "merged");
-    const flatQueued = flatItems.filter((i) => i.state === "queued");
-
-    for (const item of flatActive) {
-      lines.push(formatItemRow(item, titleWidth));
-    }
-    for (const item of flatMerged) {
-      lines.push(formatItemRow(item, titleWidth));
-    }
-
-    // Queue section for flat queued items only (tree queued items are in trees)
-    if (flatQueued.length > 0) {
+    // Queue section
+    if (queuedItems.length > 0) {
       const activeCount = items.filter(
         (i) => i.state !== "queued" && i.state !== "merged",
       ).length;
-      let queueHeader = `Queue (${flatQueued.length} waiting`;
+      let queueHeader = `Queue (${queuedItems.length} waiting`;
       if (wipLimit !== undefined) {
         queueHeader += `, ${activeCount}/${wipLimit} WIP slots active`;
       }
@@ -503,22 +550,21 @@ export function formatStatusTable(
       lines.push(`  ${DIM}${queueHeader}${RESET}`);
       lines.push(sep);
 
-      for (const item of flatQueued) {
-        lines.push(formatQueuedItemRow(item, titleWidth));
+      for (const item of queuedItems) {
+        const blockers = blockedBy.get(item.id) ?? [];
+        const blockedStr = blockers.length > 0 ? blockers.join(", ") : "-";
+        lines.push(formatQueuedItemRow(item, titleWidth, blockedStr));
       }
     }
   } else {
-    // Flat mode (original behavior): split into active, merged, and queued groups
+    // Flat mode (no dependencies): split into active, merged, and queued groups
     const activeItems = items.filter((i) => i.state !== "queued" && i.state !== "merged");
     const queuedItems = items.filter((i) => i.state === "queued");
     const mergedItems = items.filter((i) => i.state === "merged");
 
-    // Active items at top (not merged, not queued)
     for (const item of activeItems) {
       lines.push(formatItemRow(item, titleWidth));
     }
-
-    // Merged items
     for (const item of mergedItems) {
       lines.push(formatItemRow(item, titleWidth));
     }

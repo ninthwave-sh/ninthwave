@@ -1378,8 +1378,8 @@ describe("formatTreeRows", () => {
 
 // ─── formatStatusTable with dependency trees ──────────────────────────────────
 
-describe("formatStatusTable tree rendering", () => {
-  it("renders dependency chain as indented tree", () => {
+describe("formatStatusTable blocked-by rendering", () => {
+  it("renders dependency chain as flat list with BLOCKED BY column", () => {
     const items = [
       makeItem("H-PRX-4", "merged", "Add session CA", 123, 3600000),
       makeItem("H-PRX-5", "merged", "Add Cedar policy", 124, 3600000, ["H-PRX-4"]),
@@ -1391,11 +1391,13 @@ describe("formatStatusTable tree rendering", () => {
     expect(output).toContain("H-PRX-5");
     expect(output).toContain("H-PRX-6");
     expect(output).toContain("H-PRX-7");
-    // Tree chars should appear
-    expect(output).toContain("└──");
+    expect(output).toContain("BLOCKED BY");
+    // No tree chars
+    expect(output).not.toContain("└──");
+    expect(output).not.toContain("├──");
   });
 
-  it("root items (no deps) render at top level", () => {
+  it("root items (no deps) show dash in BLOCKED BY", () => {
     const items = [
       makeItem("A-1", "merged", "Root"),
       makeItem("A-2", "implementing", "Child", null, 3600000, ["A-1"]),
@@ -1421,7 +1423,7 @@ describe("formatStatusTable tree rendering", () => {
     expect(output).toContain("B-1");
   });
 
-  it("multiple independent trees render separately", () => {
+  it("multiple independent chains render flat with correct blockers", () => {
     const items = [
       makeItem("A-1", "merged", "Tree A root"),
       makeItem("A-2", "implementing", "Tree A child", null, 3600000, ["A-1"]),
@@ -1433,30 +1435,31 @@ describe("formatStatusTable tree rendering", () => {
     expect(output).toContain("A-2");
     expect(output).toContain("B-1");
     expect(output).toContain("B-2");
-    // Both should have tree connectors
-    const lines = output.split("\n");
-    const treeLines = lines.filter((l) => l.includes("└──") || l.includes("├──"));
-    expect(treeLines.length).toBeGreaterThanOrEqual(2);
+    expect(output).toContain("BLOCKED BY");
+    // No tree chars
+    expect(output).not.toContain("└──");
+    expect(output).not.toContain("├──");
   });
 
-  it("--flat flag forces flat rendering", () => {
+  it("--flat flag forces flat rendering without BLOCKED BY column", () => {
     const items = [
       makeItem("A-1", "merged", "Root"),
       makeItem("A-2", "implementing", "Child", null, 3600000, ["A-1"]),
       makeItem("A-3", "queued", "Grandchild", null, 3600000, ["A-2"]),
     ];
     const output = stripAnsi(formatStatusTable(items, 80, undefined, true));
-    // Should not have tree connectors
+    // Should not have tree connectors or BLOCKED BY
     expect(output).not.toContain("├──");
     expect(output).not.toContain("└──");
     expect(output).not.toContain("│");
+    expect(output).not.toContain("BLOCKED BY");
     // Items should still be present
     expect(output).toContain("A-1");
     expect(output).toContain("A-2");
     expect(output).toContain("A-3");
   });
 
-  it("state icons and colors preserved in tree view", () => {
+  it("state icons preserved in blocked-by view", () => {
     const items = [
       makeItem("A-1", "merged", "Root"),
       makeItem("A-2", "implementing", "Child", null, 3600000, ["A-1"]),
@@ -1500,7 +1503,7 @@ describe("formatStatusTable tree rendering", () => {
     expect(plain).toContain("A-3");
   });
 
-  it("includes progress and summary in tree mode", () => {
+  it("includes progress and summary in blocked-by mode", () => {
     const items = [
       makeItem("A-1", "merged", "Root"),
       makeItem("A-2", "implementing", "Child", null, 3600000, ["A-1"]),

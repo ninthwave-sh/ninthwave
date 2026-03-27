@@ -14,6 +14,8 @@ import {
   formatBatchProgress,
   formatSummary,
   formatStatusTable,
+  computeBlockedBy,
+  sortByBlockedThenId,
   mapDaemonItemState,
   daemonStateToStatusItems,
   getTerminalWidth,
@@ -277,6 +279,140 @@ describe("formatStatusTable", () => {
     expect(() => formatStatusTable(items, 40)).not.toThrow();
     expect(() => formatStatusTable(items, 80)).not.toThrow();
     expect(() => formatStatusTable(items, 200)).not.toThrow();
+  });
+
+  it("shows BLOCKED BY header when items have dependencies", () => {
+    const items = [
+      makeStatusItem({ id: "A", state: "merged", dependencies: [] }),
+      makeStatusItem({ id: "B", state: "queued", dependencies: ["A"] }),
+    ];
+    const table = stripAnsi(formatStatusTable(items, 100));
+    expect(table).toContain("BLOCKED BY");
+  });
+
+  it("does not show BLOCKED BY header when no items have dependencies", () => {
+    const items = [
+      makeStatusItem({ id: "A", state: "implementing" }),
+      makeStatusItem({ id: "B", state: "queued" }),
+    ];
+    const table = stripAnsi(formatStatusTable(items, 100));
+    expect(table).not.toContain("BLOCKED BY");
+  });
+
+  it("shows unresolved blockers for multi-dep items", () => {
+    const items = [
+      makeStatusItem({ id: "H-NW-1", state: "merged", dependencies: [] }),
+      makeStatusItem({ id: "H-NW-2", state: "ci-pending", dependencies: [] }),
+      makeStatusItem({ id: "H-NW-3", state: "merged", dependencies: [] }),
+      makeStatusItem({ id: "H-NW-4", state: "merged", dependencies: [] }),
+      makeStatusItem({ id: "M-NW-5", state: "queued", dependencies: ["H-NW-1", "H-NW-2", "H-NW-3", "H-NW-4"] }),
+      makeStatusItem({ id: "M-NW-6", state: "queued", dependencies: ["M-NW-5"] }),
+    ];
+    const table = stripAnsi(formatStatusTable(items, 120));
+    // M-NW-5 should show H-NW-2 as the only unresolved blocker (others merged)
+    expect(table).toContain("H-NW-2");
+    // M-NW-6 should show M-NW-5 as blocker
+    expect(table).toContain("M-NW-5");
+    // Should NOT use tree nesting
+    expect(table).not.toContain("└──");
+    expect(table).not.toContain("├──");
+  });
+
+  it("sorts by blocked-by count ascending then ID alphanumeric", () => {
+    const items = [
+      makeStatusItem({ id: "Z-3", state: "queued", dependencies: ["A-1", "B-2"] }),
+      makeStatusItem({ id: "A-1", state: "implementing", dependencies: [] }),
+      makeStatusItem({ id: "B-2", state: "implementing", dependencies: [] }),
+      makeStatusItem({ id: "C-4", state: "queued", dependencies: ["A-1"] }),
+    ];
+    const table = stripAnsi(formatStatusTable(items, 120));
+    const lines = table.split("\n");
+    // Find data lines containing our IDs
+    const a1Line = lines.findIndex(l => l.includes("A-1"));
+    const b2Line = lines.findIndex(l => l.includes("B-2"));
+    const c4Line = lines.findIndex(l => l.includes("C-4"));
+    const z3Line = lines.findIndex(l => l.includes("Z-3"));
+    // A-1 and B-2 (0 blockers) before C-4 (1 blocker) before Z-3 (2 blockers)
+    expect(a1Line).toBeLessThan(c4Line);
+    expect(b2Line).toBeLessThan(c4Line);
+    expect(c4Line).toBeLessThan(z3Line);
+  });
+});
+
+// ── computeBlockedBy ──────────────────────────────────────────────────────────
+
+describe("computeBlockedBy", () => {
+  it("returns empty arrays for items with no deps", () => {
+    const items = [
+      makeStatusItem({ id: "A", dependencies: [] }),
+      makeStatusItem({ id: "B" }),
+    ];
+    const blocked = computeBlockedBy(items);
+    expect(blocked.get("A")).toEqual([]);
+    expect(blocked.get("B")).toEqual([]);
+  });
+
+  it("returns only unresolved (non-merged) blockers", () => {
+    const items = [
+      makeStatusItem({ id: "A", state: "merged", dependencies: [] }),
+      makeStatusItem({ id: "B", state: "ci-pending", dependencies: [] }),
+      makeStatusItem({ id: "C", state: "queued", dependencies: ["A", "B"] }),
+    ];
+    const blocked = computeBlockedBy(items);
+    // A is merged, so only B blocks C
+    expect(blocked.get("C")).toEqual(["B"]);
+  });
+
+  it("returns empty when all deps are merged", () => {
+    const items = [
+      makeStatusItem({ id: "A", state: "merged", dependencies: [] }),
+      makeStatusItem({ id: "B", state: "merged", dependencies: [] }),
+      makeStatusItem({ id: "C", state: "queued", dependencies: ["A", "B"] }),
+    ];
+    const blocked = computeBlockedBy(items);
+    expect(blocked.get("C")).toEqual([]);
+  });
+
+  it("ignores deps not in the current item set", () => {
+    const items = [
+      makeStatusItem({ id: "B", state: "queued", dependencies: ["UNKNOWN-1", "UNKNOWN-2"] }),
+    ];
+    const blocked = computeBlockedBy(items);
+    expect(blocked.get("B")).toEqual([]);
+  });
+});
+
+// ── sortByBlockedThenId ───────────────────────────────────────────────────────
+
+describe("sortByBlockedThenId", () => {
+  it("sorts by blocked count ascending then ID alpha", () => {
+    const items = [
+      makeStatusItem({ id: "Z" }),
+      makeStatusItem({ id: "A" }),
+      makeStatusItem({ id: "M" }),
+    ];
+    const blockedBy = new Map([
+      ["Z", ["dep1", "dep2"]],
+      ["A", []],
+      ["M", ["dep1"]],
+    ]);
+    const sorted = sortByBlockedThenId(items, blockedBy);
+    expect(sorted.map(i => i.id)).toEqual(["A", "M", "Z"]);
+  });
+
+  it("sorts alphabetically within same blocked count", () => {
+    const items = [
+      makeStatusItem({ id: "C" }),
+      makeStatusItem({ id: "A" }),
+      makeStatusItem({ id: "B" }),
+    ];
+    const blockedBy = new Map([
+      ["C", ["x"]],
+      ["A", ["x"]],
+      ["B", ["x"]],
+    ]);
+    const sorted = sortByBlockedThenId(items, blockedBy);
+    expect(sorted.map(i => i.id)).toEqual(["A", "B", "C"]);
   });
 });
 
