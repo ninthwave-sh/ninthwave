@@ -1389,6 +1389,30 @@ describe("executeLaunch stale branch cleanup", () => {
     expect(result.success).toBe(true);
     expect(orch.getItem("H-1-1")!.workspaceRef).toBe("workspace:1");
   });
+
+  it("writes fresh heartbeat with progress 0.0 before launching", () => {
+    const orch = new Orchestrator({ wipLimit: 1 });
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "launching");
+
+    const deps = makeMinimalDeps();
+
+    const result = orch.executeAction({ type: "launch", itemId: "H-1-1" }, ctx, deps);
+
+    expect(result.success).toBe(true);
+
+    // Verify the heartbeat was written with progress 0.0
+    const hb = readHeartbeat(ctx.projectRoot, "H-1-1");
+    expect(hb).not.toBeNull();
+    expect(hb!.progress).toBe(0);
+    expect(hb!.label).toBe("Starting");
+
+    // Clean up heartbeat file
+    try {
+      const { unlinkSync } = require("fs");
+      unlinkSync(heartbeatFilePath(ctx.projectRoot, "H-1-1"));
+    } catch { /* ignore */ }
+  });
 });
 
 describe("executeMerge conflict-aware rebase", () => {
@@ -2092,7 +2116,7 @@ describe("syncWorkerDisplay", () => {
     });
   });
 
-  it("calls setProgress with 100 and contextual label for ci-pending state", () => {
+  it("calls setProgress with 100 and no label for ci-pending state", () => {
     const orch = new Orchestrator();
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "ci-pending");
@@ -2111,11 +2135,11 @@ describe("syncWorkerDisplay", () => {
     expect(mux.progressCalls[0]).toEqual({
       ref: "workspace:1",
       value: 100,
-      label: "CI running",
+      label: undefined,
     });
   });
 
-  it("calls setProgress with 100 and 'Awaiting review' for review-pending state", () => {
+  it("calls setProgress with 100 and no label for review-pending state", () => {
     const orch = new Orchestrator();
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "review-pending");
@@ -2133,11 +2157,11 @@ describe("syncWorkerDisplay", () => {
     expect(mux.progressCalls[0]).toEqual({
       ref: "workspace:1",
       value: 100,
-      label: "Awaiting review",
+      label: undefined,
     });
   });
 
-  it("calls setProgress with 100 and 'Merging' for merging state", () => {
+  it("calls setProgress with 100 and no label for merging state", () => {
     const orch = new Orchestrator();
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "merging");
@@ -2155,7 +2179,29 @@ describe("syncWorkerDisplay", () => {
     expect(mux.progressCalls[0]).toEqual({
       ref: "workspace:1",
       value: 100,
-      label: "Merging",
+      label: undefined,
+    });
+  });
+
+  it("calls setProgress with 100 and no label for pr-open state", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeTodo("H-1-1"));
+    orch.setState("H-1-1", "pr-open");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const mux = createMockMux();
+    const snapshot: PollSnapshot = {
+      items: [{ id: "H-1-1", lastHeartbeat: null }],
+      readyIds: [],
+    };
+
+    syncWorkerDisplay(orch, snapshot, mux);
+
+    expect(mux.progressCalls).toHaveLength(1);
+    expect(mux.progressCalls[0]).toEqual({
+      ref: "workspace:1",
+      value: 100,
+      label: undefined,
     });
   });
 
@@ -2189,7 +2235,7 @@ describe("syncWorkerDisplay", () => {
     expect(mux.progressCalls).toHaveLength(0);
   });
 
-  it("does not set progress for implementing when no heartbeat", () => {
+  it("sets progress to 0% for implementing when no heartbeat", () => {
     const orch = new Orchestrator();
     orch.addItem(makeTodo("H-1-1"));
     orch.setState("H-1-1", "implementing");
@@ -2203,8 +2249,13 @@ describe("syncWorkerDisplay", () => {
 
     syncWorkerDisplay(orch, snapshot, mux);
 
-    // Status should be set, but progress should NOT be set (no heartbeat data)
+    // Status should be set, and progress should default to 0% (waiting for first heartbeat)
     expect(mux.statusCalls).toHaveLength(1);
-    expect(mux.progressCalls).toHaveLength(0);
+    expect(mux.progressCalls).toHaveLength(1);
+    expect(mux.progressCalls[0]).toEqual({
+      ref: "workspace:1",
+      value: 0,
+      label: undefined,
+    });
   });
 });

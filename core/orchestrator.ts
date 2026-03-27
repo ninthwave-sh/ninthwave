@@ -6,7 +6,7 @@ import { join } from "path";
 import { existsSync, unlinkSync } from "fs";
 import type { TodoItem, Priority, WorktreeInfo } from "./types.ts";
 import { getWorktreeInfo, listCrossRepoEntries } from "./cross-repo.ts";
-import { heartbeatFilePath } from "./daemon.ts";
+import { heartbeatFilePath, writeHeartbeat } from "./daemon.ts";
 
 // ── Priority rank for merge queue ordering (lower = higher priority) ─
 
@@ -1236,6 +1236,12 @@ export class Orchestrator {
         deps.warn?.(`cleanStaleBranch failed for ${item.id}: ${msg}`);
       }
     }
+
+    // Reset heartbeat to 0% before launch to prevent stale 1.0 from a prior run
+    // showing 100% during the startup gap (~30-60s until worker's first heartbeat).
+    try {
+      writeHeartbeat(ctx.projectRoot, item.id, 0, "Starting");
+    } catch { /* best-effort — heartbeat reset failure doesn't block launch */ }
 
     try {
       const result = deps.launchSingleItem(

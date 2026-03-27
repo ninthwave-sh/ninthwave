@@ -77,6 +77,18 @@ nw heartbeat --progress 0.5 --label "Writing tests"    # when adding/updating te
 
 You don't need to hit every milestone — call heartbeat when you transition between phases of work.
 
+### Label guidelines
+
+Your heartbeat labels appear in the cmux sidebar progress bar. The lifecycle state
+(Implementing, CI Pending, etc.) is shown separately in the status pill by the orchestrator.
+
+**Avoid these label values** (they duplicate the status pill):
+Implementing, CI Pending, CI Failed, CI Passed, In Review, Merging, Done, Stuck, Rebasing, Queued
+
+**Good labels describe your current activity:**
+"Reading code", "Writing code", "Writing tests", "Running tests", "Fixing lint",
+"Reviewing diff", "Creating PR", "Fixing CI", "Addressing feedback", "Rebasing onto main"
+
 ### No-Op Path: When No Code Change Is Needed
 
 Sometimes a TODO requires no code change. Valid reasons include:
