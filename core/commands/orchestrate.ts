@@ -71,6 +71,7 @@ import {
 import {
   formatStatusTable,
   mapDaemonItemState,
+  computeCountdownText,
   getTerminalWidth,
   getTerminalHeight,
   buildStatusLayout,
@@ -1181,8 +1182,8 @@ export interface OrchestrateLoopDeps {
   analyticsCommit?: AnalyticsCommitDeps;
   /** Read screen content from a worker workspace for cost/token parsing. */
   readScreen?: (ref: string, lines?: number) => string;
-  /** Called after each poll cycle with current items. Used for daemon state persistence. */
-  onPollComplete?: (items: OrchestratorItem[]) => void;
+  /** Called after each poll cycle with current items. Used for daemon state persistence and TUI countdown. */
+  onPollComplete?: (items: OrchestratorItem[], pollIntervalMs?: number) => void;
   /** Sync cmux sidebar display for active workers after each poll cycle. */
   syncDisplay?: (orch: Orchestrator, snapshot: PollSnapshot) => void;
   /** Dependencies for external PR review processing. When present and reviewExternal is enabled, external PRs are scanned and reviewed. */
@@ -1455,11 +1456,13 @@ export async function orchestrateLoop(
       }
     }
 
-    // Persist state for daemon mode (or any caller that wants snapshots)
-    deps.onPollComplete?.(orch.getAllItems());
-
     // Sleep — adaptive or fixed override
     const interval = config.pollIntervalMs ?? adaptivePollInterval(orch);
+
+    // Persist state for daemon mode (or any caller that wants snapshots)
+    // Pass interval so TUI can set countdown target
+    deps.onPollComplete?.(orch.getAllItems(), interval);
+
     await deps.sleep(interval);
   }
 }
@@ -1470,6 +1473,8 @@ export async function orchestrateLoop(
 export interface TuiState {
   scrollOffset: number;
   viewOptions: ViewOptions;
+  /** Unix timestamp (ms) of when the next data refresh will occur. Used for countdown display. */
+  nextRefreshAt?: number;
   /** Called after any key that should trigger an immediate re-render. */
   onUpdate?: () => void;
 }
@@ -2029,6 +2034,10 @@ export async function cmdOrchestrate(
     onUpdate: () => {
       if (tuiMode) {
         try {
+          // Update countdown text before rendering
+          if (tuiState.nextRefreshAt != null) {
+            tuiState.viewOptions.countdownText = computeCountdownText(tuiState.nextRefreshAt);
+          }
           renderTuiFrame(lastTuiItems, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset);
         } catch {
           // Non-fatal
@@ -2037,8 +2046,12 @@ export async function cmdOrchestrate(
     },
   };
 
-  const onPollComplete = (items: OrchestratorItem[]) => {
+  const onPollComplete = (items: OrchestratorItem[], pollIntervalMs?: number) => {
     lastTuiItems = items;
+    // Update countdown target for next poll cycle
+    if (pollIntervalMs != null) {
+      tuiState.nextRefreshAt = Date.now() + pollIntervalMs;
+    }
     try {
       const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
         statusPaneRef: null,
@@ -2051,6 +2064,10 @@ export async function cmdOrchestrate(
     // TUI mode: render live status table to stdout after each poll cycle
     if (tuiMode) {
       try {
+        // Update countdown text before rendering
+        if (tuiState.nextRefreshAt != null) {
+          tuiState.viewOptions.countdownText = computeCountdownText(tuiState.nextRefreshAt);
+        }
         renderTuiFrame(items, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset);
       } catch {
         // Non-fatal — TUI render failure shouldn't block the orchestrator
@@ -2137,6 +2154,23 @@ export async function cmdOrchestrate(
     cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);
   }
 
+  // 1-second countdown interval: re-renders TUI to tick countdown each second (decoupled from poll loop)
+  // lint-ignore: no-uncleared-interval
+  let countdownInterval: ReturnType<typeof setInterval> | null = null;
+  if (tuiMode) {
+    countdownInterval = setInterval(() => {
+      if (abortController.signal.aborted) return;
+      try {
+        if (tuiState.nextRefreshAt != null) {
+          tuiState.viewOptions.countdownText = computeCountdownText(tuiState.nextRefreshAt);
+        }
+        renderTuiFrame(lastTuiItems, wipLimit, undefined, tuiState.viewOptions, tuiState.scrollOffset);
+      } catch {
+        // Non-fatal — countdown render failure shouldn't crash the daemon
+      }
+    }, 1_000);
+  }
+
   // Write PID file for foreground mode too (prevents duplicate instances)
   if (!isDaemonChild) {
     writePidFile(projectRoot, process.pid);
@@ -2175,6 +2209,11 @@ export async function cmdOrchestrate(
         itemIds: closedWorkspaces,
         count: closedWorkspaces.length,
       });
+    }
+
+    // Clean up countdown interval
+    if (countdownInterval != null) {
+      clearInterval(countdownInterval);
     }
 
     // Restore terminal state (disable raw mode)

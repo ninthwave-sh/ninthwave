@@ -23,6 +23,7 @@ import {
   stateLabel,
   truncateTitle,
   formatAge,
+  computeCountdownText,
   pad,
   osc8Link,
   stripAnsiForWidth,
@@ -55,6 +56,7 @@ export {
   stateLabel,
   truncateTitle,
   formatAge,
+  computeCountdownText,
   pad,
   osc8Link,
   stripAnsiForWidth,
@@ -289,6 +291,12 @@ export async function cmdStatusWatch(
   /** Track last item count for scroll clamping on data changes */
   let lastItemCount = 0;
 
+  // Countdown state: track when next data refresh will occur
+  let nextRefreshAt = Date.now() + intervalMs;
+
+  // Cache last gathered data for countdown-only re-renders (avoids re-polling every second)
+  let lastStatusItems: ReturnType<typeof gatherStatusItems> | null = null;
+
   // Resolver to wake the sleep early on keypress
   let wakeResolver: (() => void) | null = null;
 
@@ -297,6 +305,33 @@ export async function cmdStatusWatch(
       wakeResolver();
       wakeResolver = null;
     }
+  }
+
+  /** Re-render the display using cached data (for countdown tick and keypress re-renders). */
+  function renderFrame() {
+    if (!lastStatusItems) return;
+    const termRows = getTerminalHeight();
+    const termCols = getTerminalWidth();
+
+    // Compute countdown text
+    viewOpts.countdownText = computeCountdownText(nextRefreshAt);
+
+    process.stdout.write("\x1B[H");
+
+    if (termRows >= MIN_FULLSCREEN_ROWS) {
+      const mergedOpts: ViewOptions = { ...viewOpts, sessionStartedAt: lastStatusItems.sessionStartedAt ?? viewOpts.sessionStartedAt };
+      const layout = buildStatusLayout(lastStatusItems.items, termCols, lastStatusItems.wipLimit, flat, mergedOpts);
+      lastItemCount = layout.itemLines.length;
+      scrollOffset = clampScrollOffset(scrollOffset, lastItemCount, Math.max(1, termRows - layout.headerLines.length - layout.footerLines.length));
+
+      const frameLines = renderFullScreenFrame(layout, termRows, termCols, scrollOffset);
+      const content = frameLines.join("\n");
+      process.stdout.write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+    } else {
+      const content = renderStatus(worktreeDir, projectRoot, flat, viewOpts);
+      process.stdout.write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+    }
+    process.stdout.write("\x1B[J");
   }
 
   function handleKey(key: string) {
@@ -322,6 +357,8 @@ export async function cmdStatusWatch(
       default:
         return; // Don't wake for unknown keys
     }
+    // Re-render immediately on keypress with current countdown
+    renderFrame();
     wake();
   }
 
@@ -330,6 +367,7 @@ export async function cmdStatusWatch(
     const termRows = getTerminalHeight();
     const viewportHeight = Math.max(1, termRows - 10); // approximate
     scrollOffset = clampScrollOffset(scrollOffset, lastItemCount, viewportHeight);
+    renderFrame();
     wake();
   }
 
@@ -342,7 +380,19 @@ export async function cmdStatusWatch(
     process.stdout.on("resize", handleResize);
   }
 
+  // 1-second countdown interval: re-renders footer to tick countdown each second
+  // lint-ignore: no-uncleared-interval
+  const countdownInterval = setInterval(() => {
+    if (quitRequested || signal?.aborted) return;
+    try {
+      renderFrame();
+    } catch {
+      // Non-fatal — countdown render failure shouldn't crash
+    }
+  }, 1_000);
+
   function cleanup() {
+    clearInterval(countdownInterval);
     if (isTTY) {
       process.stdin.removeListener("data", handleKey);
       process.stdout.removeListener("resize", handleResize);
@@ -357,30 +407,12 @@ export async function cmdStatusWatch(
 
   try {
     while (!signal?.aborted && !quitRequested) {
-      const termRows = getTerminalHeight();
-      const termCols = getTerminalWidth();
+      // Gather fresh data and render
+      lastStatusItems = gatherStatusItems(worktreeDir, projectRoot);
 
-      // Move cursor to top-left (no full-screen clear — avoids flicker)
-      process.stdout.write("\x1B[H");
-
-      if (termRows >= MIN_FULLSCREEN_ROWS) {
-        // Full-screen mode: build layout, render with scroll
-        const statusItems = gatherStatusItems(worktreeDir, projectRoot);
-        const mergedOpts: ViewOptions = { ...viewOpts, sessionStartedAt: statusItems.sessionStartedAt ?? viewOpts.sessionStartedAt };
-        const layout = buildStatusLayout(statusItems.items, termCols, statusItems.wipLimit, flat, mergedOpts);
-        lastItemCount = layout.itemLines.length;
-        scrollOffset = clampScrollOffset(scrollOffset, lastItemCount, Math.max(1, termRows - layout.headerLines.length - layout.footerLines.length));
-
-        const frameLines = renderFullScreenFrame(layout, termRows, termCols, scrollOffset);
-        const content = frameLines.join("\n");
-        process.stdout.write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
-      } else {
-        // Fallback: legacy non-fullscreen rendering
-        const content = renderStatus(worktreeDir, projectRoot, flat, viewOpts);
-        process.stdout.write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
-      }
-      // Clear from cursor to end of screen (removes stale trailing lines)
-      process.stdout.write("\x1B[J");
+      // Update countdown text to show current state
+      viewOpts.countdownText = computeCountdownText(nextRefreshAt);
+      renderFrame();
 
       // Wait for interval, abort signal, or keypress (whichever comes first)
       await new Promise<void>((resolve) => {
@@ -406,6 +438,9 @@ export async function cmdStatusWatch(
           { once: true },
         );
       });
+
+      // After waking: set next refresh target (data will be gathered at top of loop)
+      nextRefreshAt = Date.now() + intervalMs;
     }
   } finally {
     cleanup();
