@@ -16,7 +16,6 @@ import {
   unlinkSync,
   lstatSync,
   readlinkSync,
-  readdirSync,
 } from "fs";
 import { join, relative, dirname, resolve } from "path";
 import { getBundleDir } from "../paths.ts";
