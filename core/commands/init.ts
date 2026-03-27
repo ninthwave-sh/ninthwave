@@ -39,8 +39,8 @@ export interface DetectionResult {
   aiTools: string[];
   /** Repo structure type */
   repoType: "monorepo" | "single";
-  /** Detected kernel-level sandbox */
-  sandbox: "nono" | null;
+  /** Detected observability backends (from env vars) */
+  observabilityBackends: string[];
 }
 
 /**
@@ -173,14 +173,6 @@ export function detectAITools(
 }
 
 /**
- * Detect kernel-level sandbox (nono).
- */
-export function detectSandbox(deps: InitDeps = {}): "nono" | null {
-  const commandExists = deps.commandExists ?? defaultCommandExists;
-  return commandExists("nono") ? "nono" : null;
-}
-
-/**
  * Detect repo structure — monorepo if package.json has workspaces,
  * or if there are multiple package.json files in top-level directories.
  */
@@ -220,6 +212,21 @@ export function detectRepoType(
 }
 
 /**
+ * Detect observability backend env vars (Sentry, PagerDuty).
+ * Returns an array of backend names whose auth tokens are present.
+ */
+export function detectObservabilityBackends(deps: InitDeps = {}): string[] {
+  const getEnv = deps.getEnv ?? defaultGetEnv;
+  const backends: string[] = [];
+
+  if (getEnv("SENTRY_AUTH_TOKEN")) backends.push("sentry");
+  if (getEnv("PAGERDUTY_API_TOKEN")) backends.push("pagerduty");
+  if (getEnv("LINEAR_API_KEY")) backends.push("linear");
+
+  return backends;
+}
+
+/**
  * Run all detections and return the combined result.
  */
 export function detectAll(
@@ -232,7 +239,7 @@ export function detectAll(
     mux: detectMux(deps),
     aiTools: detectAITools(projectDir, deps),
     repoType: detectRepoType(projectDir, deps),
-    sandbox: detectSandbox(deps),
+    observabilityBackends: detectObservabilityBackends(deps),
   };
 }
 
@@ -269,11 +276,6 @@ export function generateConfig(detection: DetectionResult): string {
     lines.push("# MUX=cmux");
   }
 
-  // Sandbox
-  if (detection.sandbox) {
-    lines.push(`# SANDBOX=${detection.sandbox}`);
-  }
-
   // Repo type
   lines.push(`REPO_TYPE=${detection.repoType}`);
 
@@ -282,6 +284,26 @@ export function generateConfig(detection: DetectionResult): string {
     lines.push(`AI_TOOLS=${detection.aiTools.join(",")}`);
   } else {
     lines.push("# AI_TOOLS=claude,opencode,copilot");
+  }
+
+  // Observability backends
+  if (detection.observabilityBackends.length > 0) {
+    lines.push("");
+    lines.push("# Observability backends");
+  }
+  if (detection.observabilityBackends.includes("sentry")) {
+    lines.push("# Sentry integration (SENTRY_AUTH_TOKEN detected)");
+    lines.push("# sentry_org=your-org");
+    lines.push("# sentry_project=your-project");
+  }
+  if (detection.observabilityBackends.includes("pagerduty")) {
+    lines.push("# PagerDuty integration (PAGERDUTY_API_TOKEN detected)");
+    lines.push("# pagerduty_service_id=your-service-id");
+    lines.push("# pagerduty_from_email=your@email.com");
+  }
+  if (detection.observabilityBackends.includes("linear")) {
+    lines.push("# Linear integration (LINEAR_API_KEY detected)");
+    lines.push("# linear_team_key=ENG");
   }
 
   lines.push("");
@@ -335,17 +357,6 @@ export function printSummary(detection: DetectionResult): void {
     );
   }
 
-  // Sandbox
-  if (detection.sandbox) {
-    console.log(
-      `  ${GREEN}✓${RESET} Sandbox: ${detection.sandbox}`,
-    );
-  } else {
-    console.log(
-      `  ${DIM}–${RESET} Sandbox: ${DIM}none (install nono for worker isolation)${RESET}`,
-    );
-  }
-
   // Repo type
   console.log(
     `  ${GREEN}✓${RESET} Repo type: ${detection.repoType}`,
@@ -359,6 +370,17 @@ export function printSummary(detection: DetectionResult): void {
   } else {
     console.log(
       `  ${DIM}–${RESET} AI tools: ${DIM}none detected${RESET}`,
+    );
+  }
+
+  // Observability backends
+  if (detection.observabilityBackends.length > 0) {
+    console.log(
+      `  ${GREEN}✓${RESET} Observability: ${detection.observabilityBackends.join(", ")}`,
+    );
+  } else {
+    console.log(
+      `  ${DIM}–${RESET} Observability: ${DIM}no backends detected (set SENTRY_AUTH_TOKEN, PAGERDUTY_API_TOKEN, or LINEAR_API_KEY)${RESET}`,
     );
   }
 
@@ -422,17 +444,6 @@ function scaffold(projectDir: string, bundleDir: string): void {
       const linkPath = join(targetDir, target.filename);
       if (existsSync(linkPath)) unlinkSync(linkPath);
       symlinkSync(relative(targetDir, agentSource), linkPath);
-    }
-  }
-
-  // --- nono profile symlink ---
-  const nonoProfileSource = join(bundleDir, ".nono", "profiles", "claude-worker.json");
-  if (existsSync(nonoProfileSource)) {
-    const nonoProfileDir = join(projectDir, ".nono", "profiles");
-    const nonoProfileLink = join(nonoProfileDir, "claude-worker.json");
-    if (!existsSync(nonoProfileLink)) {
-      mkdirSync(nonoProfileDir, { recursive: true });
-      symlinkSync(relative(nonoProfileDir, nonoProfileSource), nonoProfileLink);
     }
   }
 
