@@ -715,7 +715,7 @@ describe("process liveness timeout suppression", () => {
 
     // Activity timeout is the hard cap even when process is alive
     expect(orch.getItem("H-1-1")!.state).toBe("stuck");
-    expect(actions.some((a) => a.type === "clean")).toBe(true);
+    expect(actions.some((a) => a.type === "workspace-close")).toBe(true);
   });
 
   it("worker with stale heartbeat and workerAlive=false is marked stuck at launchTimeoutMs", () => {
@@ -737,7 +737,7 @@ describe("process liveness timeout suppression", () => {
 
     // workerAlive=false: launch timeout applies (existing behavior)
     expect(orch.getItem("H-1-1")!.state).toBe("stuck");
-    expect(actions.some((a) => a.type === "clean")).toBe(true);
+    expect(actions.some((a) => a.type === "workspace-close")).toBe(true);
   });
 
   it("fresh heartbeat still takes priority over process liveness signal", () => {

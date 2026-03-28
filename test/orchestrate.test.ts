@@ -692,7 +692,7 @@ describe("orchestrateLoop", () => {
   });
 
   it("final cleanup sweep skips worktree removal for stuck items (H-WR-2)", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "asap", maxRetries: 0 });
+    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto", maxRetries: 0 });
     orch.addItem(makeWorkItem("SK-1-1"));
     orch.addItem(makeWorkItem("SK-1-2"));
 
@@ -723,7 +723,7 @@ describe("orchestrateLoop", () => {
           if (item.id === "SK-1-2") {
             items.push({ id: item.id, workerAlive: false });
           }
-        } else if (item.state === "merging" || item.state === "merged") {
+        } else if (item.state === "ci-passed" || item.state === "merging" || item.state === "merged") {
           items.push({ id: item.id, prState: "merged" });
         }
       }
