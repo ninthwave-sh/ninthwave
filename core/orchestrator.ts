@@ -182,7 +182,8 @@ export type ActionType =
   | "sync-stack-comments"
   | "launch-review"
   | "clean-review"
-  | "send-message";
+  | "send-message"
+  | "set-commit-status";
 
 export interface Action {
   type: ActionType;
@@ -193,6 +194,10 @@ export interface Action {
   message?: string;
   /** For launch actions, the base branch to stack on (e.g., "todo/H-1-1"). */
   baseBranch?: string;
+  /** For set-commit-status actions, the status state. */
+  statusState?: "pending" | "success" | "failure";
+  /** For set-commit-status actions, the description text. */
+  statusDescription?: string;
 }
 
 // ── Execution context and dependencies ──────────────────────────────
@@ -298,6 +303,17 @@ export interface OrchestratorDeps {
    * Clean up a repair worker session and workspace.
    */
   cleanRepair?: (itemId: string, repairWorkspaceRef: string) => boolean;
+  /**
+   * Set a commit status on a PR's head SHA.
+   * Used to post review results as GitHub commit statuses for branch protection integration.
+   */
+  setCommitStatus?: (
+    repoRoot: string,
+    prNumber: number,
+    state: "pending" | "success" | "failure",
+    context: string,
+    description: string,
+  ) => boolean;
 }
 
 /** Result of executing a single action. */
@@ -316,7 +332,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   launchTimeoutMs: 30 * 60 * 1000,   // 30 minutes
   activityTimeoutMs: 60 * 60 * 1000, // 60 minutes
   enableStacking: true,
-  reviewEnabled: false,
+  reviewEnabled: true,
   reviewWipLimit: 2,
   reviewAutoFix: "off",
   reviewCanApprove: false,
@@ -982,6 +998,14 @@ export class Orchestrator {
     if (snap?.reviewDecision === "APPROVED") {
       item.reviewCompleted = true;
       this.transition(item, "ci-passed", snap?.eventTime);
+      // Set success commit status — review passed with no blockers
+      actions.push({
+        type: "set-commit-status",
+        itemId: item.id,
+        prNumber: item.prNumber,
+        statusState: "success",
+        statusDescription: "Review passed — no blockers",
+      });
       // Chain through evaluateMerge to handle merge in the same cycle
       actions.push(...this.evaluateMerge(item, snap, snap?.eventTime));
       return actions;
@@ -990,6 +1014,18 @@ export class Orchestrator {
     // Review CHANGES_REQUESTED → transition to review-pending, notify worker
     if (snap?.reviewDecision === "CHANGES_REQUESTED") {
       this.transition(item, "review-pending", snap?.eventTime);
+      // Set commit status based on reviewCanApprove:
+      // - If reviewCanApprove: "failure" (blockers are gate-blocking)
+      // - Otherwise: "success" (blockers are informational, not gate-blocking)
+      actions.push({
+        type: "set-commit-status",
+        itemId: item.id,
+        prNumber: item.prNumber,
+        statusState: this.config.reviewCanApprove ? "failure" : "success",
+        statusDescription: this.config.reviewCanApprove
+          ? "Review found blockers"
+          : "Review found issues (non-blocking)",
+      });
       actions.push({
         type: "notify-review",
         itemId: item.id,
@@ -1130,6 +1166,14 @@ export class Orchestrator {
             itemId: item.id,
             prNumber: item.prNumber,
           });
+          // Set pending commit status when entering review
+          actions.push({
+            type: "set-commit-status",
+            itemId: item.id,
+            prNumber: item.prNumber,
+            statusState: "pending",
+            statusDescription: "Review in progress",
+          });
         }
         // else: no review slots available, stay in ci-passed until a slot opens
       }
@@ -1245,6 +1289,8 @@ export class Orchestrator {
         return this.executeCleanReview(item, deps);
       case "send-message":
         return this.executeSendMessage(item, action, deps);
+      case "set-commit-status":
+        return this.executeSetCommitStatus(item, action, ctx, deps);
     }
   }
 
@@ -1719,6 +1765,32 @@ export class Orchestrator {
     }
 
     return { success: true };
+  }
+
+  /** Set a commit status on the PR's head SHA. */
+  private executeSetCommitStatus(
+    item: OrchestratorItem,
+    action: Action,
+    ctx: ExecutionContext,
+    deps: OrchestratorDeps,
+  ): ActionResult {
+    if (!deps.setCommitStatus) {
+      return { success: true }; // no-op when not wired
+    }
+
+    const prNum = action.prNumber ?? item.prNumber;
+    if (!prNum) {
+      return { success: false, error: `No PR number for commit status of ${item.id}` };
+    }
+
+    const state = action.statusState ?? "pending";
+    const description = action.statusDescription ?? "";
+    const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
+
+    const ok = deps.setCommitStatus(repoRoot, prNum, state, "ninthwave/review", description);
+    return ok
+      ? { success: true }
+      : { success: false, error: `Failed to set commit status for ${item.id}` };
   }
 
   /** Send rebase request to a worker. */

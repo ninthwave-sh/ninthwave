@@ -202,6 +202,62 @@ export function resolveGithubToken(projectRoot: string): string | undefined {
   return undefined;
 }
 
+// ── Commit Status API ───────────────────────────────────────────────
+
+/**
+ * Set a commit status on a specific SHA via the GitHub Statuses API.
+ * Uses `gh api repos/{owner}/{repo}/statuses/{sha}` — requires standard `repo` scope.
+ *
+ * @param repoRoot - Repo root for gh CLI context
+ * @param sha - The commit SHA to set status on
+ * @param state - Status state: "pending", "success", or "failure"
+ * @param context - Status context string (e.g., "ninthwave/review")
+ * @param description - Short description (e.g., "2 nits, 0 blockers")
+ * @param targetUrl - Optional URL linking to the review comment
+ * @returns true on success, false on failure
+ */
+export function setCommitStatus(
+  repoRoot: string,
+  sha: string,
+  state: "pending" | "success" | "failure",
+  context: string,
+  description: string,
+  targetUrl?: string,
+): boolean {
+  let ownerRepo: string;
+  try {
+    ownerRepo = getRepoOwner(repoRoot);
+  } catch {
+    return false;
+  }
+
+  const args = [
+    "api",
+    "--method",
+    "POST",
+    `repos/${ownerRepo}/statuses/${sha}`,
+    "-f", `state=${state}`,
+    "-f", `context=${context}`,
+    "-f", `description=${description}`,
+  ];
+  if (targetUrl) {
+    args.push("-f", `target_url=${targetUrl}`);
+  }
+
+  const result = ghInRepo(repoRoot, args);
+  return result.exitCode === 0;
+}
+
+/**
+ * Get the head SHA of a PR.
+ * @returns The head commit SHA, or null if the PR can't be queried.
+ */
+export function prHeadSha(repoRoot: string, prNumber: number): string | null {
+  const data = prView(repoRoot, prNumber, ["headRefOid"]);
+  const sha = data.headRefOid as string | undefined;
+  return sha ?? null;
+}
+
 // ── Trusted PR comments ──────────────────────────────────────────────
 
 /** Trusted author associations for comment filtering. */

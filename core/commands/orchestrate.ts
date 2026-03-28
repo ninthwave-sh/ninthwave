@@ -27,7 +27,7 @@ import { resolveRepo, getWorktreeInfo, bootstrapRepo } from "../cross-repo.ts";
 import { checkPrStatus, scanExternalPRs } from "./pr-monitor.ts";
 import { launchSingleItem, launchReviewWorker, launchRepairWorker, detectAiTool, cleanStaleBranchForReuse } from "./launch.ts";
 import { cleanSingleWorktree } from "./clean.ts";
-import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrComments, upsertOrchestratorComment } from "../gh.ts";
+import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrComments, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha } from "../gh.ts";
 import { fetchOrigin, ffMerge, hasChanges, getStagedFiles, gitAdd, gitCommit, gitPush, gitReset, daemonRebase } from "../git.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
 import { reconcile } from "./reconcile.ts";
@@ -1732,7 +1732,7 @@ export async function cmdOrchestrate(
   let isDaemonChild = false;
   let clickupListId: string | undefined;
   let remoteFlag = false;
-  let reviewEnabled = false;
+  let reviewEnabled = true;
   let reviewWipLimit: number | undefined;
   let reviewAutoFix: "off" | "direct" | "pr" | undefined;
   let reviewCanApprove = false;
@@ -1793,6 +1793,10 @@ export async function cmdOrchestrate(
         break;
       case "--review":
         reviewEnabled = true;
+        i += 1;
+        break;
+      case "--no-review":
+        reviewEnabled = false;
         i += 1;
         break;
       case "--review-wip-limit":
@@ -2013,7 +2017,7 @@ export async function cmdOrchestrate(
   const orch = new Orchestrator({
     wipLimit,
     mergeStrategy,
-    ...(reviewEnabled ? { reviewEnabled } : {}),
+    reviewEnabled,
     ...(reviewWipLimit !== undefined ? { reviewWipLimit } : {}),
     ...(reviewAutoFix !== undefined ? { reviewAutoFix } : {}),
     ...(reviewCanApprove ? { reviewCanApprove } : {}),
@@ -2141,6 +2145,11 @@ export async function cmdOrchestrate(
     cleanRepair: (itemId, repairWorkspaceRef) => {
       try { mux.closeWorkspace(repairWorkspaceRef); } catch { /* best-effort */ }
       return true;
+    },
+    setCommitStatus: (repoRoot, prNumber, state, context, description) => {
+      const sha = prHeadSha(repoRoot, prNumber);
+      if (!sha) return false;
+      return ghSetCommitStatus(repoRoot, sha, state, context, description);
     },
   };
 

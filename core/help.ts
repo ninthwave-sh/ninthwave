@@ -123,6 +123,8 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
       "--daemon": "Run in daemon mode (background)",
       "--no-watch": "Disable TUI watch mode",
       "--watch": "Enable TUI watch mode",
+      "--no-review": "Disable review workers (on by default)",
+      "--review": "Enable review workers (default)",
     },
     examples: [
       "nw watch",
