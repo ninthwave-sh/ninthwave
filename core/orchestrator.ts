@@ -97,6 +97,8 @@ export interface OrchestratorItem {
   ciFailureNotifiedAt?: string | null;
   /** ISO timestamp of the last comment check for this item's PR. Used to avoid duplicate comment relay. */
   lastCommentCheck?: string;
+  /** Number of consecutive repair worker launches for rebase conflict resolution. Resets when conflicts resolve (isMergeable !== false). */
+  repairAttemptCount?: number;
 }
 
 export interface OrchestratorConfig {
@@ -124,6 +126,8 @@ export interface OrchestratorConfig {
   reviewCanApprove: boolean;
   /** Max merge failures before marking stuck. Default: 3. */
   maxMergeRetries: number;
+  /** Max consecutive repair worker launches before marking stuck. Default: 3. */
+  maxRepairAttempts: number;
 }
 
 // ── Poll snapshot ────────────────────────────────────────────────────
@@ -314,6 +318,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   reviewAutoFix: "off",
   reviewCanApprove: false,
   maxMergeRetries: 3,
+  maxRepairAttempts: 3,
 };
 
 // ── Memory-aware WIP limit ──────────────────────────────────────────
@@ -802,6 +807,11 @@ export class Orchestrator {
       this.transition(item, "merged", snap?.eventTime);
       actions.push({ type: "clean", itemId: item.id });
       return actions;
+    }
+
+    // Reset repair attempt counter when conflicts are resolved
+    if (snap?.isMergeable !== false && (item.repairAttemptCount ?? 0) > 0) {
+      item.repairAttemptCount = 0;
     }
 
     // Resolve the effective CI status from the snapshot
@@ -1746,7 +1756,29 @@ export class Orchestrator {
       }
     }
 
-    // Daemon rebase failed — try repair worker if available (focused rebase-only prompt)
+    // Daemon rebase failed — prefer sending message to live worker over launching repair.
+    // The original worker knows the code best and can resolve conflicts properly.
+    const message = action.message || "Please rebase onto latest main.";
+    if (item.workspaceRef) {
+      const sent = deps.sendMessage(item.workspaceRef, message);
+      if (sent) {
+        return { success: true };
+      }
+      // sendMessage failed — worker may be unresponsive, fall through to repair
+    }
+
+    // Circuit breaker: stop launching repairs after maxRepairAttempts
+    const attemptCount = item.repairAttemptCount ?? 0;
+    if (attemptCount >= this.config.maxRepairAttempts) {
+      this.transition(item, "stuck");
+      item.failureReason = `repair-loop: exceeded max repair attempts (${this.config.maxRepairAttempts}) — rebase conflicts could not be resolved`;
+      deps.warn?.(
+        `[Orchestrator] ${item.id} stuck after ${attemptCount} repair attempts. Manual intervention needed.`,
+      );
+      return { success: false, error: `Repair loop circuit breaker triggered for ${item.id} after ${attemptCount} attempts` };
+    }
+
+    // Launch repair worker if available (focused rebase-only prompt)
     if (deps.launchRepair && item.prNumber) {
       const repoRoot = deps.daemonRebase
         ? (getWorktreeInfo(item.id, join(ctx.worktreeDir, ".cross-repo-index"), ctx.worktreeDir)?.repoRoot ?? item.resolvedRepoRoot ?? ctx.projectRoot)
@@ -1755,6 +1787,7 @@ export class Orchestrator {
         const result = deps.launchRepair(item.id, item.prNumber, repoRoot);
         if (result) {
           item.repairWorkspaceRef = result.workspaceRef;
+          item.repairAttemptCount = attemptCount + 1;
           this.transition(item, "repairing");
           return { success: true };
         }
@@ -1763,19 +1796,9 @@ export class Orchestrator {
       }
     }
 
-    // Repair unavailable — fall back to worker rebase message
-    const message = action.message || "Please rebase onto latest main.";
-    if (item.workspaceRef) {
-      const sent = deps.sendMessage(item.workspaceRef, message);
-      if (!sent) {
-        return { success: false, error: `Daemon rebase failed and could not send worker message for ${item.id}` };
-      }
-      return { success: true };
-    }
-
-    // No daemon rebase, no repair, no worker — log warning
+    // No live worker, no repair — log warning
     deps.warn?.(
-      `[Orchestrator] PR for ${item.id} (branch ${branch}) has merge conflicts but daemon rebase failed and worker has no workspace. Manual rebase needed.`,
+      `[Orchestrator] PR for ${item.id} (branch ${branch}) has merge conflicts but daemon rebase failed and no worker/repair available. Manual rebase needed.`,
     );
     return { success: false, error: `Daemon rebase failed and no worker available for ${item.id}` };
   }
