@@ -14,307 +14,90 @@
 <p align="center">
   <img src="docs/assets/hero.png" alt="ninthwave running in cmux: orchestrator with parallel worker sessions" width="800" />
 </p>
-<p align="center"><em>Work items in → parallel AI sessions → merged PRs out</em></p>
+<p align="center"><em>todos/*.md &rarr; sequenced AI agents &rarr; human-sized PRs</em></p>
 
 ---
 
-**ninthwave is an open-source orchestration layer for AI coding tools.** It decomposes a feature into reviewable work items, launches parallel AI sessions to implement them, sequences dependencies, monitors CI, and merges — automatically. Each session is a full native instance of Claude Code, OpenCode, or Copilot CLI. You review every PR before it lands.
+**ninthwave orchestrates parallel AI coding sessions from todo files.** Each work item gets a full native instance of Claude Code, OpenCode, or Copilot CLI — latest agent features, full capability, focused on one task. Workers open a PR then idle with full context: review comments, CI failures, and rebase requests go straight back for the worker to handle. Switch into any session to steer. The orchestrator sequences dependencies, auto-merges, and cleans up.
 
-Your AI tool handles one session at a time. An 8-item feature means 8 sequential sessions, 8 CI waits, 8 manual PR flows. ninthwave runs them in parallel, manages the lifecycle, and lets you focus on review — not orchestration.
+- **Parallel sessions** — each work item gets its own git worktree and AI coding session
+- **Dependency sequencing** — items launch in batch order; dependent items target their dependency's branch (stacked PRs)
+- **Review relay** — PR comments from reviewers are forwarded directly into the worker's session
+- **CI failure recovery** — orchestrator detects failures, notifies the worker, retries up to 3x, marks stuck if unresolvable
+- **Auto-rebase** — daemon rebases branches automatically; falls back to a repair worker on conflicts
+- **Auto-merge** — approved PRs merge on CI pass, or gate on manual confirmation
+- **Crew mode** — multiple daemons on different machines coordinate via [ninthwave.sh](https://ninthwave.sh) broker, with creator-affinity scheduling
+- **Convention over configuration** — cross-repo via sibling directories, port isolation, domain mapping. Zero config for the common case
 
-**Built on [cmux](https://cmux.com), works with tmux.** cmux provides composable primitives — terminal, workspaces, splits, notifications, CLI control — and invites developers to build their own workflows on top. ninthwave is our answer to that call: an orchestration layer that turns those primitives into a structured delivery pipeline. Already using tmux? ninthwave auto-detects it and works out of the box.
-
-## What You Get
-
-- **Decompose any feature** into PR-sized work items (~200-400 LOC) with dependency mapping
-- **Launch parallel AI sessions** — each a full native instance of Claude Code, OpenCode, or Copilot CLI
-- **Automatic CI + merge pipeline** — dependency ordering, CI monitoring, review dispatch, auto-merge
-- **Switch into any session** mid-flight via cmux sidebar or tmux
-- **Friction log + self-improvement** — log what slows you down, decompose fixes, process them automatically
-- **Stacked branch execution** — dependent items automatically target their dependency's branch, giving reviewers clean diffs
-- **Convention over configuration** — cross-repo, port isolation, domain mapping. Zero config for the common case
-- **Bring your own everything** — your AI tool, your billing, your CI, your task tracker. No lock-in
-
-Works for a solo dev decomposing a weekend feature and a team dividing a quarterly milestone.
-
-## See It Work
-
-```
-> /decompose
-
-ninthwave / Feature Decomposition
-Project: acme-app (main)
-
-What feature are we breaking down?
-
-> Here's the spec for user onboarding: new users get a welcome email,
-> an onboarding checklist on the dashboard, and a profile completion flow.
-
-Exploring codebase...
-  Found: lib/mailer.ex (email infrastructure exists)
-  Found: lib/accounts/ (user model, no onboarding fields)
-  Missing: onboarding context, checklist component, profile completion
-
-Decomposition:
-
-  Batch  ID      Title                           Est. LOC
-  ─────  ──────  ──────────────────────────────  ────────
-  1      C-UO-1  Add welcome email on signup         ~200
-  1      H-UO-2  Create onboarding context           ~300
-  2      H-UO-3  Dashboard onboarding checklist      ~350
-  2      H-UO-4  Profile completion flow             ~400
-  3      M-UO-5  Onboarding analytics events         ~150
-
-5 items across 3 batches written to .ninthwave/todos/
-
-
-> /work
-
-ninthwave / Batch Processing
-Project: acme-app (main)
-
-4 items ready (batches 1–2). How do you want to select?
-  A) All ready (4 items)
-  B) By feature code
-  C) By priority
-
-> a
-
-Dependency analysis:
-  Batch 1: C-UO-1, H-UO-2 (parallel, no file conflicts)
-  Batch 2: H-UO-3, H-UO-4 (depends on batch 1)
-
-Merge strategy?
-  A) Auto-merge once approved + CI passes
-  B) Auto-merge ASAP (CI only)
-  C) Ask me before each merge
-
-> a
-
-Launching batch 1...
-  todo/C-UO-1  → Add welcome email          [session started]
-  todo/H-UO-2  → Create onboarding context  [session started]
-
-cmux sidebar shows 2 active sessions. Switch into any one to steer it.
-
-  C-UO-1  Implementing → Testing → PR #42 → CI passing → Approved → Merged
-  H-UO-2  Implementing → Testing → PR #43 → CI passing → Approved → Merged
-
-Batch 1 complete. Launching batch 2...
-  todo/H-UO-3  → Dashboard checklist        [session started]
-  todo/H-UO-4  → Profile completion flow    [session started]
-
-  H-UO-3  Implementing → PR #44 → Review feedback → Fix pushed → Merged
-  H-UO-4  Implementing → Testing → PR #45 → CI passing → Approved → Merged
-
-All items merged. Version bump: 1.4.0 → 1.5.0 (CHANGELOG updated)
-```
-
-## How It Works
-
-### `/decompose`: Spec to Work Items
-
-| Phase | What happens |
-|-------|-------------|
-| **Intake** | Point to a PRD, spec, or describe the feature verbally |
-| **Explore** | Scans the codebase: what exists vs. what needs building |
-| **Architect** | Optional architecture review for complex features |
-| **Decompose** | PR-sized items (~200-400 LOC each), dependencies mapped into batches |
-| **Write** | Items written to `.ninthwave/todos/` (or synced to Linear/ClickUp) |
-
-### `/work`: Orchestrate Parallel Sessions
-
-| Phase | What happens |
-|-------|-------------|
-| **Select** | Choose items by feature, priority, domain, or all-at-once |
-| **Launch** | Each item gets a git worktree + full AI coding session via your multiplexer (cmux or tmux) |
-| **Monitor** | `orchestrate` daemon polls CI, dispatches failures to workers, forwards review feedback, handles rebases |
-| **Merge** | Auto-merge after approval, on CI pass, or confirm each one |
-| **Finalize** | Version bump, changelog, cleanup. Offer to continue with next batch. |
-
-## Self-Improving
-
-ninthwave includes a built-in feedback loop. As you work, log friction — slowdowns, surprises, rough edges. `/work` reviews your friction log between batches, decomposes actionable items into TODOs, processes them through the same pipeline, and repeats. When all code items are done, it offers vision exploration to identify what's next.
-
-Your workflow improves itself. ninthwave uses this loop to develop itself.
-
-## Quick Start
-
-### Install
+## Install
 
 ```bash
 brew install ninthwave-sh/tap/ninthwave
 ```
 
-This installs both `nw` (short alias) and `ninthwave` (full name). Use `nw` for daily work — it's the recommended command.
+Examples on this page use `nw` for brevity. The full command `ninthwave` works identically.
 
-<details>
-<summary>Alternative: install via curl</summary>
+**Prerequisites:** [cmux](https://cmux.com) for terminal sessions, an AI coding tool ([Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), [OpenCode](https://opencode.ai), or [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)), and [`gh`](https://cli.github.com) for PR operations.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/ninthwave-sh/ninthwave/main/install.sh | bash
-```
-</details>
-
-### Prerequisites
-
-| Dependency | Purpose | Install |
-|------------|---------|---------|
-| AI coding tool | Runs the sessions | [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), [OpenCode](https://opencode.ai), or [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli) ([integration guide](docs/copilot-cli.md)) |
-| [cmux](https://cmux.com) | Parallel terminal sessions | `brew install --cask manaflow-ai/cmux/cmux` |
-| [gh](https://cli.github.com) | PR operations | `brew install gh && gh auth login` |
-
-### Set up a project
+## Quick Start
 
 ```bash
-cd /path/to/your/project
-nw setup
+nw setup                    # initialize project
+nw list                     # see work items
+nw start <ID1> <ID2>       # launch parallel sessions
+nw orchestrate --daemon     # monitor CI, merge approved PRs
+nw status --watch           # live dashboard
+nw clean                    # remove merged worktrees
 ```
 
-One developer runs setup. The team gets everything via `git pull`.
+Each session is a full native instance of your AI coding tool in its own git worktree. Switch into any session via cmux to steer it mid-flight.
 
-### First run
+One developer runs `nw setup`. The team gets everything via `git pull`.
 
-> Open your AI tool in the project and say:
->
-> **`/decompose`** Point it at a spec or describe a feature. It scans your codebase and creates work items.
->
-> **`/work`** Select items, set a merge strategy, and watch parallel sessions launch.
+Run `nw doctor` to verify your setup.
 
-## Why ninthwave?
+## How It Works
 
-**Your tool, multiplied.** Each session is a full native instance of the AI coding tool you already use. Same interface, same capabilities. Switch into any session via cmux's workspace sidebar, steer it mid-flight, or iterate on a PR. You review every PR before it merges.
+Todo files in `.ninthwave/todos/` define work items with priorities, dependencies, and optional repo targets. `nw start` creates a git worktree and AI coding session for each item. `nw orchestrate` runs a deterministic daemon that sequences batches, monitors CI, relays review feedback into worker sessions, auto-rebases branches, and merges approved PRs. Dependent items automatically target their dependency's branch, giving reviewers clean diffs.
 
-**Deterministic orchestration.** One session per work item, dependency-ordered and conflict-checked. Workers idle after opening a PR — no polling, no redundant calls. The orchestrator wakes them for CI fixes or review feedback. Every step is visible and auditable.
+The orchestrator is deterministic — no LLM calls in the event loop. Workers are the intelligent agents.
 
-**Bring your own agent.** Keep your billing, your interface, your API keys. Workers read your project instructions for conventions — same coding standards, same test commands, same architecture guardrails. No vendor lock-in. Works with Claude Code, OpenCode, Copilot CLI, and anything supporting the [Agent Skills standard](https://agentskills.io).
+## CLI
 
-**Cross-repo by convention.** Work items can target different repositories via a `Repo:` field. Sibling directories resolve automatically — no config file required.
+| Command | |
+|---------|---|
+| `setup` | Initialize project |
+| `doctor` | Check prerequisites |
+| `list` | List and filter work items |
+| `start <IDs>` | Launch parallel AI sessions |
+| `orchestrate` | Run orchestration daemon |
+| `status --watch` | Live session dashboard |
+| `stop` | Stop orchestrator |
+| `retry <IDs>` | Re-queue stuck items |
+| `clean` | Remove merged worktrees |
 
-### Verify your setup
+Run `nw --help` for the full command reference.
 
-```bash
-nw doctor
-```
+## Skills
 
-Checks required tools (gh, AI tool, multiplexer, git config) and recommended config (project setup, pre-commit hook).
+ninthwave ships with skills that plug into your AI tool's chat interface. These are optional — the CLI works standalone.
 
-## Reference
+| Skill | |
+|-------|---|
+| `/decompose` | Break a feature spec into batched work items with dependency mapping |
+| `/work` | Full delivery loop: select items, launch sessions, monitor, merge, finalize |
+| `/todo-preview` | Port-isolated dev servers for live testing in worktrees |
 
-### Skills
-
-| Skill | Description |
-|-------|-------------|
-| `/work` | Select work items, orchestrate parallel sessions, review friction, run vision — the full delivery loop |
-| `/decompose` | Break a feature spec into PR-sized work items with dependency mapping |
-| `/todo-preview` | Launch port-isolated dev servers for live testing in worktrees |
-| `/ninthwave-upgrade` | Update ninthwave to the latest version |
-
-### CLI
-
-All commands work with both `nw` and `ninthwave` (identical behavior):
-
-**Setup & diagnostics:**
-
-| Command | Description |
-|---------|-------------|
-| `doctor` | Check prerequisites and configuration health |
-| `init` | Auto-detect and initialize ninthwave (zero input) |
-| `setup [--global]` | Set up ninthwave in a project (creates `.ninthwave/todos/`) or globally |
-| `version` | Print ninthwave version |
-
-**Work items:**
-
-| Command | Description |
-|---------|-------------|
-| `list [--ready] [--priority P] [--domain D] [--feature F]` | List and filter work items |
-| `deps <ID>` | Show dependency chain and dependents |
-| `conflicts <ID1> <ID2> ...` | Check file-level and domain overlaps |
-| `batch-order <ID1> [ID2] ...` | Group items into dependency-ordered batches |
-
-**Sessions & orchestration:**
-
-| Command | Description |
-|---------|-------------|
-| `start <ID1> [ID2] ... [--mux cmux\|tmux]` | Create worktrees and launch AI sessions |
-| `orchestrate [--items ID1 ID2 ...] [--daemon] [--watch]` | Orchestrate parallel processing (interactive if no `--items`) |
-| `stop` | Stop the orchestrator daemon |
-| `retry <ID> [ID2] ...` | Reset stuck or done items to queued for re-processing |
-| `status [--watch] [--flat]` | Show active worktrees (live refresh with `--watch`) |
-| `partitions` | Show partition allocation |
-
-**CI & PR monitoring:**
-
-| Command | Description |
-|---------|-------------|
-| `watch-ready` | Check which PRs are merge-ready |
-| `autopilot-watch [--interval N] [--state-file F]` | Block until item status changes |
-| `pr-watch --pr N [--interval N] [--since T]` | Block until a PR has new activity |
-| `pr-activity <PR1> [PR2] ... [--since T]` | Check for new comments and reviews |
-| `ci-failures <PR>` | Show failing CI check details |
-
-**Cleanup & finalization:**
-
-| Command | Description |
-|---------|-------------|
-| `clean [ID]` | Remove merged worktrees and close workspaces |
-| `clean-single <ID>` | Clean a single worktree (no side effects) |
-| `close-workspaces` | Close all cmux todo workspaces |
-| `close-workspace <ID>` | Close cmux workspace for a single item |
-| `mark-done <ID1> [ID2] ...` | Remove completed todo files |
-| `merged-ids` | List IDs of already-merged work items |
-| `reconcile` | Sync todo files with merged PRs and clean stale worktrees |
-| `version-bump` | Bump version and generate changelog from commits |
-
-**Utilities:**
-
-| Command | Description |
-|---------|-------------|
-| `repos` | List discovered repos (sibling dirs + repos.conf) |
-| `analytics [--all]` | Show orchestration performance trends |
-
-### Expected skills (bring your own)
-
-Workers reference these skill names during execution. If available, they're used; if not, the worker falls back gracefully.
-
-| Skill | When | Fallback |
-|-------|------|----------|
-| `/review` | Pre-landing code review | Self-review of the diff |
-| `/design-review` | UI/visual changes | Skipped |
-| `/qa` | Bug fixes with UI impact | Skipped |
-| `/plan-eng-review` | Architecture validation | Skipped |
-
-[gstack](https://github.com/garrytan/gstack) provides all four out of the box. Or bring your own: any skill with the matching name and the [SKILL.md standard](https://agentskills.io) will work.
-
-<details>
-<summary><strong>What gets installed</strong></summary>
-
-`brew install` places the `ninthwave` binary (plus `nw` short alias) and resource files (skills, agents, docs) in the Homebrew prefix. `nw setup` creates minimal project-level config.
-
-**Project-level files** (created by `ninthwave setup`, committed to git):
-
-| Path | Purpose |
-|------|---------|
-| `.ninthwave/config` | Project settings (LOC extensions, domain mappings) |
-| `.ninthwave/todos/` | Work items directory (one file per todo) |
-| `.ninthwave/domains.conf` | Custom domain slug mappings |
-| `.claude/skills/*` | Symlinks to skills (for discovery) |
-| `.claude/agents/todo-worker.md` | Worker agent (Claude Code) |
-| `.opencode/agents/todo-worker.md` | Worker agent (OpenCode) |
-| `.github/agents/todo-worker.agent.md` | Worker agent (Copilot CLI) |
-
-</details>
+Workers can optionally use `/review`, `/design-review`, `/qa`, and `/plan-eng-review` during execution. [gstack](https://github.com/garrytan/gstack) provides all four out of the box, or bring your own — any skill following the [Agent Skills standard](https://agentskills.io) works.
 
 ## Updating
-
-Run `/ninthwave-upgrade` from any AI coding session, or manually:
 
 ```bash
 brew upgrade ninthwave
 nw setup   # re-sync project-level files
 ```
 
-Project-specific config (`.ninthwave/todos/`, `.ninthwave/config`, `domains.conf`) is preserved.
+Project config (`.ninthwave/`) is preserved.
 
 ## Contributing
 
