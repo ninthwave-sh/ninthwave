@@ -75,6 +75,83 @@ export function shouldEnterInteractive(
   return !hasItems && isTTY;
 }
 
+// ── Display-only item summary ───────────────────────────────────────
+
+/**
+ * Render a read-only numbered list of available work items.
+ * Sorted by priority with color coding and dependency info.
+ * Display-only — no selection prompt.
+ */
+export function displayItemsSummary(todos: WorkItem[]): void {
+  if (todos.length === 0) {
+    console.log(`  ${YELLOW}No work items found.${RESET}`);
+    return;
+  }
+
+  // Sort by priority then ID (same logic as promptItems)
+  const sorted = [...todos].sort((a, b) => {
+    const pa = PRIORITY_NUM[a.priority] ?? 3;
+    const pb = PRIORITY_NUM[b.priority] ?? 3;
+    if (pa !== pb) return pa - pb;
+    return a.id.localeCompare(b.id);
+  });
+
+  console.log();
+  console.log(`${BOLD}Work items (${sorted.length}):${RESET}`);
+  console.log();
+  for (let i = 0; i < sorted.length; i++) {
+    const t = sorted[i]!;
+    const priorityColor =
+      t.priority === "critical" || t.priority === "high"
+        ? YELLOW
+        : DIM;
+    const depInfo =
+      t.dependencies.length > 0
+        ? ` ${DIM}(deps: ${t.dependencies.join(", ")})${RESET}`
+        : "";
+    console.log(
+      `  ${BOLD}${String(i + 1).padStart(3)}${RESET}. ${CYAN}${t.id}${RESET}  ${priorityColor}[${t.priority}]${RESET}  ${t.title}${depInfo}`,
+    );
+  }
+  console.log();
+}
+
+// ── Mode prompt ─────────────────────────────────────────────────────
+
+export type Mode = "orchestrate" | "launch" | "quit";
+
+/**
+ * Prompt the user to choose between "Orchestrate" (default) and "Launch subset".
+ * Returns "orchestrate", "launch", or "quit".
+ * Follows the same input loop pattern as promptAction() in onboard.ts.
+ */
+export async function promptMode(
+  prompt: PromptFn,
+): Promise<Mode> {
+  console.log(`  ${BOLD}1${RESET}. ${CYAN}Orchestrate${RESET}  ${DIM}— daemon mode with auto-merge and monitoring${RESET} ${GREEN}(default)${RESET}`);
+  console.log(`  ${BOLD}2${RESET}. ${CYAN}Launch subset${RESET} ${DIM}— targeted work on selected items${RESET}`);
+  console.log();
+
+  while (true) {
+    const answer = await prompt(`${BOLD}Choose [1-2]: ${RESET}`);
+
+    if (answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") {
+      return "quit";
+    }
+
+    // Default to orchestrate on empty input
+    if (answer === "" || answer === "1" || answer.toLowerCase() === "orchestrate") {
+      return "orchestrate";
+    }
+
+    if (answer === "2" || answer.toLowerCase() === "launch") {
+      return "launch";
+    }
+
+    console.log(`  ${YELLOW}Enter 1, 2, or "q" to quit.${RESET}`);
+  }
+}
+
 // ── Item selection ───────────────────────────────────────────────────
 
 /**

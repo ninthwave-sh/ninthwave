@@ -9,6 +9,8 @@ import {
   promptWipLimit,
   confirmSummary,
   runInteractiveFlow,
+  displayItemsSummary,
+  promptMode,
   type PromptFn,
   type InteractiveResult,
 } from "../core/interactive.ts";
@@ -317,5 +319,148 @@ describe("runInteractiveFlow", () => {
     expect(result).not.toBeNull();
     expect(result!.mergeStrategy).toBe("approved");
     expect(result!.wipLimit).toBe(7);
+  });
+});
+
+// ── displayItemsSummary ─────────────────────────────────────────────
+
+describe("displayItemsSummary", () => {
+  it("output contains item IDs, titles, and priority labels", () => {
+    const todos = [
+      makeTodo("A-1", "First task", "high"),
+      makeTodo("B-2", "Second task", "medium"),
+      makeTodo("C-3", "Third task", "low"),
+    ];
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+    try {
+      displayItemsSummary(todos);
+    } finally {
+      console.log = origLog;
+    }
+
+    const output = logs.join("\n");
+    expect(output).toContain("A-1");
+    expect(output).toContain("First task");
+    expect(output).toContain("[high]");
+    expect(output).toContain("B-2");
+    expect(output).toContain("Second task");
+    expect(output).toContain("[medium]");
+    expect(output).toContain("C-3");
+    expect(output).toContain("Third task");
+    expect(output).toContain("[low]");
+  });
+
+  it("renders items sorted by priority", () => {
+    const todos = [
+      makeTodo("L-1", "Low task", "low"),
+      makeTodo("C-1", "Critical task", "critical"),
+      makeTodo("M-1", "Medium task", "medium"),
+    ];
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+    try {
+      displayItemsSummary(todos);
+    } finally {
+      console.log = origLog;
+    }
+
+    const output = logs.join("\n");
+    // Critical should appear before medium, medium before low
+    const critIdx = output.indexOf("C-1");
+    const medIdx = output.indexOf("M-1");
+    const lowIdx = output.indexOf("L-1");
+    expect(critIdx).toBeLessThan(medIdx);
+    expect(medIdx).toBeLessThan(lowIdx);
+  });
+
+  it("shows dependency info for items with deps", () => {
+    const todos = [
+      makeTodo("A-1", "First task", "high", ["X-1", "Y-2"]),
+    ];
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+    try {
+      displayItemsSummary(todos);
+    } finally {
+      console.log = origLog;
+    }
+
+    const output = logs.join("\n");
+    expect(output).toContain("deps: X-1, Y-2");
+  });
+
+  it("handles empty todo list", () => {
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+    try {
+      displayItemsSummary([]);
+    } finally {
+      console.log = origLog;
+    }
+
+    const output = logs.join("\n");
+    expect(output).toContain("No work items found");
+  });
+});
+
+// ── promptMode ──────────────────────────────────────────────────────
+
+describe("promptMode", () => {
+  it('returns "orchestrate" on input "1"', async () => {
+    const result = await promptMode(makePrompt(["1"]));
+    expect(result).toBe("orchestrate");
+  });
+
+  it('returns "orchestrate" on empty input (default)', async () => {
+    const result = await promptMode(makePrompt([""]));
+    expect(result).toBe("orchestrate");
+  });
+
+  it('returns "orchestrate" on text "orchestrate"', async () => {
+    const result = await promptMode(makePrompt(["orchestrate"]));
+    expect(result).toBe("orchestrate");
+  });
+
+  it('returns "launch" on input "2"', async () => {
+    const result = await promptMode(makePrompt(["2"]));
+    expect(result).toBe("launch");
+  });
+
+  it('returns "launch" on text "launch"', async () => {
+    const result = await promptMode(makePrompt(["launch"]));
+    expect(result).toBe("launch");
+  });
+
+  it('returns "quit" on "q"', async () => {
+    const result = await promptMode(makePrompt(["q"]));
+    expect(result).toBe("quit");
+  });
+
+  it('returns "quit" on "quit"', async () => {
+    const result = await promptMode(makePrompt(["quit"]));
+    expect(result).toBe("quit");
+  });
+
+  it("retries on invalid input then accepts valid", async () => {
+    const result = await promptMode(makePrompt(["abc", "99", "1"]));
+    expect(result).toBe("orchestrate");
+  });
+
+  it("is case-insensitive for text inputs", async () => {
+    const result = await promptMode(makePrompt(["ORCHESTRATE"]));
+    expect(result).toBe("orchestrate");
+  });
+
+  it("is case-insensitive for launch", async () => {
+    const result = await promptMode(makePrompt(["LAUNCH"]));
+    expect(result).toBe("launch");
   });
 });
