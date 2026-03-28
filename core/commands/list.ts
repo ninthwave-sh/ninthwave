@@ -1,18 +1,22 @@
 // list command: display TODO items with optional filters.
 
 import { parseWorkItems } from "../parser.ts";
+import { getCleanRemoteWorkItemFiles } from "../git.ts";
 import { die, BOLD, RED, YELLOW, CYAN, DIM, RESET } from "../output.ts";
 import type { WorkItem } from "../types.ts";
+import { basename } from "path";
 
 export function cmdList(
   args: string[],
   workDir: string,
   worktreeDir: string,
+  projectRoot?: string,
 ): void {
   let filterPriority = "";
   let filterDomain = "";
   let filterFeature = "";
   let showReady = false;
+  let showRemote = false;
   let depth = 0; // 0 = no depth limit (when used with --ready, depth 1 is default)
 
   // Parse args
@@ -33,6 +37,10 @@ export function cmdList(
         break;
       case "--ready":
         showReady = true;
+        i += 1;
+        break;
+      case "--remote":
+        showRemote = true;
         i += 1;
         break;
       case "--depth": {
@@ -102,11 +110,18 @@ export function cmdList(
     items = items.filter((item) => included.has(item.id));
   }
 
+  // Resolve remote status when --remote flag is set
+  let remoteFiles: Set<string> | null = null;
+  if (showRemote && projectRoot) {
+    remoteFiles = getCleanRemoteWorkItemFiles(projectRoot);
+  }
+
   // Print table header
+  const remoteHeader = showRemote ? ` ${pad("REMOTE", 8)}` : "";
   console.log(
-    `${BOLD}${pad("ID", 12)} ${pad("PRIORITY", 10)} ${pad("TITLE", 55)} ${pad("DOMAIN", 14)} ${pad("DEPENDS ON", 18)} ${pad("STATUS", 12)}${RESET}`,
+    `${BOLD}${pad("ID", 12)} ${pad("PRIORITY", 10)} ${pad("TITLE", 55)} ${pad("DOMAIN", 14)} ${pad("DEPENDS ON", 18)} ${pad("STATUS", 12)}${remoteHeader}${RESET}`,
   );
-  console.log("-".repeat(120));
+  console.log("-".repeat(showRemote ? 130 : 120));
 
   let count = 0;
   for (const item of items) {
@@ -158,8 +173,17 @@ export function cmdList(
       }
     }
 
+    // Format remote status
+    let remoteCol = "";
+    if (showRemote) {
+      const filename = basename(item.filePath);
+      // null means origin/main not available -- show all as "local"
+      const isRemote = remoteFiles !== null && remoteFiles.has(filename);
+      remoteCol = ` ${pad(isRemote ? "remote" : "local", 8)}`;
+    }
+
     console.log(
-      `${pad(item.id, 12)} ${pcolor}${pad(item.priority, 10)}${RESET} ${pad(displayTitle, 55)} ${pad(item.domain, 14)} ${pad(displayDeps, 18)} ${scolor}${pad(item.status, 12)}${RESET}`,
+      `${pad(item.id, 12)} ${pcolor}${pad(item.priority, 10)}${RESET} ${pad(displayTitle, 55)} ${pad(item.domain, 14)} ${pad(displayDeps, 18)} ${scolor}${pad(item.status, 12)}${RESET}${remoteCol}`,
     );
 
     count++;
