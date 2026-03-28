@@ -488,8 +488,10 @@ export function upsertOrchestratorComment(
   const existing = comments.find((c) => c.body.includes(ORCHESTRATOR_COMMENT_MARKER));
 
   if (existing) {
-    // Insert new row before the branding footer (if present), otherwise append
-    const footerMarker = "\n---\n*Powered by [Ninthwave](https://ninthwave.dev)*";
+    // Insert new row before the branding footer (if present), otherwise append.
+    // The footer in the created body is: "\n\n---\n*Powered by...*"
+    // (blank line before --- to avoid setext heading interpretation).
+    const footerMarker = "\n\n---\n*Powered by [Ninthwave](https://ninthwave.dev)*";
     let updatedBody: string;
     if (existing.body.includes(footerMarker)) {
       updatedBody = existing.body.replace(footerMarker, "\n" + newRow + footerMarker);

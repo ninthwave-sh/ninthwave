@@ -84,6 +84,11 @@ describe("upsertOrchestratorComment", () => {
     const newRowIdx = updatedBody.indexOf("Rebase succeeded");
     const footerIdx = updatedBody.indexOf("*Powered by");
     expect(newRowIdx).toBeLessThan(footerIdx);
+
+    // Table rows must be contiguous (no blank line between them which breaks markdown tables)
+    const firstRowIdx = updatedBody.indexOf("| 14:02 |");
+    const betweenRows = updatedBody.slice(firstRowIdx, newRowIdx);
+    expect(betweenRows).not.toContain("\n\n");
   });
 
   it("handles deleted marker comment by creating new one", () => {
