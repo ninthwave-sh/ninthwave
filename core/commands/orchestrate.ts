@@ -90,6 +90,23 @@ import type { CrewBroker, CrewStatus, SyncItem } from "../crew.ts";
 import { WebSocketCrewBroker, getOrCreateDaemonId, resolveOperatorId } from "../crew.ts";
 import { MockBroker } from "../mock-broker.ts";
 import { AuthorCache } from "../git-author.ts";
+import type { ScheduledTask } from "../types.ts";
+import type { ScheduleState, ScheduleWorkerEntry } from "../schedule-state.ts";
+import type { ScheduleState } from "../schedule-state.ts";
+import {
+  readScheduleState,
+  writeScheduleState,
+} from "../schedule-state.ts";
+import {
+  checkSchedules,
+  processScheduleQueue,
+  launchScheduledTask,
+  monitorScheduleWorkers,
+  processTriggerFiles,
+  scheduleTriggerDir,
+  type MonitorScheduleDeps,
+} from "../schedule-runner.ts";
+import { listScheduledTasks as listScheduledTasksFromDir } from "../schedule-files.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
 
@@ -1280,6 +1297,26 @@ export interface OrchestrateLoopDeps {
   scanWorkItems?: () => WorkItem[];
   /** Crew coordination broker. When present, crew mode is active -- claim before launch, complete after merge. */
   crewBroker?: CrewBroker;
+  /** Schedule dependencies. When present, scheduled task processing is active. */
+  scheduleDeps?: ScheduleLoopDeps;
+}
+
+/** Dependencies for scheduled task processing within the orchestrate loop. */
+export interface ScheduleLoopDeps {
+  /** List all scheduled tasks from the schedules directory. */
+  listScheduledTasks: () => ScheduledTask[];
+  /** Read schedule state from disk. */
+  readState: (projectRoot: string) => ScheduleState;
+  /** Write schedule state to disk. */
+  writeState: (projectRoot: string, state: ScheduleState) => void;
+  /** Launch a scheduled task worker. Returns workspace ref or null. */
+  launchWorker: (task: ScheduledTask, projectRoot: string, aiTool: string) => string | null;
+  /** Monitor deps (workspace listing + close). */
+  monitorDeps: MonitorScheduleDeps;
+  /** AI tool identifier for worker launch commands. */
+  aiTool: string;
+  /** Path to the schedule triggers directory. */
+  triggerDir: string;
 }
 
 export interface OrchestrateLoopConfig {
@@ -1391,6 +1428,7 @@ export async function orchestrateLoop(
   let __lastSnapshot: PollSnapshot | undefined;
   let __lastActions: import("../orchestrator.ts").Action[] = [];
   let __lastTransitionIter = 0;
+  let lastScheduleCheckMs = 0; // Force first check immediately
   while (true) {
     __iterations++;
     if (config.maxIterations != null && __iterations > config.maxIterations) {
@@ -1529,6 +1567,34 @@ export async function orchestrateLoop(
       } catch { /* best-effort -- sync failure doesn't block the orchestrator */ }
     }
 
+    // ── Scheduled task processing ─────────────────────────────────
+    // Gated by 30s interval check to avoid excessive filesystem reads.
+    if (deps.scheduleDeps) {
+      const SCHEDULE_CHECK_INTERVAL_MS = 30_000;
+      const nowMs = Date.now();
+      if (nowMs - lastScheduleCheckMs >= SCHEDULE_CHECK_INTERVAL_MS) {
+        lastScheduleCheckMs = nowMs;
+        try {
+          processScheduledTasks(
+            ctx.projectRoot,
+            orch,
+            deps.scheduleDeps,
+            log,
+            memoryWip,
+          );
+        } catch (e: unknown) {
+          // Non-fatal -- schedule processing failure shouldn't block the orchestrator
+          const msg = e instanceof Error ? e.message : String(e);
+          log({
+            ts: new Date().toISOString(),
+            level: "warn",
+            event: "schedule_error",
+            error: msg,
+          });
+        }
+      }
+    }
+
     // Build snapshot from external state
     const snapshot = deps.buildSnapshot(orch, ctx.projectRoot, ctx.worktreeDir);
     __lastSnapshot = snapshot;
@@ -1661,6 +1727,190 @@ export async function orchestrateLoop(
 
     await deps.sleep(interval);
   }
+}
+
+// ── Scheduled task processing ────────────────────────────────────────
+
+/**
+ * Process scheduled tasks: check for due tasks, handle triggers, monitor workers, manage queue.
+ *
+ * This is called from the orchestrate loop on a 30s interval. It:
+ * 1. Reads schedule state from disk
+ * 2. Monitors active workers (detect completion/timeout/crash)
+ * 3. Checks for trigger files from `nw schedule run`
+ * 4. Checks which tasks are due based on cron schedule
+ * 5. Queues or launches tasks based on WIP availability
+ * 6. Writes updated state back to disk
+ */
+export function processScheduledTasks(
+  projectRoot: string,
+  orch: Orchestrator,
+  deps: ScheduleLoopDeps,
+  log: (entry: LogEntry) => void,
+  effectiveWip: number,
+): void {
+  const tasks = deps.listScheduledTasks();
+  if (tasks.length === 0) return;
+
+  const state = deps.readState(projectRoot);
+  const now = new Date();
+  const taskMap = new Map(tasks.map((t) => [t.id, t]));
+
+  // 1. Monitor active workers
+  if (state.active.length > 0) {
+    const results = monitorScheduleWorkers(state, tasks, now, deps.monitorDeps);
+    const completedIds: string[] = [];
+    const timedOutIds: string[] = [];
+
+    for (const [taskId, result] of results) {
+      if (result.status === "completed") {
+        completedIds.push(taskId);
+        log({
+          ts: now.toISOString(),
+          level: "info",
+          event: "schedule-completed",
+          taskId,
+        });
+      } else if (result.status === "timeout") {
+        timedOutIds.push(taskId);
+        log({
+          ts: now.toISOString(),
+          level: "warn",
+          event: "schedule-error",
+          taskId,
+          reason: "timeout",
+          elapsedMs: result.elapsedMs,
+        });
+      } else if (result.status === "crashed") {
+        completedIds.push(taskId);
+        log({
+          ts: now.toISOString(),
+          level: "warn",
+          event: "schedule-error",
+          taskId,
+          reason: "crashed",
+        });
+      }
+    }
+
+    // Remove completed/timed-out workers from active list
+    const removeIds = new Set([...completedIds, ...timedOutIds]);
+    state.active = state.active.filter((w) => !removeIds.has(w.taskId));
+  }
+
+  // 2. Check for trigger files
+  const triggered = processTriggerFiles(projectRoot, deps.triggerDir);
+  const activeIds = new Set(state.active.map((w) => w.taskId));
+  const queuedIds = new Set(state.queued);
+
+  for (const taskId of triggered) {
+    if (!taskMap.has(taskId)) {
+      log({
+        ts: now.toISOString(),
+        level: "warn",
+        event: "schedule-skipped",
+        taskId,
+        reason: "trigger-unknown-task",
+      });
+      continue;
+    }
+    if (activeIds.has(taskId) || queuedIds.has(taskId)) {
+      log({
+        ts: now.toISOString(),
+        level: "info",
+        event: "schedule-skipped",
+        taskId,
+        reason: "already-active-or-queued",
+      });
+      continue;
+    }
+    log({
+      ts: now.toISOString(),
+      level: "info",
+      event: "schedule-triggered",
+      taskId,
+      source: "trigger-file",
+    });
+    // Add to front of queue for priority processing
+    state.queued.unshift(taskId);
+    queuedIds.add(taskId);
+  }
+
+  // 3. Check which tasks are due based on cron schedule
+  const dueTasks = checkSchedules(tasks, state, now);
+  for (const taskId of dueTasks) {
+    if (!queuedIds.has(taskId)) {
+      log({
+        ts: now.toISOString(),
+        level: "info",
+        event: "schedule-triggered",
+        taskId,
+        source: "cron",
+      });
+      state.queued.push(taskId);
+    }
+  }
+
+  // 4. Process queue: launch tasks when WIP slots are available
+  // Scheduled tasks consume from the shared WIP pool
+  const activeWorkItemCount = orch.getAllItems()
+    .filter((i) => !["done", "stuck", "ready", "queued"].includes(i.state)).length;
+  const activeScheduleCount = state.active.length;
+  const freeSlots = Math.max(0, effectiveWip - activeWorkItemCount - activeScheduleCount);
+
+  const { toLaunch, remainingQueue } = processScheduleQueue(state, freeSlots);
+  state.queued = remainingQueue;
+
+  for (const taskId of toLaunch) {
+    const task = taskMap.get(taskId);
+    if (!task) continue;
+
+    // Double-fire prevention: update lastRunAt BEFORE launching worker
+    // Uses the scheduled fire time (now), not poll time
+    state.tasks[task.id] = { lastRunAt: now.toISOString() };
+
+    const ref = deps.launchWorker(task, projectRoot, deps.aiTool);
+    if (ref) {
+      state.active.push({
+        taskId: task.id,
+        workspaceRef: ref,
+        startedAt: now.toISOString(),
+      });
+      log({
+        ts: now.toISOString(),
+        level: "info",
+        event: "schedule-triggered",
+        taskId: task.id,
+        workspaceRef: ref,
+        source: "launch",
+      });
+    } else {
+      log({
+        ts: now.toISOString(),
+        level: "warn",
+        event: "schedule-error",
+        taskId: task.id,
+        reason: "launch-failed",
+      });
+    }
+  }
+
+  // Log WIP-full queueing
+  if (state.queued.length > 0 && freeSlots === 0) {
+    log({
+      ts: now.toISOString(),
+      level: "info",
+      event: "schedule-skipped",
+      reason: "wip-full",
+      queuedTasks: state.queued,
+      activeWorkItems: activeWorkItemCount,
+      activeScheduled: activeScheduleCount,
+      wipLimit: effectiveWip,
+    });
+  }
+
+  // 5. Write updated state
+  deps.writeState(projectRoot, state);
 }
 
 // ── Keyboard shortcuts (TUI mode) ────────────────────────────────────
@@ -2508,6 +2758,7 @@ export async function cmdOrchestrate(
   // Resolve config-file flags
   const projectConfig = loadConfig(projectRoot);
   const reviewExternalEnabled = reviewExternal || projectConfig["review_external"] === "true";
+  const scheduleEnabled = projectConfig["schedule_enabled"] === "true";
 
   // Analytics directory -- always enabled, writes to .ninthwave/analytics/
   const analyticsDir = join(projectRoot, ".ninthwave", "analytics");
@@ -2641,6 +2892,34 @@ export async function cmdOrchestrate(
     });
   }
 
+  // Build schedule deps when schedule_enabled and no crew broker (solo mode only)
+  const schedulesDir = join(projectRoot, ".ninthwave", "schedules");
+  const scheduleLoopDeps: ScheduleLoopDeps | undefined = (scheduleEnabled && !crewBroker)
+    ? {
+        listScheduledTasks: () => listScheduledTasksFromDir(schedulesDir),
+        readState: readScheduleState,
+        writeState: writeScheduleState,
+        launchWorker: (task, pr, ai) => launchScheduledTask(task, pr, ai, {
+          launchWorkspace: (cwd, cmd, todoId) => mux.launchWorkspace(cwd, cmd, todoId),
+        }),
+        monitorDeps: {
+          listWorkspaces: () => mux.listWorkspaces(),
+          closeWorkspace: (ref) => mux.closeWorkspace(ref),
+        },
+        aiTool,
+        triggerDir: scheduleTriggerDir(projectRoot),
+      }
+    : undefined;
+
+  if (scheduleLoopDeps) {
+    log({
+      ts: new Date().toISOString(),
+      level: "info",
+      event: "schedule_enabled",
+      schedulesDir,
+    });
+  }
+
   const loopDeps: OrchestrateLoopDeps = {
     buildSnapshot: (o, pr, wd) => buildSnapshot(o, pr, wd, mux, undefined, undefined, fetchTrustedPrComments, ghCheckCommitCI),
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
@@ -2656,6 +2935,7 @@ export async function cmdOrchestrate(
     externalReviewDeps,
     ...(watchMode ? { scanWorkItems: () => parseWorkItems(workDir, worktreeDir) } : {}),
     ...(crewBroker ? { crewBroker } : {}),
+    ...(scheduleLoopDeps ? { scheduleDeps: scheduleLoopDeps } : {}),
   };
 
   // Resolve repo URL for PR URL construction in completion event
