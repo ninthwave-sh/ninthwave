@@ -693,7 +693,7 @@ describe("repairing-main state handling", () => {
     expect(actions).toContainEqual({ type: "clean-verifier", itemId: "H-1-1" });
   });
 
-  it("repairing-main → stuck when verifier worker dies (3 consecutive polls)", () => {
+  it("repairing-main → stuck when verifier worker dies (5 consecutive polls)", () => {
     const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -715,7 +715,21 @@ describe("repairing-main state handling", () => {
     );
     expect(orch.getItem("H-1-1")!.state).toBe("repairing-main");
 
-    // Poll 3: third consecutive — transition to stuck
+    // Poll 3: still not alive
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: false }]),
+      NOW,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("repairing-main");
+
+    // Poll 4: still not alive
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", workerAlive: false }]),
+      NOW,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("repairing-main");
+
+    // Poll 5: fifth consecutive — transition to stuck
     const actions = orch.processTransitions(
       snapshotWith([{ id: "H-1-1", workerAlive: false }]),
       NOW,

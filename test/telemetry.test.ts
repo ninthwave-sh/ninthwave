@@ -137,8 +137,8 @@ describe("telemetry: startedAt / endedAt on transitions", () => {
     const item = orch.getItem("T-1-1")!;
     expect(item.state).toBe("implementing");
 
-    // Worker dies (3 consecutive not-alive checks for debounce)
-    for (let i = 0; i < 3; i++) {
+    // Worker dies (5 consecutive not-alive checks for debounce)
+    for (let i = 0; i < 5; i++) {
       orch.processTransitions({ items: [{ id: "T-1-1", workerAlive: false }], readyIds: [] });
     }
 

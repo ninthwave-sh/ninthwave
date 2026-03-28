@@ -503,20 +503,26 @@ describe("handleImplementing", () => {
     expect(actions.some((a) => a.type === "clean" && a.itemId === "H-1-1")).toBe(true);
   });
 
-  it("requires 3 consecutive not-alive checks before retry (debounce)", () => {
+  it("requires 5 consecutive not-alive checks before retry (debounce)", () => {
     const orch = new Orchestrator({ maxRetries: 1 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
 
-    // First two not-alive: no action
+    // First four not-alive: no action
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]), NOW);
     expect(orch.getItem("H-1-1")!.state).toBe("implementing");
 
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]), NOW);
     expect(orch.getItem("H-1-1")!.state).toBe("implementing");
 
-    // Third not-alive triggers retry
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]), NOW);
+    expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]), NOW);
+    expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+
+    // Fifth not-alive triggers retry
     const actions = orch.processTransitions(
       snapshotWith([{ id: "H-1-1", workerAlive: false }]),
       NOW,
@@ -532,10 +538,12 @@ describe("handleImplementing", () => {
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
 
-    // Two not-alive checks
+    // Four not-alive checks
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]), NOW);
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]), NOW);
-    expect(orch.getItem("H-1-1")!.notAliveCount).toBe(2);
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]), NOW);
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]), NOW);
+    expect(orch.getItem("H-1-1")!.notAliveCount).toBe(4);
 
     // Worker comes back
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: true }]), NOW);
@@ -2752,8 +2760,8 @@ describe("repair worker state transitions", () => {
     const item = orch.getItem("H-1-1")!;
     item.repairWorkspaceRef = "repair:1";
 
-    // Simulate 3 consecutive not-alive polls (debounce)
-    for (let i = 0; i < 3; i++) {
+    // Simulate 5 consecutive not-alive polls (debounce)
+    for (let i = 0; i < 5; i++) {
       const snapshot: PollSnapshot = {
         items: [{ id: "H-1-1", workerAlive: false }],
         readyIds: [],

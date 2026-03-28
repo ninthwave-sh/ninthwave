@@ -421,6 +421,9 @@ export function calculateMemoryWipLimit(
 /** Heartbeat recency threshold: a heartbeat within this window means the worker is healthy. */
 export const HEARTBEAT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+/** Number of consecutive workerAlive=false polls required before declaring a worker dead. */
+export const NOT_ALIVE_THRESHOLD = 5;
+
 // ── WIP states: states that count toward the WIP limit ───────────────
 
 const WIP_STATES: Set<OrchestratorItemState> = new Set([
@@ -715,7 +718,7 @@ export class Orchestrator {
           actions = [];
         } else if (snap?.workerAlive === false) {
           item.notAliveCount = (item.notAliveCount ?? 0) + 1;
-          if (item.notAliveCount >= 3) {
+          if (item.notAliveCount >= NOT_ALIVE_THRESHOLD) {
             actions = this.stuckOrRetry(item, "worker-crashed: session died during launch");
           } else {
             actions = [];
@@ -848,7 +851,7 @@ export class Orchestrator {
     // from transient cmux listing failures or slow workspace registration.
     if (snap && snap.workerAlive === false && !snap.prNumber) {
       item.notAliveCount = (item.notAliveCount ?? 0) + 1;
-      if (item.notAliveCount >= 3) {
+      if (item.notAliveCount >= NOT_ALIVE_THRESHOLD) {
         return this.stuckOrRetry(item, "worker-crashed: session died without creating PR");
       }
     } else if (snap && snap.workerAlive === true) {
@@ -1198,7 +1201,7 @@ export class Orchestrator {
     // Repair worker died without pushing
     if (snap?.workerAlive === false && item.repairWorkspaceRef) {
       item.notAliveCount = (item.notAliveCount ?? 0) + 1;
-      if (item.notAliveCount >= 3) {
+      if (item.notAliveCount >= NOT_ALIVE_THRESHOLD) {
         this.transition(item, "stuck");
         item.failureReason = "repair-failed: repair worker could not resolve rebase conflicts";
         actions.push({ type: "clean-repair", itemId: item.id });
@@ -1304,7 +1307,7 @@ export class Orchestrator {
     // Verifier worker died without fixing
     if (snap?.workerAlive === false && item.verifyWorkspaceRef) {
       item.notAliveCount = (item.notAliveCount ?? 0) + 1;
-      if (item.notAliveCount >= 3) {
+      if (item.notAliveCount >= NOT_ALIVE_THRESHOLD) {
         this.transition(item, "stuck");
         item.failureReason = `verify-repair-failed: verifier worker died without fixing CI for merge commit ${item.mergeCommitSha}`;
         actions.push({ type: "clean-verifier", itemId: item.id });

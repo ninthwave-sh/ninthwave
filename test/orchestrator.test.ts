@@ -201,7 +201,9 @@ describe("Orchestrator", () => {
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "launching");
 
-    // Debounce: 3 consecutive not-alive checks required
+    // Debounce: 5 consecutive not-alive checks required
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     const actions = orch.processTransitions(
@@ -221,7 +223,9 @@ describe("Orchestrator", () => {
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "launching");
 
-    // Debounce: 3 consecutive not-alive checks required
+    // Debounce: 5 consecutive not-alive checks required
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     const actions = orch.processTransitions(
@@ -270,7 +274,9 @@ describe("Orchestrator", () => {
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
 
-    // Debounce: 3 consecutive not-alive checks required
+    // Debounce: 5 consecutive not-alive checks required
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     const actions = orch.processTransitions(
@@ -290,7 +296,9 @@ describe("Orchestrator", () => {
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "implementing");
 
-    // Debounce: 3 consecutive not-alive checks required
+    // Debounce: 5 consecutive not-alive checks required
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
+    orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     orch.processTransitions(snapshotWith([{ id: "H-1-1", workerAlive: false }]));
     const actions = orch.processTransitions(
@@ -1904,7 +1912,9 @@ describe("Orchestrator", () => {
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;
         orch.setState("X-1-1", "launching");
-        // Debounce: 3 consecutive not-alive checks required
+        // Debounce: 5 consecutive not-alive checks required
+        orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
+        orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         const actions = orch.processTransitions(
@@ -1922,7 +1932,9 @@ describe("Orchestrator", () => {
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;
         orch.setState("X-1-1", "launching");
-        // Debounce: 3 consecutive not-alive checks required
+        // Debounce: 5 consecutive not-alive checks required
+        orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
+        orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         const actions = orch.processTransitions(
@@ -1967,7 +1979,9 @@ describe("Orchestrator", () => {
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;
         orch.setState("X-1-1", "implementing");
-        // Debounce: 3 consecutive not-alive checks required
+        // Debounce: 5 consecutive not-alive checks required
+        orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
+        orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         const actions = orch.processTransitions(
@@ -1985,7 +1999,9 @@ describe("Orchestrator", () => {
         orch.addItem(makeWorkItem("X-1-1"));
         orch.getItem("X-1-1")!.reviewCompleted = true;
         orch.setState("X-1-1", "implementing");
-        // Debounce: 3 consecutive not-alive checks required
+        // Debounce: 5 consecutive not-alive checks required
+        orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
+        orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         orch.processTransitions(snapshotWith([{ id: "X-1-1", workerAlive: false }]));
         const actions = orch.processTransitions(
@@ -3611,7 +3627,9 @@ describe("Orchestrator", () => {
       orch.getItem("R-1-1")!.reviewCompleted = true;
       orch.setState("R-1-1", "implementing");
 
-      // Debounce: 3 consecutive not-alive checks required
+      // Debounce: 5 consecutive not-alive checks required
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       const actions = orch.processTransitions(
@@ -3634,7 +3652,9 @@ describe("Orchestrator", () => {
       orch.setState("R-1-1", "implementing");
       orch.getItem("R-1-1")!.workspaceRef = "workspace:1";
 
-      // Debounce: 3 consecutive not-alive checks required
+      // Debounce: 5 consecutive not-alive checks required
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       // Simulate worker death → processTransitions detects and emits retry + launch actions
@@ -3664,7 +3684,9 @@ describe("Orchestrator", () => {
       orch.setState("R-1-1", "launching");
       orch.getItem("R-1-1")!.retryCount = 1; // already retried once
 
-      // Debounce: 3 consecutive not-alive checks required
+      // Debounce: 5 consecutive not-alive checks required
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       const actions = orch.processTransitions(
@@ -3682,7 +3704,9 @@ describe("Orchestrator", () => {
       orch.getItem("R-1-1")!.reviewCompleted = true;
       orch.setState("R-1-1", "implementing");
 
-      // First crash — debounce: 3 consecutive not-alive checks required
+      // First crash — debounce: 5 consecutive not-alive checks required
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
@@ -3694,7 +3718,9 @@ describe("Orchestrator", () => {
       );
       expect(orch.getItem("R-1-1")!.state).toBe("implementing");
 
-      // Second crash — debounce: 3 consecutive not-alive checks required
+      // Second crash — debounce: 5 consecutive not-alive checks required
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
@@ -3707,7 +3733,9 @@ describe("Orchestrator", () => {
       orch.getItem("R-1-1")!.reviewCompleted = true;
       orch.setState("R-1-1", "launching");
 
-      // First crash — debounce: 3 consecutive not-alive checks required
+      // First crash — debounce: 5 consecutive not-alive checks required
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       let actions = orch.processTransitions(
@@ -3717,7 +3745,9 @@ describe("Orchestrator", () => {
       expect(orch.getItem("R-1-1")!.state).toBe("launching");
       expect(actions.some((a) => a.type === "retry")).toBe(true);
 
-      // Second crash — notAliveCount resets on retry, needs 3 consecutive checks again
+      // Second crash — notAliveCount resets on retry, needs 5 consecutive checks again
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       actions = orch.processTransitions(
@@ -3727,7 +3757,9 @@ describe("Orchestrator", () => {
       expect(orch.getItem("R-1-1")!.state).toBe("launching");
       expect(actions.some((a) => a.type === "retry")).toBe(true);
 
-      // Third crash — notAliveCount resets again, 3 more checks → permanently stuck
+      // Third crash — notAliveCount resets again, 5 more checks → permanently stuck
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       actions = orch.processTransitions(
@@ -3773,7 +3805,9 @@ describe("Orchestrator", () => {
       orch.getItem("R-1-1")!.reviewCompleted = true;
       orch.setState("R-1-1", "launching");
 
-      // Debounce: 3 consecutive not-alive checks required
+      // Debounce: 5 consecutive not-alive checks required
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "R-1-1", workerAlive: false }]));
       const actions = orch.processTransitions(
@@ -6281,7 +6315,9 @@ describe("Orchestrator", () => {
       orch.addItem(makeWorkItem("WP-1-1"));
       orch.setState("WP-1-1", "implementing");
 
-      // Debounce: 3 consecutive not-alive checks
+      // Debounce: 5 consecutive not-alive checks
+      orch.processTransitions(snapshotWith([{ id: "WP-1-1", workerAlive: false }]));
+      orch.processTransitions(snapshotWith([{ id: "WP-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "WP-1-1", workerAlive: false }]));
       orch.processTransitions(snapshotWith([{ id: "WP-1-1", workerAlive: false }]));
       const actions = orch.processTransitions(

@@ -739,7 +739,7 @@ describe("orchestrateLoop", () => {
           if (item.id === "SK-1-1") {
             items.push({ id: item.id, prNumber: cycle, prState: "open", ciStatus: "pass" });
           }
-          // SK-1-2: worker dies → stuck (debounce requires 3 consecutive false checks)
+          // SK-1-2: worker dies → stuck (debounce requires 5 consecutive false checks)
           if (item.id === "SK-1-2") {
             items.push({ id: item.id, workerAlive: false });
           }
