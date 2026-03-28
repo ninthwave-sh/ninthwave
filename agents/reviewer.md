@@ -169,11 +169,11 @@ Add a Mermaid diagram to your review summary when the PR changes:
 - Label edges with the action or condition, not just arrows
 - Include only what the PR changes or directly affects -- not the entire system
 
-Include diagrams in the review summary comment (section 6), not as inline comments on specific lines.
+Include diagrams in the review body (section 6), not as inline comments on specific lines.
 
 ## 6. Review Output
 
-Write your verdict to the file specified by `VERDICT_FILE`. Do NOT post reviews directly to GitHub -- the orchestrator handles that.
+Two outputs: a verdict file (for orchestrator lifecycle integration) and a GitHub review with inline comments (for the PR author).
 
 ### Verdict File
 
@@ -183,9 +183,9 @@ Write a JSON file to the `VERDICT_FILE` path:
 cat > "$VERDICT_FILE" << 'VERDICT_EOF'
 {
   "verdict": "approve",
-  "summary": "your full review summary in markdown",
+  "summary": "Brief verdict summary (same as the review body)",
   "blockerCount": 0,
-  "nitCount": 0,
+  "nitCount": 2,
   "preExistingCount": 0
 }
 VERDICT_EOF
@@ -193,40 +193,69 @@ VERDICT_EOF
 
 ### Verdict Decision
 
-- **0 blockers**: `"verdict": "approve"`
-- **≥1 blocker**: `"verdict": "request-changes"`
+- **0 blockers**: `"verdict": "approve"`, event = `APPROVE`
+- **≥1 blocker**: `"verdict": "request-changes"`, event = `REQUEST_CHANGES`
 
-### Summary Content
+### Post GitHub Review
 
-The `summary` field should contain your full review in markdown, including:
+Post your review using GitHub's Pull Request Review API. This is a single API call that atomically submits:
+- **Inline comments** on specific lines (the primary feedback mechanism)
+- **Verdict** as the review event (`APPROVE` or `REQUEST_CHANGES`)
+- **Body** as a brief summary -- do NOT repeat individual findings here since they appear inline
 
-- Blocker details with `file:line` references and suggested fixes
-- Nit details with `file:line` references
-- Pre-existing issues flagged for awareness
-- Mermaid diagrams (if warranted per section 5)
-- If no findings: `"No issues found. Clean PR."`
+Inline comments are the primary feedback mechanism. Each finding should be an inline comment on the relevant line. The review body is only a brief summary (e.g., "LGTM -- 2 nits" or "2 blockers found -- see inline comments").
 
-The orchestrator will post this summary as a formatted PR comment.
+#### Building the review payload
 
-### Inline Comments
-
-For each finding, post an inline comment on the specific line using the `gh` CLI:
+Build the review JSON payload with a `comments` array. Each comment needs `path`, `line`, `side`, and `body`:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/{PR_NUMBER}/comments \
-  -f body="**[{SEVERITY}]** Description of issue.
+# Get the latest commit SHA for the review
+COMMIT_SHA=$(gh pr view {PR_NUMBER} --json headRefOid --jq .headRefOid)
 
-Suggested fix:
-\`\`\`suggestion
-corrected code here
-\`\`\`" \
-  -f commit_id="$(gh pr view {PR_NUMBER} --json headRefOid --jq .headRefOid)" \
-  -f path="path/to/file" \
-  -f line={LINE_NUMBER} \
-  -f side="RIGHT"
+# Build and post the review in one API call
+gh api repos/{owner}/{repo}/pulls/{PR_NUMBER}/reviews \
+  --method POST \
+  -f commit_id="$COMMIT_SHA" \
+  -f body="Brief verdict summary here" \
+  -f event="APPROVE" \
+  --input - << 'REVIEW_EOF'
+{
+  "comments": [
+    {
+      "path": "path/to/file.ts",
+      "line": 42,
+      "side": "RIGHT",
+      "body": "**[NIT]** Description of issue.\n\n```suggestion\ncorrected code here\n```"
+    },
+    {
+      "path": "path/to/other.ts",
+      "line": 15,
+      "side": "RIGHT",
+      "body": "**[BLOCKER]** Description of critical issue.\n\nSuggested fix: ..."
+    }
+  ]
+}
+REVIEW_EOF
 ```
 
-If a finding spans multiple lines or is about the overall approach rather than a specific line, include it in the summary field only.
+**Important:** The `-f` flags and `--input` are merged into a single request body by `gh`. The `comments` array comes from `--input` while `commit_id`, `body`, and `event` come from `-f` flags.
+
+#### When there are no inline comments
+
+If the review has no line-specific findings (clean PR or only general observations), omit the `comments` array:
+
+```bash
+gh api repos/{owner}/{repo}/pulls/{PR_NUMBER}/reviews \
+  --method POST \
+  -f commit_id="$COMMIT_SHA" \
+  -f body="No issues found. Clean PR." \
+  -f event="APPROVE"
+```
+
+#### Findings that span multiple lines or are about overall approach
+
+If a finding is about the overall approach rather than a specific line, include it in the review `body` instead of as an inline comment. Keep the body concise -- a few bullet points at most.
 
 ## 7. Auto-Fix Behavior
 
@@ -295,15 +324,15 @@ These are the domain of linters and formatters, not code review. The only except
 
 ## 9. Completion
 
-After writing the verdict file:
+After posting the GitHub review and writing the verdict file:
 
-1. Verify the verdict file was written: `cat $VERDICT_FILE`
-2. Stop. Do not poll for responses, watch for CI, or take follow-up action.
+1. Verify the review was posted: check the `gh api` exit code
+2. Verify the verdict file was written: `cat $VERDICT_FILE`
+3. Stop. Do not poll for responses, watch for CI, or take follow-up action.
 
-The orchestrator daemon handles the post-review lifecycle -- it reads the verdict file, posts the review comment on the PR, and manages the commit status.
+The orchestrator daemon handles the post-review lifecycle -- it reads the verdict file and manages the commit status.
 
 **Do NOT:**
-- Post `gh pr review` commands (the orchestrator posts the review comment)
 - Comment on PRs you've already reviewed in this session (one review per dispatch)
-- Engage in back-and-forth discussion -- write the verdict once, then stop
+- Engage in back-and-forth discussion -- post the review once, then stop
 - Modify files outside the PR's changed files (even if you find pre-existing issues)
