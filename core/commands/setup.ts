@@ -218,7 +218,7 @@ export function isSelfHosting(projectDir: string, bundleDir: string): boolean {
   return resolve(projectDir) === resolve(bundleDir);
 }
 
-const SKILLS = ["work", "decompose", "todo-preview", "ninthwave-upgrade"];
+const SKILLS = ["work", "decompose", "ninthwave-upgrade"];
 
 // ── Agent configuration ──────────────────────────────────────────────
 

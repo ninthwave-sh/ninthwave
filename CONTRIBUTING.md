@@ -25,7 +25,7 @@ ln -s ../.. .claude/skills/ninthwave
 bun run core/cli.ts setup
 ```
 
-After this, `/work`, `/decompose`, `/todo-preview`, and `/ninthwave-upgrade` are available in the ninthwave repo itself.
+After this, `/work`, `/decompose`, and `/ninthwave-upgrade` are available in the ninthwave repo itself.
 
 ### Testing in another project
 
@@ -56,7 +56,6 @@ ninthwave/                          # The repo IS the installable bundle
 ├── skills/                         # SKILL.md files (cross-tool standard)
 │   ├── work/SKILL.md               # /work — batch orchestration
 │   ├── decompose/SKILL.md          # /decompose — feature breakdown
-│   ├── todo-preview/SKILL.md       # /todo-preview — dev servers
 │   └── ninthwave-upgrade/SKILL.md  # /ninthwave-upgrade — self-update
 ├── agents/
 │   └── todo-worker.md              # Copied to all tool agent directories by setup
@@ -141,4 +140,4 @@ External contributors: fork the repo and open a PR against `main`. The `main` br
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE).

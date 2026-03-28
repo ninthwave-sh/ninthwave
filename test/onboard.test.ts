@@ -233,7 +233,7 @@ describe("onboard", () => {
     const bundleDir = join(dir, "bundle");
     mkdirSync(bundleDir, { recursive: true });
 
-    for (const skill of ["work", "decompose", "todo-preview", "ninthwave-upgrade"]) {
+    for (const skill of ["work", "decompose", "ninthwave-upgrade"]) {
       const skillDir = join(bundleDir, "skills", skill);
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}\n`);

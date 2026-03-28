@@ -67,7 +67,6 @@ function createFakeBundle(dir: string): string {
   for (const skill of [
     "work",
     "decompose",
-    "todo-preview",
     "ninthwave-upgrade",
   ]) {
     const skillDir = join(bundleDir, "skills", skill);
@@ -735,7 +734,7 @@ describe("initProject", () => {
     expect(existsSync(join(projectDir, "TODOS.md"))).toBe(false);
 
     // Skills symlinked
-    for (const skill of ["work", "decompose", "todo-preview", "ninthwave-upgrade"]) {
+    for (const skill of ["work", "decompose", "ninthwave-upgrade"]) {
       const linkPath = join(projectDir, ".claude/skills", skill);
       expect(existsSync(linkPath)).toBe(true);
       expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
@@ -914,7 +913,7 @@ describe("initProject — symlink gitignore entries", () => {
     const projectDir = setupTempRepo();
 
     // Set up bundle structure inside projectDir to simulate self-hosting
-    for (const skill of ["work", "decompose", "todo-preview", "ninthwave-upgrade"]) {
+    for (const skill of ["work", "decompose", "ninthwave-upgrade"]) {
       const skillDir = join(projectDir, "skills", skill);
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}\n`);
@@ -1829,7 +1828,6 @@ describe("initProject — global mode", () => {
     for (const skill of [
       "work",
       "decompose",
-      "todo-preview",
       "ninthwave-upgrade",
     ]) {
       const linkPath = join(skillsDir, skill);
@@ -1918,7 +1916,6 @@ describe("initProject — idempotency", () => {
     for (const skill of [
       "work",
       "decompose",
-      "todo-preview",
       "ninthwave-upgrade",
     ]) {
       const linkPath = join(projectDir, ".claude/skills", skill);
@@ -2008,7 +2005,6 @@ describe("initProject — preserves existing files", () => {
     for (const skill of [
       "work",
       "decompose",
-      "todo-preview",
       "ninthwave-upgrade",
     ]) {
       const linkPath = join(projectDir, ".claude/skills", skill);

@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/ninthwave-sh/ninthwave/stargazers"><img src="https://img.shields.io/github/stars/ninthwave-sh/ninthwave?style=flat" alt="GitHub stars" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0 License" /></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.2.0-green" alt="Version" /></a>
   <a href="https://agentskills.io"><img src="https://img.shields.io/badge/Agent%20Skills-standard-purple" alt="Agent Skills" /></a>
 </p>
@@ -87,9 +87,8 @@ ninthwave ships with skills that plug into your AI tool's chat interface. These 
 |-------|---|
 | `/decompose` | Break a feature spec into batched work items with dependency mapping |
 | `/work` | Full delivery loop: select items, launch sessions, monitor, merge, finalize |
-| `/todo-preview` | Port-isolated dev servers for live testing in worktrees |
 
-Workers can use `/review`, `/design-review`, `/qa`, and `/plan-eng-review` during execution if available. [gstack](https://github.com/garrytan/gstack) provides all four. Or bring your own: any skill following the [Agent Skills standard](https://agentskills.io) works.
+Workers can use `/review`, `/design-review`, `/qa`, and `/plan-eng-review` during execution if available. Any skill following the [Agent Skills standard](https://agentskills.io) works.
 
 ## Updating
 
@@ -106,4 +105,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture, and 
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).

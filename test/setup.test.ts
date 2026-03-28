@@ -52,7 +52,6 @@ function createFakeBundle(dir: string): string {
   for (const skill of [
     "work",
     "decompose",
-    "todo-preview",
     "ninthwave-upgrade",
   ]) {
     const skillDir = join(bundleDir, "skills", skill);
@@ -668,7 +667,6 @@ describe("setupGlobal", () => {
     for (const skill of [
       "work",
       "decompose",
-      "todo-preview",
       "ninthwave-upgrade",
     ]) {
       const linkPath = join(skillsDir, skill);
@@ -713,7 +711,6 @@ describe("setupGlobal", () => {
     for (const skill of [
       "work",
       "decompose",
-      "todo-preview",
       "ninthwave-upgrade",
     ]) {
       const linkPath = join(skillsDir, skill);
