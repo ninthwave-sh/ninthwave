@@ -2701,7 +2701,7 @@ export async function cmdOrchestrate(
   const tuiState: TuiState = {
     scrollOffset: 0,
     viewOptions: {
-      showBlockerDetail: false,
+      showBlockerDetail: true,
       sessionStartedAt: daemonStartedAt,
       mergeStrategy: orch.config.mergeStrategy,
     },
