@@ -2411,6 +2411,129 @@ describe("processComments (via processTransitions)", () => {
     // lastCommentCheck should be the latest comment timestamp
     expect(orch.getItem("H-1-1")!.lastCommentCheck).toBe("2026-01-15T12:02:00Z");
   });
+
+  it("skips orchestrator status comments with HTML marker", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "<!-- ninthwave-orchestrator-status -->\n| Event | Time |\n|---|---|\n| CI pending | 12:00 |", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+
+    expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+  });
+
+  it("skips worker self-comments", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "**[Worker: H-1-1](agents/implementer.md)** Addressed feedback: fixed error handling.", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+
+    expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+  });
+
+  it("skips comments from other workers too", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "**[Worker: H-2-3](agents/implementer.md)** Some cross-reference comment.", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+
+    expect(actions.filter((a) => a.type === "send-message")).toHaveLength(0);
+    expect(actions.filter((a) => a.type === "daemon-rebase")).toHaveLength(0);
+  });
+
+  it("relays human reviewer comments while filtering bot comments", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "**[Orchestrator]** Status for H-1-1: CI pending", author: "bot", createdAt: "2026-01-15T12:01:00Z" },
+          { body: "<!-- ninthwave-orchestrator-status -->\n| Status |", author: "bot", createdAt: "2026-01-15T12:02:00Z" },
+          { body: "**[Worker: H-1-1](agents/implementer.md)** Fixed the issue.", author: "bot", createdAt: "2026-01-15T12:03:00Z" },
+          { body: "Great work, but please add error handling for the edge case.", author: "reviewer", createdAt: "2026-01-15T12:04:00Z" },
+        ],
+      }]),
+    );
+
+    // Only the human reviewer comment should be relayed
+    const sendMsgs = actions.filter((a) => a.type === "send-message" && a.itemId === "H-1-1");
+    expect(sendMsgs).toHaveLength(1);
+    expect(sendMsgs[0]!.message).toContain("@reviewer");
+    expect(sendMsgs[0]!.message).toContain("error handling for the edge case");
+  });
+
+  it("relays GitHub review body comments", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.setState("H-1-1", "ci-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+        newComments: [
+          { body: "LGTM! Approved with minor nit: consider renaming the variable.", author: "senior-dev", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+    );
+
+    const sendMsgs = actions.filter((a) => a.type === "send-message" && a.itemId === "H-1-1");
+    expect(sendMsgs).toHaveLength(1);
+    expect(sendMsgs[0]!.message).toContain("@senior-dev");
+    expect(sendMsgs[0]!.message).toContain("renaming the variable");
+  });
 });
 
 // ── statusDisplayForState ───────────────────────────────────────────
