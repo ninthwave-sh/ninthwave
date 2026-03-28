@@ -56,9 +56,18 @@ export interface CommandEntry {
   needsRoot: boolean;
   needsTodos: boolean;
   handler: (ctx: CommandContext) => void | Promise<void>;
-  flags: string[];
+  flags: Record<string, string>;
   examples: string[];
 }
+
+// ── Group display configuration ─────────────────────────────────────
+
+const GROUP_ORDER: CommandGroup[] = ["workflow", "diagnostic", "advanced"];
+const GROUP_LABELS: Record<CommandGroup, string> = {
+  workflow: "Workflow",
+  diagnostic: "Diagnostics",
+  advanced: "Advanced",
+};
 
 // ── Version handler (extracted from inline logic) ───────────────────
 
@@ -81,20 +90,11 @@ function cmdVersion(): void {
 
 /**
  * Single source of truth for all CLI commands.
- * Order determines help output order.
+ * Commands are ordered by group: workflow, diagnostic, advanced.
+ * Within each group, order determines help output order.
  */
 export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
-  {
-    name: "doctor",
-    usage: "doctor",
-    description: "Check prerequisites and configuration health",
-    group: "workflow",
-    needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdDoctor(ctx.projectRoot),
-    flags: [],
-    examples: ["nw doctor"],
-  },
+  // ── Workflow ────────────────────────────────────────────────────────
   {
     name: "init",
     usage: "init [--global] [--yes]",
@@ -103,74 +103,32 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     needsRoot: false,
     needsTodos: false,
     handler: async (ctx) => { await cmdInit(ctx.args); },
-    flags: ["--global", "--yes", "-y"],
+    flags: {
+      "--global": "Install global shell alias and config",
+      "--yes": "Skip confirmation prompts",
+      "-y": "Skip confirmation prompts",
+    },
     examples: ["nw init", "nw init --global", "nw init --yes"],
   },
   {
-    name: "version",
-    usage: "version",
-    description: "Print ninthwave version",
-    group: "workflow",
-    needsRoot: false,
-    needsTodos: false,
-    handler: () => cmdVersion(),
-    flags: [],
-    examples: ["nw version", "nw --version", "nw -v"],
-  },
-  {
-    name: "list",
-    usage: "list [--priority P] [--domain D] [--feature F] [--ready]",
-    description: "List TODO items",
+    name: "watch",
+    usage: "watch [--items ID1 ID2 ...] [--daemon] [--no-watch]",
+    description: "Run the full pipeline (TUI, daemon, or JSON modes)",
     group: "workflow",
     needsRoot: true,
     needsTodos: true,
-    handler: (ctx) => cmdList(ctx.args, ctx.todosDir, ctx.worktreeDir),
-    flags: ["--priority", "--domain", "--feature", "--ready"],
-    examples: ["nw list", "nw list --ready", "nw list --domain core"],
-  },
-  {
-    name: "deps",
-    usage: "deps <ID>",
-    description: "Show dependency chain",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: true,
-    handler: (ctx) => cmdDeps(ctx.args, ctx.todosDir, ctx.worktreeDir),
-    flags: [],
-    examples: ["nw deps H-FOO-1"],
-  },
-  {
-    name: "conflicts",
-    usage: "conflicts <ID1> <ID2>...",
-    description: "Check file conflicts",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: true,
-    handler: (ctx) => cmdConflicts(ctx.args, ctx.todosDir, ctx.worktreeDir),
-    flags: [],
-    examples: ["nw conflicts H-FOO-1 H-FOO-2"],
-  },
-  {
-    name: "batch-order",
-    usage: "batch-order <ID1> [ID2]...",
-    description: "Group items into dependency batches",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: true,
-    handler: (ctx) => cmdBatchOrder(ctx.args, ctx.todosDir, ctx.worktreeDir),
-    flags: [],
-    examples: ["nw batch-order H-FOO-1 H-FOO-2 H-FOO-3"],
-  },
-  {
-    name: "start",
-    usage: "start <ID1> [ID2]...",
-    description: "Launch parallel sessions",
-    group: "workflow",
-    needsRoot: true,
-    needsTodos: true,
-    handler: async (ctx) => { await cmdStart(ctx.args, ctx.todosDir, ctx.worktreeDir, ctx.projectRoot); },
-    flags: [],
-    examples: ["nw start H-FOO-1 H-FOO-2"],
+    handler: async (ctx) => { await cmdWatch(ctx.args, ctx.todosDir, ctx.worktreeDir, ctx.projectRoot); },
+    flags: {
+      "--items": "TODO item IDs to process",
+      "--daemon": "Run in daemon mode (background)",
+      "--no-watch": "Disable TUI watch mode",
+      "--watch": "Enable TUI watch mode",
+    },
+    examples: [
+      "nw watch",
+      "nw watch --items H-FOO-1 H-FOO-2",
+      "nw watch --daemon",
+    ],
   },
   {
     name: "status",
@@ -188,8 +146,138 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
         await cmdStatusWatch(ctx.worktreeDir, ctx.projectRoot, 5_000, undefined, flatFlag);
       }
     },
-    flags: ["--once", "--watch", "--flat"],
+    flags: {
+      "--once": "Show status once without live refresh",
+      "--watch": "Live refresh display (default, accepted for backwards compat)",
+      "--flat": "Flat output without tree formatting",
+    },
     examples: ["nw status", "nw status --once", "nw status --flat"],
+  },
+  {
+    name: "stop",
+    usage: "stop",
+    description: "Stop the orchestrator daemon",
+    group: "workflow",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdStop(ctx.projectRoot),
+    flags: {},
+    examples: ["nw stop"],
+  },
+
+  // ── Diagnostics ─────────────────────────────────────────────────────
+  {
+    name: "doctor",
+    usage: "doctor",
+    description: "Check prerequisites and configuration health",
+    group: "diagnostic",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdDoctor(ctx.projectRoot),
+    flags: {},
+    examples: ["nw doctor"],
+  },
+  {
+    name: "list",
+    usage: "list [--priority P] [--domain D] [--feature F] [--ready]",
+    description: "List TODO items",
+    group: "diagnostic",
+    needsRoot: true,
+    needsTodos: true,
+    handler: (ctx) => cmdList(ctx.args, ctx.todosDir, ctx.worktreeDir),
+    flags: {
+      "--priority": "Filter by priority level (e.g. High, Medium)",
+      "--domain": "Filter by domain (e.g. core, tui-status)",
+      "--feature": "Filter by feature name",
+      "--ready": "Show only items with no unmet dependencies",
+    },
+    examples: [
+      "nw list",
+      "nw list --ready",
+      "nw list --domain core",
+      "nw list --priority High",
+    ],
+  },
+  {
+    name: "deps",
+    usage: "deps <ID>",
+    description: "Show dependency chain for a TODO item",
+    group: "diagnostic",
+    needsRoot: true,
+    needsTodos: true,
+    handler: (ctx) => cmdDeps(ctx.args, ctx.todosDir, ctx.worktreeDir),
+    flags: {},
+    examples: ["nw deps H-FOO-1"],
+  },
+  {
+    name: "conflicts",
+    usage: "conflicts <ID1> <ID2>...",
+    description: "Check file conflicts between TODO items",
+    group: "diagnostic",
+    needsRoot: true,
+    needsTodos: true,
+    handler: (ctx) => cmdConflicts(ctx.args, ctx.todosDir, ctx.worktreeDir),
+    flags: {},
+    examples: ["nw conflicts H-FOO-1 H-FOO-2"],
+  },
+  {
+    name: "batch-order",
+    usage: "batch-order <ID1> [ID2]...",
+    description: "Group items into dependency-ordered batches",
+    group: "diagnostic",
+    needsRoot: true,
+    needsTodos: true,
+    handler: (ctx) => cmdBatchOrder(ctx.args, ctx.todosDir, ctx.worktreeDir),
+    flags: {},
+    examples: ["nw batch-order H-FOO-1 H-FOO-2 H-FOO-3"],
+  },
+  {
+    name: "analytics",
+    usage: "analytics [--all]",
+    description: "Show orchestration performance trends",
+    group: "diagnostic",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdAnalytics(ctx.args, ctx.projectRoot),
+    flags: {
+      "--all": "Show all-time analytics instead of recent",
+    },
+    examples: ["nw analytics", "nw analytics --all"],
+  },
+
+  // ── Advanced ────────────────────────────────────────────────────────
+  {
+    name: "start",
+    usage: "start <ID1> [ID2]...",
+    description: "Launch parallel coding sessions for TODO items",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: true,
+    handler: async (ctx) => { await cmdStart(ctx.args, ctx.todosDir, ctx.worktreeDir, ctx.projectRoot); },
+    flags: {},
+    examples: ["nw start H-FOO-1 H-FOO-2"],
+  },
+  {
+    name: "clean",
+    usage: "clean [ID]",
+    description: "Clean up worktrees and close all workspaces",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdClean(ctx.args, ctx.worktreeDir, ctx.projectRoot),
+    flags: {},
+    examples: ["nw clean", "nw clean H-FOO-1"],
+  },
+  {
+    name: "clean-single",
+    usage: "clean-single <ID>",
+    description: "Clean a single worktree without side effects",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdCleanSingle(ctx.args, ctx.worktreeDir, ctx.projectRoot),
+    flags: {},
+    examples: ["nw clean-single H-FOO-1"],
   },
   {
     name: "close-workspaces",
@@ -199,7 +287,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     needsRoot: true,
     needsTodos: false,
     handler: () => cmdCloseWorkspaces(),
-    flags: [],
+    flags: {},
     examples: ["nw close-workspaces"],
   },
   {
@@ -210,195 +298,74 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     needsRoot: true,
     needsTodos: false,
     handler: (ctx) => cmdCloseWorkspace(ctx.args[0] ?? ""),
-    flags: [],
+    flags: {},
     examples: ["nw close-workspace H-FOO-1"],
-  },
-  {
-    name: "clean",
-    usage: "clean [ID]",
-    description: "Clean up worktrees + close all workspaces",
-    group: "workflow",
-    needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdClean(ctx.args, ctx.worktreeDir, ctx.projectRoot),
-    flags: [],
-    examples: ["nw clean", "nw clean H-FOO-1"],
-  },
-  {
-    name: "clean-single",
-    usage: "clean-single <ID>",
-    description: "Clean single worktree (no side effects)",
-    group: "advanced",
-    needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdCleanSingle(ctx.args, ctx.worktreeDir, ctx.projectRoot),
-    flags: [],
-    examples: ["nw clean-single H-FOO-1"],
   },
   {
     name: "mark-done",
     usage: "mark-done <ID1> [ID2]...",
-    description: "Remove completed todo files",
+    description: "Remove completed TODO files from disk",
     group: "advanced",
     needsRoot: true,
     needsTodos: true,
     handler: (ctx) => cmdMarkDone(ctx.args, ctx.todosDir),
-    flags: [],
+    flags: {},
     examples: ["nw mark-done H-FOO-1 H-FOO-2"],
   },
   {
-    name: "merged-ids",
-    usage: "merged-ids",
-    description: "List IDs of already-merged worktree items",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdMergedIds(ctx.worktreeDir, ctx.projectRoot),
-    flags: [],
-    examples: ["nw merged-ids"],
-  },
-  {
-    name: "partitions",
-    usage: "partitions",
-    description: "Show partition allocation",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdPartitions(ctx.partitionDir),
-    flags: [],
-    examples: ["nw partitions"],
-  },
-  {
-    name: "watch-ready",
-    usage: "watch-ready",
-    description: "Check which PRs are merge-ready",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdWatchReady(ctx.worktreeDir, ctx.projectRoot),
-    flags: [],
-    examples: ["nw watch-ready"],
-  },
-  {
-    name: "autopilot-watch",
-    usage: "autopilot-watch [--interval N] [--state-file F]",
-    description: "Block until item status changes",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: false,
-    handler: async (ctx) => { await cmdAutopilotWatch(ctx.args, ctx.worktreeDir, ctx.projectRoot); },
-    flags: ["--interval", "--state-file"],
-    examples: ["nw autopilot-watch", "nw autopilot-watch --interval 30"],
-  },
-  {
-    name: "pr-watch",
-    usage: "pr-watch --pr N [--interval N] [--since T]",
-    description: "Block until PR has new activity",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: false,
-    handler: async (ctx) => { await cmdPrWatch(ctx.args, ctx.projectRoot); },
-    flags: ["--pr", "--interval", "--since"],
-    examples: ["nw pr-watch --pr 42"],
-  },
-  {
-    name: "ci-failures",
-    usage: "ci-failures <PR>",
-    description: "Show failing CI check details",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdCiFailures(ctx.args, ctx.projectRoot),
-    flags: [],
-    examples: ["nw ci-failures 42"],
-  },
-  {
-    name: "pr-activity",
-    usage: "pr-activity <PR1> [PR2]... [--since T]",
-    description: "Check for new comments/reviews",
-    group: "diagnostic",
-    needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdPrActivity(ctx.args, ctx.projectRoot),
-    flags: ["--since"],
-    examples: ["nw pr-activity 42", "nw pr-activity 42 43 --since 2024-01-01"],
-  },
-  {
-    name: "version-bump",
-    usage: "version-bump",
-    description: "Bump version + changelog",
+    name: "reconcile",
+    usage: "reconcile",
+    description: "Sync TODO files with merged PRs",
     group: "advanced",
     needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdVersionBump(ctx.projectRoot),
-    flags: [],
-    examples: ["nw version-bump"],
-  },
-  {
-    name: "watch",
-    usage: "watch [--items ID1 ID2 ...] [--daemon] [--no-watch]",
-    description: "Run the full pipeline (TUI, daemon, or JSON modes)",
-    group: "workflow",
-    needsRoot: true,
     needsTodos: true,
-    handler: async (ctx) => { await cmdWatch(ctx.args, ctx.todosDir, ctx.worktreeDir, ctx.projectRoot); },
-    flags: ["--items", "--daemon", "--no-watch", "--watch"],
-    examples: ["nw watch", "nw watch --items H-FOO-1 H-FOO-2", "nw watch --daemon"],
-  },
-  {
-    name: "stop",
-    usage: "stop",
-    description: "Stop the orchestrator daemon",
-    group: "workflow",
-    needsRoot: true,
-    needsTodos: false,
-    handler: (ctx) => cmdStop(ctx.projectRoot),
-    flags: [],
-    examples: ["nw stop"],
+    handler: (ctx) => cmdReconcile(ctx.todosDir, ctx.worktreeDir, ctx.projectRoot),
+    flags: {},
+    examples: ["nw reconcile"],
   },
   {
     name: "retry",
     usage: "retry <ID> [ID2...]",
-    description: "Retry stuck/done items (reset to queued)",
-    group: "workflow",
+    description: "Retry stuck or done items (reset to queued)",
+    group: "advanced",
     needsRoot: true,
     needsTodos: false,
     handler: (ctx) => cmdRetry(ctx.args, ctx.worktreeDir, ctx.projectRoot),
-    flags: [],
+    flags: {},
     examples: ["nw retry H-FOO-1"],
   },
   {
     name: "repos",
     usage: "repos",
-    description: "List discovered repos",
-    group: "diagnostic",
+    description: "List discovered sibling repositories",
+    group: "advanced",
     needsRoot: true,
     needsTodos: false,
     handler: (ctx) => cmdRepos(ctx.projectRoot),
-    flags: [],
+    flags: {},
     examples: ["nw repos"],
   },
   {
-    name: "reconcile",
-    usage: "reconcile",
-    description: "Sync todo files with merged PRs",
-    group: "workflow",
-    needsRoot: true,
-    needsTodos: true,
-    handler: (ctx) => cmdReconcile(ctx.todosDir, ctx.worktreeDir, ctx.projectRoot),
-    flags: [],
-    examples: ["nw reconcile"],
+    name: "version",
+    usage: "version",
+    description: "Print ninthwave version",
+    group: "advanced",
+    needsRoot: false,
+    needsTodos: false,
+    handler: () => cmdVersion(),
+    flags: {},
+    examples: ["nw version", "nw --version", "nw -v"],
   },
   {
-    name: "analytics",
-    usage: "analytics [--all]",
-    description: "Show orchestration performance trends",
-    group: "workflow",
+    name: "version-bump",
+    usage: "version-bump",
+    description: "Bump version and update changelog",
+    group: "advanced",
     needsRoot: true,
     needsTodos: false,
-    handler: (ctx) => cmdAnalytics(ctx.args, ctx.projectRoot),
-    flags: ["--all"],
-    examples: ["nw analytics", "nw analytics --all"],
+    handler: (ctx) => cmdVersionBump(ctx.projectRoot),
+    flags: {},
+    examples: ["nw version-bump"],
   },
   {
     name: "heartbeat",
@@ -408,8 +375,106 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     needsRoot: true,
     needsTodos: false,
     handler: (ctx) => cmdHeartbeat(ctx.args, ctx.projectRoot),
-    flags: ["--progress", "--label", "--tokens-in", "--tokens-out", "--model"],
-    examples: ['nw heartbeat --progress 0.5 --label "Writing tests"'],
+    flags: {
+      "--progress": "Progress value from 0.0 to 1.0",
+      "--label": "Status label text",
+      "--tokens-in": "Input tokens consumed (for analytics)",
+      "--tokens-out": "Output tokens consumed (for analytics)",
+      "--model": "Model identifier (for analytics)",
+    },
+    examples: [
+      'nw heartbeat --progress 0.5 --label "Writing tests"',
+      'nw heartbeat --progress 1.0 --label "Done" --tokens-in 45000',
+    ],
+  },
+  {
+    name: "merged-ids",
+    usage: "merged-ids",
+    description: "List IDs of already-merged worktree items",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdMergedIds(ctx.worktreeDir, ctx.projectRoot),
+    flags: {},
+    examples: ["nw merged-ids"],
+  },
+  {
+    name: "partitions",
+    usage: "partitions",
+    description: "Show partition allocation table",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdPartitions(ctx.partitionDir),
+    flags: {},
+    examples: ["nw partitions"],
+  },
+  {
+    name: "watch-ready",
+    usage: "watch-ready",
+    description: "Check which PRs are merge-ready",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdWatchReady(ctx.worktreeDir, ctx.projectRoot),
+    flags: {},
+    examples: ["nw watch-ready"],
+  },
+  {
+    name: "autopilot-watch",
+    usage: "autopilot-watch [--interval N] [--state-file F]",
+    description: "Block until item status changes",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: false,
+    handler: async (ctx) => { await cmdAutopilotWatch(ctx.args, ctx.worktreeDir, ctx.projectRoot); },
+    flags: {
+      "--interval": "Polling interval in seconds",
+      "--state-file": "Path to state file for persistence",
+    },
+    examples: ["nw autopilot-watch", "nw autopilot-watch --interval 30"],
+  },
+  {
+    name: "pr-watch",
+    usage: "pr-watch --pr N [--interval N] [--since T]",
+    description: "Block until a PR has new activity",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: false,
+    handler: async (ctx) => { await cmdPrWatch(ctx.args, ctx.projectRoot); },
+    flags: {
+      "--pr": "PR number to watch",
+      "--interval": "Polling interval in seconds",
+      "--since": "Only detect activity after this timestamp",
+    },
+    examples: ["nw pr-watch --pr 42"],
+  },
+  {
+    name: "ci-failures",
+    usage: "ci-failures <PR>",
+    description: "Show failing CI check details for a PR",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdCiFailures(ctx.args, ctx.projectRoot),
+    flags: {},
+    examples: ["nw ci-failures 42"],
+  },
+  {
+    name: "pr-activity",
+    usage: "pr-activity <PR1> [PR2]... [--since T]",
+    description: "Check for new comments and reviews on PRs",
+    group: "advanced",
+    needsRoot: true,
+    needsTodos: false,
+    handler: (ctx) => cmdPrActivity(ctx.args, ctx.projectRoot),
+    flags: {
+      "--since": "Only show activity after this timestamp",
+    },
+    examples: [
+      "nw pr-activity 42",
+      "nw pr-activity 42 43 --since 2024-01-01",
+    ],
   },
 ];
 
@@ -424,14 +489,24 @@ export function lookupCommand(name: string): CommandEntry | undefined {
 
 const HELP_PAD = 48;
 
-/** Print full usage help. */
-export function printHelp(): void {
-  console.log("Usage: nw <command> [options]");
-  console.log("       nw <ID> [ID2...]          Launch TODO items by ID");
-  console.log("       ninthwave <command> [options]");
-  console.log();
-  console.log("Commands:");
-  for (const { usage, description } of COMMAND_REGISTRY) {
+/** Get commands filtered by groups. */
+function commandsByGroup(groups: CommandGroup[]): Map<CommandGroup, CommandEntry[]> {
+  const map = new Map<CommandGroup, CommandEntry[]>();
+  for (const group of groups) {
+    map.set(group, []);
+  }
+  for (const cmd of COMMAND_REGISTRY) {
+    const list = map.get(cmd.group);
+    if (list) list.push(cmd);
+  }
+  return map;
+}
+
+/** Print a group of commands with a header. */
+function printGroup(label: string, commands: CommandEntry[]): void {
+  if (commands.length === 0) return;
+  console.log(`${label}:`);
+  for (const { usage, description } of commands) {
     const prefix = `  ${usage}`;
     if (prefix.length >= HELP_PAD) {
       console.log(prefix);
@@ -442,14 +517,71 @@ export function printHelp(): void {
   }
 }
 
-/** Print help for a single command. */
+/** Print grouped usage help (Workflow + Diagnostics only). */
+export function printHelp(): void {
+  console.log("Usage: nw <command> [options]");
+  console.log("       nw <ID> [ID2...]          Launch TODO items by ID");
+  console.log();
+
+  const groups = commandsByGroup(["workflow", "diagnostic"]);
+  for (const group of ["workflow", "diagnostic"] as CommandGroup[]) {
+    printGroup(GROUP_LABELS[group], groups.get(group) ?? []);
+    console.log();
+  }
+
+  console.log("Run nw --help-all for all commands, or nw <command> --help for details.");
+}
+
+/** Print full usage help with all groups including Advanced. */
+export function printHelpAll(): void {
+  console.log("Usage: nw <command> [options]");
+  console.log("       nw <ID> [ID2...]          Launch TODO items by ID");
+  console.log();
+
+  const groups = commandsByGroup(GROUP_ORDER);
+  for (const group of GROUP_ORDER) {
+    printGroup(GROUP_LABELS[group], groups.get(group) ?? []);
+    console.log();
+  }
+
+  console.log("Run nw <command> --help for detailed help on any command.");
+}
+
+/** Print rich help for a single command. */
 export function printCommandHelp(cmd: string): void {
   const entry = COMMAND_REGISTRY.find((c) => c.name === cmd);
-  if (entry) {
-    console.log(`Usage: ninthwave ${entry.usage}`);
-    console.log();
-    console.log(entry.description);
-  } else {
+  if (!entry) {
     die(`Unknown command: ${cmd}`);
+    return; // unreachable but helps TS
+  }
+
+  // Header
+  console.log(`nw ${entry.name} — ${entry.description}`);
+  console.log();
+
+  // Usage
+  console.log("Usage:");
+  console.log(`  nw ${entry.usage}`);
+
+  // Flags
+  const flagEntries = Object.entries(entry.flags);
+  if (flagEntries.length > 0) {
+    console.log();
+    console.log("Flags:");
+    // Find the longest flag name for alignment
+    const maxLen = Math.max(...flagEntries.map(([name]) => name.length));
+    const pad = Math.max(maxLen + 4, 16); // at least 16 chars
+    for (const [name, desc] of flagEntries) {
+      console.log(`  ${name.padEnd(pad)}${desc}`);
+    }
+  }
+
+  // Examples
+  if (entry.examples.length > 0) {
+    console.log();
+    console.log("Examples:");
+    for (const example of entry.examples) {
+      console.log(`  ${example}`);
+    }
   }
 }

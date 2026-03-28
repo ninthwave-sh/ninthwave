@@ -52,14 +52,14 @@ describe("CLI flags", () => {
       const result = runCli("--help");
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("Usage:");
-      expect(result.stdout).toContain("Commands:");
+      expect(result.stdout).toContain("Workflow:");
     });
 
     it("prints help with -h flag", () => {
       const result = runCli("-h");
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("Usage:");
-      expect(result.stdout).toContain("Commands:");
+      expect(result.stdout).toContain("Workflow:");
     });
 
     it("--help and -h produce the same output", () => {
@@ -74,12 +74,12 @@ describe("CLI flags", () => {
       expect(flag.stdout).toBe(noArgs.stdout);
     });
 
-    it("help output includes key commands", () => {
+    it("help output includes key workflow and diagnostic commands", () => {
       const result = runCli("--help");
       expect(result.stdout).toContain("init");
-      expect(result.stdout).toContain("version");
       expect(result.stdout).toContain("list");
       expect(result.stdout).toContain("watch");
+      expect(result.stdout).toContain("doctor");
     });
   });
 
@@ -87,27 +87,27 @@ describe("CLI flags", () => {
     it("shows command-specific help for list --help", () => {
       const result = runCli("list", "--help");
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("Usage: ninthwave list");
+      expect(result.stdout).toContain("nw list");
       expect(result.stdout).toContain("List TODO items");
     });
 
     it("shows command-specific help for list -h", () => {
       const result = runCli("list", "-h");
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("Usage: ninthwave list");
+      expect(result.stdout).toContain("nw list");
     });
 
     it("shows command-specific help for start --help", () => {
       const result = runCli("start", "--help");
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("Usage: ninthwave start");
-      expect(result.stdout).toContain("Launch parallel sessions");
+      expect(result.stdout).toContain("nw start");
+      expect(result.stdout).toContain("Launch parallel coding sessions");
     });
 
     it("shows command-specific help for watch --help", () => {
       const result = runCli("watch", "--help");
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain("Usage: ninthwave watch");
+      expect(result.stdout).toContain("nw watch");
       expect(result.stdout).toContain("Run the full pipeline");
     });
 

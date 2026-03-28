@@ -5,7 +5,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { die } from "./output.ts";
 import { run } from "./shell.ts";
-import { lookupCommand, printHelp, printCommandHelp } from "./help.ts";
+import { lookupCommand, printHelp, printHelpAll, printCommandHelp } from "./help.ts";
 import { cmdNoArgs } from "./commands/onboard.ts";
 import { TODO_ID_CLI_PATTERN, cmdRunItems } from "./commands/launch.ts";
 
@@ -34,6 +34,11 @@ const command =
   rawCommand === "--version" || rawCommand === "-v" ? "version" : rawCommand;
 
 // ── Handle --help / -h / no args (before project root — works outside git repos)
+
+if (command === "--help-all") {
+  printHelpAll();
+  process.exit(0);
+}
 
 if (command === "--help" || command === "-h") {
   printHelp();

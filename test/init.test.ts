@@ -1870,8 +1870,8 @@ describe("setup command removal", () => {
   it("'init' is in the command registry with --global flag", () => {
     const entry = lookupCommand("init");
     expect(entry).toBeDefined();
-    expect(entry!.flags).toContain("--global");
-    expect(entry!.flags).toContain("--yes");
+    expect("--global" in entry!.flags).toBe(true);
+    expect("--yes" in entry!.flags).toBe(true);
   });
 });
 

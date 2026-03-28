@@ -1711,9 +1711,9 @@ describe("status command flag routing", () => {
     const { lookupCommand } = require("../core/help.ts");
     const entry = lookupCommand("status");
     expect(entry).toBeDefined();
-    expect(entry!.flags).toContain("--once");
-    expect(entry!.flags).toContain("--watch");
-    expect(entry!.flags).toContain("--flat");
+    expect("--once" in entry!.flags).toBe(true);
+    expect("--watch" in entry!.flags).toBe(true);
+    expect("--flat" in entry!.flags).toBe(true);
     expect(entry!.usage).toContain("--once");
     expect(entry!.description).toContain("Live");
   });
