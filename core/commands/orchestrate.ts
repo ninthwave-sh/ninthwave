@@ -2316,13 +2316,26 @@ export async function cmdOrchestrate(
   let crewBroker: CrewBroker | undefined;
   let mockBrokerInstance: MockBroker | undefined;
 
+  // Resolve git remote URL for crew repo verification
+  let crewRepoUrl = "";
+  try {
+    const { execSync } = await import("child_process");
+    crewRepoUrl = execSync("git remote get-url origin", { cwd: projectRoot, encoding: "utf-8" }).trim();
+  } catch {
+    // No git remote available
+  }
+
   if (crewCreate) {
     // Start mock broker in-process
     mockBrokerInstance = new MockBroker({ port: crewPort || 0 });
     const brokerPort = mockBrokerInstance.start();
 
     // Create a crew
-    const res = await fetch(`http://localhost:${brokerPort}/api/crews`, { method: "POST" });
+    const res = await fetch(`http://localhost:${brokerPort}/api/crews`, {
+      method: "POST",
+      body: JSON.stringify({ repoUrl: crewRepoUrl }),
+      headers: { "Content-Type": "application/json" },
+    });
     const body = (await res.json()) as { code: string };
     crewCode = body.code;
     crewUrl = `ws://localhost:${brokerPort}`;
@@ -2343,7 +2356,7 @@ export async function cmdOrchestrate(
       }
     }
     resolvedCrewName = crewName ?? (await import("os")).hostname();
-    const broker = new WebSocketCrewBroker(projectRoot, crewUrl, crewCode, {
+    const broker = new WebSocketCrewBroker(projectRoot, crewUrl, crewCode, crewRepoUrl, {
       log: (level, msg) => log({ ts: new Date().toISOString(), level, event: "crew_client", message: msg }),
     }, resolvedCrewName);
 

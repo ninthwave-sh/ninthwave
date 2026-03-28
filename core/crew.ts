@@ -253,6 +253,7 @@ export class WebSocketCrewBroker implements CrewBroker {
   private daemonId: string;
   private operatorId: string;
   private url: string;
+  private repoUrl: string;
   private name: string;
   private deps: CrewBrokerDeps;
   private reconnectTimer: ReturnType<typeof setInterval> | null = null;
@@ -272,6 +273,7 @@ export class WebSocketCrewBroker implements CrewBroker {
     projectRoot: string,
     url: string,
     crewCode: string,
+    repoUrl: string,
     deps: CrewBrokerDeps,
     name?: string,
   ) {
@@ -279,6 +281,7 @@ export class WebSocketCrewBroker implements CrewBroker {
     this.operatorId = resolveOperatorId(projectRoot);
     this.name = name ?? hostname();
     this.url = `${url}/api/crews/${crewCode}/ws`;
+    this.repoUrl = repoUrl;
     this.deps = deps;
   }
 
@@ -300,7 +303,7 @@ export class WebSocketCrewBroker implements CrewBroker {
   private doConnect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       this.connectPromise = { resolve, reject };
-      const wsUrl = `${this.url}?daemonId=${this.daemonId}&name=${encodeURIComponent(this.name)}&operatorId=${encodeURIComponent(this.operatorId)}`;
+      const wsUrl = `${this.url}?daemonId=${this.daemonId}&name=${encodeURIComponent(this.name)}&operatorId=${encodeURIComponent(this.operatorId)}&repoUrl=${encodeURIComponent(this.repoUrl)}`;
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
