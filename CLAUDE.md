@@ -43,7 +43,7 @@ No build step — Bun executes TypeScript directly. Changes take effect immediat
 
 ## Dogfooding Mode
 
-This repo uses ninthwave to develop ninthwave. When working here, **dogfooding self-improvement mode is the default** — follow the full loop below unless explicitly asked to skip it.
+This repo uses ninthwave to develop ninthwave. When working here, log friction and follow the conventions below.
 
 ### Basics
 
@@ -54,16 +54,4 @@ This repo uses ninthwave to develop ninthwave. When working here, **dogfooding s
 3. **WIP limit ≤ 5.** Each worker session (Claude Code + language server + worktree) consumes ~2-3GB RAM. On a 16GB Mac, WIP limit of 5 is the default; reduce if memory pressure is observed.
 
 4. **Always use worktree isolation for parallel agents.** When spawning agents that work on branches in the same repo, use `isolation: "worktree"` so each gets its own working copy. Never have two agents share a checkout.
-
-### Self-Improvement Loop (default behavior)
-
-`/work` handles the full dogfooding cycle automatically. Its Phase 3 continuous delivery loop includes friction review, friction decomposition, and vision exploration — no separate commands needed.
-
-The cycle: process all ready work items → review friction log → decompose actionable friction into new work items → process friction work items → run vision item (L-VIS-N) → repeat with new work items from vision.
-
-Between batches, `/work` pauses at checkpoints to report progress and confirm continuation. The friction log is reviewed before the vision item runs, ensuring friction fixes ship before new features are explored.
-
-### Opting Out
-
-If the user explicitly asks to skip the self-improvement loop (e.g., "just process the items" or "no friction review"), process items straight through without pausing. Ask the user at the start of `/work` if there's any ambiguity.
 

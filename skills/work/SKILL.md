@@ -3,10 +3,9 @@ name: work
 description: |
   Batch-process work items through parallel AI coding sessions.
   Interactively select items, then delegate execution to `nw watch`.
-  Includes continuous delivery loop with friction review, vision exploration, and
-  autonomous self-improvement when dogfooding.
+  Includes continuous delivery loop with friction review when dogfooding.
   Use when asked to "process work items", "batch work", "run work", "start work",
-  "grind", "work-work-work", "continuous loop", "dogfood loop", or "self-improvement cycle".
+  "grind", "work-work-work", or "continuous loop".
 allowed-tools:
   - Bash
   - Read
@@ -219,7 +218,7 @@ Skip this step if nothing changed in `.ninthwave/work/` during Phase 1.
 
 **Goal:** After the orchestrator finishes a batch, check for remaining work and loop back to keep delivering until everything is done or the user stops.
 
-Phase 3 runs automatically after Phase 2 completes. It checks whether more work was unblocked by the completed batch, reviews friction, offers vision exploration, and loops back. In dogfooding mode (developing ninthwave itself), it runs the full self-improvement cycle automatically.
+Phase 3 runs automatically after Phase 2 completes. It checks whether more work was unblocked by the completed batch, reviews friction, and loops back.
 
 #### Step 1: Reconcile and check for remaining ready items
 
@@ -227,8 +226,8 @@ Run `ninthwave reconcile` to sync work item state with GitHub — files for merg
 
 Then run `ninthwave list --ready` to see if any items were unblocked by the batch that just completed.
 
-- If **ready items exist** (non-vision items), continue to Step 2.
-- If **only vision items remain** (L-VIS-*) or **no items remain**, skip to Step 3 (vision).
+- If **ready items exist**, continue to Step 2.
+- If **no items remain**, skip to Step 3.
 
 #### Step 2: Dogfooding — friction log review (ninthwave projects only)
 
@@ -272,25 +271,9 @@ If in dogfooding mode:
 
 If **not** in dogfooding mode, skip this step entirely.
 
-#### Step 3: Vision exploration (when all code items are done)
+#### Step 3: Offer to continue
 
-Check if an L-VIS-* item exists in `.ninthwave/work/` and is ready (all deps met). This step runs when all non-vision items have been processed — either no ready items remain, or only vision items are left.
-
-- If **no vision item is ready**, skip to Step 4.
-- If a vision item is ready:
-
-  AskUserQuestion — "All code and friction items are done. Ready to run the vision exploration (L-VIS-N)? This reviews the product state, friction log, and competitive landscape, then decomposes new work."
-  - A) Run vision — recommended
-  - B) Skip vision — end this cycle
-  - C) Run vision with scope constraint — limit vision to a specific area
-
-  If the user chooses A or C, process the vision item via the orchestrator (single item). After vision completes, run `ninthwave reconcile` to sync state. New work items created by the vision item feed back into the loop naturally — return to Step 1.
-
-  If the user chooses B, skip to Step 4.
-
-#### Step 4: Offer to continue
-
-Run `ninthwave list --ready` to get the current count (may have changed due to friction decompose or vision).
+Run `ninthwave list --ready` to get the current count (may have changed due to friction decompose).
 
 - If **no ready items remain**, report "All done — inbox zero" and exit.
 - If **ready items exist**, present them:
@@ -318,9 +301,7 @@ At each checkpoint, display a summary:
 ║  Items merged:       7                   ║
 ║  Items stuck:        1                   ║
 ║  Friction reviewed:  3 entries           ║
-║  Friction → items:   2 new items              ║
-║  Vision items:       1 (L-VIS-4)         ║
-║  New items created:  5                   ║
+║  Friction → items:   2 new items         ║
 ║  Ready for next:     5                   ║
 ╚══════════════════════════════════════════╝
 ```
@@ -329,8 +310,8 @@ At each checkpoint, display a summary:
 
 The Phase 2 → Phase 3 loop continues until one of these conditions is met:
 
-1. **No ready items remain** — `list --ready` returns zero items after vision check. Report "All done — inbox zero" and exit.
-2. **User chooses to stop** — user selects "Stop" at the continuation prompt or skips vision.
+1. **No ready items remain** — `list --ready` returns zero items after friction review. Report "All done — inbox zero" and exit.
+2. **User chooses to stop** — user selects "Stop" at the continuation prompt.
 3. **All items stuck** — every remaining item is in a stuck/blocked state with no path forward. Report the stuck items and exit.
 
 ---

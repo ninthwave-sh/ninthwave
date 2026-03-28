@@ -39,8 +39,6 @@ v0.1.0 shipped March 2026. Twelve grind cycles (0-11) have shipped since then. S
 
 **Crew mode foundation.** Multi-daemon coordination via WebSocket broker with creator-affinity scheduling — items prefer the daemon whose human decomposed them, enabling easier steering and intervention. Affinity is a WIP-bounded preference, not a hard rule: when the creator's daemon hits its WIP limit, queued items overflow to other daemons. Review jobs are local-only and do not participate in crew claim scheduling. Mock broker for local testing, persistent daemon IDs, and reconnect state reconciliation. TUI displays crew status when connected.
 
-**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 25+ issues across 12+ grind cycles, driving improvements from poll interval tuning to deterministic worker health monitoring.
-
 **Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching.
 
 ## Principles
@@ -55,7 +53,7 @@ v0.1.0 shipped March 2026. Twelve grind cycles (0-11) have shipped since then. S
 
 5. **Bring your own everything.** Your AI tool, your billing, your API keys, your task tracker, your CI. ninthwave is a coordination layer, not a platform.
 
-6. **The friction log is the roadmap.** Dogfooding generates signal. Every friction point encountered while using ninthwave is a potential improvement. L-VIS cycles review the friction log and decompose actionable items.
+6. **The friction log is the roadmap.** Dogfooding generates signal. Every friction point encountered while using ninthwave is a potential improvement.
 
 7. **Delegate, don't debug.** The orchestrator's job is to detect problems and dispatch them to workers. It doesn't read source code, diagnose root causes, or attempt patches.
 
@@ -68,15 +66,6 @@ v0.1.0 shipped March 2026. Twelve grind cycles (0-11) have shipped since then. S
 ### CLI Redesign (in progress)
 
 Restructuring the CLI mental model: `nw` (no args) adapts to project state, `nw <ID>` launches items with topo-sort, `nw watch` replaces `nw orchestrate`, `nw init` absorbs `nw setup`. Grouped help, rich per-command help pages, and an interactive no-args picker.
-
-### Developer Experience & Onboarding
-
-The pipeline works but onboarding has rough edges. Friction from Copilot trust prompts, AI tool misconfiguration, and lost analytics data add up. This iteration polishes the first-run experience and operational data management:
-
-- **Copilot trusted_folders in `nw init`.** Auto-add the project root to `~/.copilot/config.json#trusted_folders` when Copilot is detected. Prevents the interactive trust prompt that blocks every worker launch in worktrees.
-- **AI tool validation in `nw doctor`.** Check that detected AI tools are properly configured (Copilot trust, Claude accessibility) with specific remediation instructions.
-- **Auto-commit analytics at shutdown.** Commit `.ninthwave/analytics/` files when the daemon stops so orchestration data is preserved in git history.
-- **Pre-launch validation.** Check that work item files are committed and pushed before launching workers in worktrees. Auto-commit in daemon mode.
 
 ### C-beta. Remote Session Access — Cloud Track
 
@@ -129,10 +118,3 @@ ninthwave is feature-complete when:
 
 After feature-completeness, ninthwave enters maintenance: bug fixes, compatibility updates, and community-driven extensions.
 
-## The Self-Improvement Loop
-
-ninthwave uses itself to develop itself. This is not a metaphor — the v0.1.0 release was built this way.
-
-The cycle: decompose a feature into work items, process them via `ninthwave orchestrate` with auto-merge, review the friction log after each batch, decompose actionable friction into new work items, repeat until no actionable friction remains.
-
-The **L-VIS recurring item** in `.ninthwave/work/` is the mechanism. When all other work items complete, L-VIS triggers: review this document against the current state, check the friction log, identify the next most impactful capability, decompose it into work items, add a new L-VIS-(N+1) depending on the terminal items. The cycle continues.
