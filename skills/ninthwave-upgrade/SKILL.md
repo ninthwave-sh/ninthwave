@@ -60,7 +60,8 @@ brew update --quiet
 brew upgrade ninthwave
 ```
 
-After upgrading, re-run setup to update skill symlinks and agent files:
+After upgrading, skill symlinks auto-resolve to the new version (they point through
+Homebrew's prefix symlinks). Re-run init only if this release added new skills or agents:
 
 ```bash
 nw init

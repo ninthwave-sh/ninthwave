@@ -10,34 +10,68 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.artifact }}
+    name: Build ${{ matrix.platform }}
     strategy:
       matrix:
         include:
           - os: macos-latest
             target: bun-darwin-arm64
-            artifact: ninthwave-darwin-arm64
+            platform: darwin-arm64
           - os: macos-latest
             target: bun-darwin-x64
-            artifact: ninthwave-darwin-x64
+            platform: darwin-x64
           - os: ubuntu-latest
             target: bun-linux-x64
-            artifact: ninthwave-linux-x64
+            platform: linux-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify tag matches VERSION
+        run: |
+          VERSION=$(cat VERSION)
+          if [ "v${VERSION}" != "${GITHUB_REF_NAME}" ]; then
+            echo "ERROR: Tag ${GITHUB_REF_NAME} does not match VERSION file (${VERSION})"
+            exit 1
+          fi
 
       - uses: oven-sh/setup-bun@v2
 
       - run: bun install
 
       - name: Build binary
-        run: bun build --compile --target=${{ matrix.target }} core/cli.ts --outfile dist/${{ matrix.artifact }}
+        run: bun build --compile --target=${{ matrix.target }} core/cli.ts --outfile dist/ninthwave
+
+      - name: Package release tarball
+        run: |
+          VERSION=$(cat VERSION)
+          ARTIFACT_NAME="ninthwave-${VERSION}-${{ matrix.platform }}"
+          mkdir -p "staging/${ARTIFACT_NAME}"
+
+          # Binary
+          cp dist/ninthwave "staging/${ARTIFACT_NAME}/ninthwave"
+          chmod +x "staging/${ARTIFACT_NAME}/ninthwave"
+
+          # Resource files
+          cp VERSION "staging/${ARTIFACT_NAME}/"
+          cp -r skills "staging/${ARTIFACT_NAME}/"
+          cp -r agents "staging/${ARTIFACT_NAME}/"
+          cp -r templates "staging/${ARTIFACT_NAME}/"
+
+          # Validate BUNDLE_MARKER exists
+          test -f "staging/${ARTIFACT_NAME}/skills/work/SKILL.md" || {
+            echo "ERROR: BUNDLE_MARKER (skills/work/SKILL.md) missing from staging"
+            exit 1
+          }
+
+          # Create tarball
+          cd staging
+          tar -czf "${ARTIFACT_NAME}.tar.gz" "${ARTIFACT_NAME}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}
+          name: ninthwave-${{ matrix.platform }}
+          path: staging/*.tar.gz
 
   release:
     name: Create Release
@@ -54,3 +88,79 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+
+  update-tap:
+    name: Update Homebrew Tap
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release tarballs and compute SHAs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(cat VERSION)
+          mkdir -p release-assets
+
+          # Download each tarball (retry up to 3 times with 10s delay)
+          for platform in darwin-arm64 darwin-x64 linux-x64; do
+            for attempt in 1 2 3; do
+              if gh release download "v${VERSION}" \
+                --pattern "ninthwave-${VERSION}-${platform}.tar.gz" \
+                --dir ./release-assets/ 2>/dev/null; then
+                echo "Downloaded ${platform} (attempt ${attempt})"
+                break
+              fi
+              echo "Retry ${attempt}/3 for ${platform}..."
+              sleep 10
+            done
+          done
+
+          # Compute SHA256 for each tarball
+          SHA_DARWIN_ARM64=$(shasum -a 256 "release-assets/ninthwave-${VERSION}-darwin-arm64.tar.gz" | cut -d' ' -f1)
+          SHA_DARWIN_X64=$(shasum -a 256 "release-assets/ninthwave-${VERSION}-darwin-x64.tar.gz" | cut -d' ' -f1)
+          SHA_LINUX_X64=$(shasum -a 256 "release-assets/ninthwave-${VERSION}-linux-x64.tar.gz" | cut -d' ' -f1)
+
+          echo "SHA_DARWIN_ARM64=${SHA_DARWIN_ARM64}" >> "$GITHUB_ENV"
+          echo "SHA_DARWIN_X64=${SHA_DARWIN_X64}" >> "$GITHUB_ENV"
+          echo "SHA_LINUX_X64=${SHA_LINUX_X64}" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Generate formula from template
+        run: |
+          cp homebrew/ninthwave.rb Formula-ninthwave.rb
+
+          sed -i \
+            -e "s/__VERSION__/${VERSION}/g" \
+            -e "s/__SHA_DARWIN_ARM64__/${SHA_DARWIN_ARM64}/g" \
+            -e "s/__SHA_DARWIN_X64__/${SHA_DARWIN_X64}/g" \
+            -e "s/__SHA_LINUX_X64__/${SHA_LINUX_X64}/g" \
+            Formula-ninthwave.rb
+
+          # Verify no placeholders remain
+          if grep -q '__' Formula-ninthwave.rb; then
+            echo "ERROR: Unsubstituted placeholders found in formula:"
+            grep '__' Formula-ninthwave.rb
+            exit 1
+          fi
+
+          echo "Generated formula:"
+          cat Formula-ninthwave.rb
+
+      - name: Push to tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/ninthwave-sh/homebrew-tap.git" tap
+          cp Formula-ninthwave.rb tap/Formula/ninthwave.rb
+
+          cd tap
+          git config user.name "ninthwave-bot"
+          git config user.email "bot@ninthwave.sh"
+          git add Formula/ninthwave.rb
+          git commit -m "ninthwave ${VERSION}"
+          git push
+
+          # Verify push succeeded
+          echo "Tap updated to ninthwave ${VERSION}"
