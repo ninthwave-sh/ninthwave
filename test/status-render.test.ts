@@ -183,7 +183,7 @@ describe("blockerIcon", () => {
   });
 
   it("output is always 1 visible character wide", () => {
-    // Icon or space — strip ANSI, should be 1 char
+    // Icon or space -- strip ANSI, should be 1 char
     expect(stripAnsi(blockerIcon(0))).toHaveLength(1);
     expect(stripAnsi(blockerIcon(1))).toHaveLength(1);
     expect(stripAnsi(blockerIcon(3))).toHaveLength(1);
@@ -209,8 +209,8 @@ describe("formatBlockerSubline", () => {
 
   it("truncates with ... when IDs exceed titleWidth", () => {
     // prefix "    └ " is 6 chars, so available = 20 - 6 = 14
-    // "H-CA-1, H-CA-3" is 14 chars — fits exactly at titleWidth 20
-    // "H-CA-1, H-CA-3, H-CA-5" is 23 chars — needs truncation at titleWidth 20
+    // "H-CA-1, H-CA-3" is 14 chars -- fits exactly at titleWidth 20
+    // "H-CA-1, H-CA-3, H-CA-5" is 23 chars -- needs truncation at titleWidth 20
     const result = formatBlockerSubline(["H-CA-1", "H-CA-3", "H-CA-5"], 20, false);
     const text = stripAnsi(result);
     expect(text).toContain("...");
