@@ -4,7 +4,7 @@ description: |
   Decompose a feature spec into work items for batch processing via /work.
   Takes a PRD, phase doc, or verbal description and breaks it into human-reviewable
   PR-sized work items with dependencies mapped into batches.
-  Use when asked to "decompose", "break down this feature", "create todos for",
+  Use when asked to "decompose", "break down this feature", "create work items for",
   or "plan the work items".
 allowed-tools:
   - Bash
@@ -174,7 +174,7 @@ Show totals and ask for approval. Options: looks good, adjust, re-decompose.
 **Goal:** Write each work item as an individual file in `.ninthwave/work/`.
 
 1. Ensure the directory exists: `mkdir -p .ninthwave/work`
-2. Read the format guide: `cat "$(cat .ninthwave/dir)/core/docs/todos-format.md"`
+2. Read the format guide: `cat "$(cat .ninthwave/dir)/core/docs/work-item-format.md"`
 3. Write each work item as a separate file. The filename convention is:
 
    ```

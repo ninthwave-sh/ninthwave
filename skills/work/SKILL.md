@@ -49,7 +49,7 @@ This skill interactively selects work items, then delegates all orchestration to
 
 **Goal:** Help the user choose which work items to work on and how to process them.
 
-> **Rule: Never trust `list --ready` without reconciling first.** Todo files in `.ninthwave/work/` may be stale if PRs were merged outside the orchestrator (manually, by another session, or by GitHub auto-merge). Always reconcile before listing.
+> **Rule: Never trust `list --ready` without reconciling first.** Work item files in `.ninthwave/work/` may be stale if PRs were merged outside the orchestrator (manually, by another session, or by GitHub auto-merge). Always reconcile before listing.
 
 1. Check for uncommitted work files and commit+push if needed (e.g., after `/decompose` wrote new items):
 
@@ -61,7 +61,7 @@ This skill interactively selects work items, then delegates all orchestration to
    fi
    ```
 
-2. Run `ninthwave reconcile` to sync todo state with GitHub (removes files for merged PRs, cleans stale worktrees).
+2. Run `ninthwave reconcile` to sync work item state with GitHub (removes files for merged PRs, cleans stale worktrees).
 3. Run `ninthwave list --depth 99` to get all reachable items across the full dependency chain. Also run `ninthwave list --ready` to identify which items can start immediately (depth 1).
 4. Parse the output and present a summary showing items grouped by depth tier:
    - **Depth 1 (starts now):** items with all deps already done
@@ -223,7 +223,7 @@ Phase 3 runs automatically after Phase 2 completes. It checks whether more work 
 
 #### Step 1: Reconcile and check for remaining ready items
 
-Run `ninthwave reconcile` to sync todo state with GitHub — files for merged items are removed from `.ninthwave/work/`, stale worktrees are cleaned, and changes are committed/pushed. Never trust `list --ready` without reconciling first.
+Run `ninthwave reconcile` to sync work item state with GitHub — files for merged items are removed from `.ninthwave/work/`, stale worktrees are cleaned, and changes are committed/pushed. Never trust `list --ready` without reconciling first.
 
 Then run `ninthwave list --ready` to see if any items were unblocked by the batch that just completed.
 
