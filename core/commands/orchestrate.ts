@@ -705,7 +705,7 @@ export function reconstructState(
       item.retryCount = saved.retryCount;
       if (saved.reviewWorkspaceRef) item.reviewWorkspaceRef = saved.reviewWorkspaceRef;
       if (saved.reviewCompleted) item.reviewCompleted = saved.reviewCompleted;
-      if (saved.reviewRound) item.reviewRound = saved.reviewRound;
+      if (saved.reviewRound != null) item.reviewRound = saved.reviewRound;
       if (saved.lastCommentCheck) item.lastCommentCheck = saved.lastCommentCheck;
       if (saved.rebaseRequested) item.rebaseRequested = saved.rebaseRequested;
       if (saved.ciFailureNotified) item.ciFailureNotified = saved.ciFailureNotified;
@@ -2726,9 +2726,6 @@ export async function cmdOrchestrate(
   const projectConfig = loadConfig(projectRoot);
   const reviewExternalEnabled = reviewExternal || projectConfig["review_external"] === "true";
   const scheduleEnabled = projectConfig["schedule_enabled"] === "true";
-
-  // Analytics directory -- always enabled, writes to .ninthwave/analytics/
-  const analyticsDir = join(projectRoot, ".ninthwave", "analytics");
 
   // State persistence: serialize state each poll cycle so the status pane can display all items.
   // Written in both daemon and interactive mode -- the status pane reads this file to show
