@@ -31,6 +31,7 @@ v0.1.0 shipped March 2026. Twelve grind cycles (0-11) have shipped since then. S
 - Worker health monitoring — deterministic screen-based stall detection
 - Memory-aware WIP limits based on available RAM
 - Structured analytics with cost/token tracking
+- Observability: `nw logs` (view/tail/filter), `nw history <ID>` (state timeline), structured transition events, log rotation
 - Monorepo workspace detection (pnpm/yarn/npm)
 - `nw doctor` health check command
 
@@ -68,14 +69,14 @@ v0.1.0 shipped March 2026. Twelve grind cycles (0-11) have shipped since then. S
 
 Restructuring the CLI mental model: `nw` (no args) adapts to project state, `nw <ID>` launches items with topo-sort, `nw watch` replaces `nw orchestrate`, `nw init` absorbs `nw setup`. Grouped help, rich per-command help pages, and an interactive no-args picker.
 
-### Observability & Debugging
+### Developer Experience & Onboarding
 
-The orchestrator emits structured JSONL logs and maintains state archives, but there's no CLI surface to access them. This iteration adds:
+The pipeline works but onboarding has rough edges. Friction from Copilot trust prompts, AI tool misconfiguration, and lost analytics data add up. This iteration polishes the first-run experience and operational data management:
 
-- **`nw logs`** — view, tail, and filter orchestration logs with `--follow`, `--item`, `--level`, and `--lines` flags.
-- **`nw history <ID>`** — state transition timeline for a specific item, showing time spent in each state.
-- **Transition events** — every state change emitted as a structured log entry, making the log a complete audit trail.
-- **Log rotation** — prevent unbounded log growth with automatic rotation at daemon startup.
+- **Copilot trusted_folders in `nw init`.** Auto-add the project root to `~/.copilot/config.json#trusted_folders` when Copilot is detected. Prevents the interactive trust prompt that blocks every worker launch in worktrees.
+- **AI tool validation in `nw doctor`.** Check that detected AI tools are properly configured (Copilot trust, Claude accessibility) with specific remediation instructions.
+- **Auto-commit analytics at shutdown.** Commit `.ninthwave/analytics/` files when the daemon stops so orchestration data is preserved in git history.
+- **Pre-launch validation.** Check that work item files are committed and pushed before launching workers in worktrees. Auto-commit in daemon mode.
 
 ### C-beta. Remote Session Access — Cloud Track
 
