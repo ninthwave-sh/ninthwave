@@ -36,7 +36,9 @@ v0.1.0 shipped March 2026. Twelve grind cycles (0-11) have shipped since then. S
 
 **0.2.0 scope reduction.** Narrowed focus to the core orchestration pipeline. Removed: external task backends (GitHub Issues, ClickUp, Sentry, PagerDuty), sandboxing (nono, policy proxy), remote dashboard server, webhook notifications, and legacy migration commands. These features were working but added surface area beyond the narrowest wedge. They may return as separate packages or plugins.
 
-**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 25+ issues across 12 grind cycles, driving improvements from poll interval tuning to deterministic worker health monitoring.
+**Crew mode foundation.** Multi-daemon coordination via WebSocket broker with creator-affinity scheduling. Mock broker for local testing, persistent daemon IDs, and reconnect state reconciliation. TUI displays crew status when connected.
+
+**Self-developing.** ninthwave dogfoods itself. The friction log has surfaced 25+ issues across 12+ grind cycles, driving improvements from poll interval tuning to deterministic worker health monitoring.
 
 **Competitive positioning (Q1 2026).** Parallel AI coding exploded: Claude Code Agent Teams (16+ agents), Cursor (8 agents), Superset IDE (10+ agents), dmux, Conductor. All launch parallel sessions. None decompose work, order dependencies, manage CI lifecycle, or orchestrate merges. ninthwave's moat is the integrated pipeline, not session launching.
 
@@ -61,6 +63,19 @@ v0.1.0 shipped March 2026. Twelve grind cycles (0-11) have shipped since then. S
 9. **Reduce entropy, maintain outcomes.** Systems should get simpler over time, not more complex and fragile. Prefer removing code over adding code, fewer moving parts achieving the same results.
 
 ## What's Next
+
+### CLI Redesign (in progress)
+
+Restructuring the CLI mental model: `nw` (no args) adapts to project state, `nw <ID>` launches items with topo-sort, `nw watch` replaces `nw orchestrate`, `nw init` absorbs `nw setup`. Grouped help, rich per-command help pages, and an interactive no-args picker.
+
+### Observability & Debugging
+
+The orchestrator emits structured JSONL logs and maintains state archives, but there's no CLI surface to access them. This iteration adds:
+
+- **`nw logs`** — view, tail, and filter orchestration logs with `--follow`, `--item`, `--level`, and `--lines` flags.
+- **`nw history <ID>`** — state transition timeline for a specific item, showing time spent in each state.
+- **Transition events** — every state change emitted as a structured log entry, making the log a complete audit trail.
+- **Log rotation** — prevent unbounded log growth with automatic rotation at daemon startup.
 
 ### C-beta. Remote Session Access — Cloud Track
 
