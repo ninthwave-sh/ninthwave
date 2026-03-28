@@ -1,6 +1,6 @@
 // start command: launch parallel AI coding sessions for work items.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, copyFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from "fs";
 import { join, basename, dirname } from "path";
 import { tmpdir, freemem } from "os";
 import { parseWorkItems } from "../parser.ts";
@@ -590,26 +590,17 @@ ${itemText}`;
   const promptFile = join(tmpdir(), `nw-prompt-${item.id}-${Date.now()}`);
   writeFileSync(promptFile, systemPrompt);
 
-  try {
-    const workspaceRef = launchAiSession(
-      aiTool,
-      worktreePath,
-      item.id,
-      safeTitle,
-      promptFile,
-      mux,
-      { projectRoot },
-    );
-    if (!workspaceRef) return null;
-    return { worktreePath, workspaceRef };
-  } finally {
-    // Clean up temp prompt file
-    try {
-      unlinkSync(promptFile);
-    } catch {
-      // ignore
-    }
-  }
+  const workspaceRef = launchAiSession(
+    aiTool,
+    worktreePath,
+    item.id,
+    safeTitle,
+    promptFile,
+    mux,
+    { projectRoot },
+  );
+  if (!workspaceRef) return null;
+  return { worktreePath, workspaceRef };
 }
 
 /** Result of launching a review worker session. */
@@ -715,25 +706,17 @@ ${baseBranchLine}${securityLine}`;
   const promptFile = join(tmpdir(), `nw-review-prompt-${itemId}-${Date.now()}`);
   writeFileSync(promptFile, systemPrompt);
 
-  try {
-    const workspaceRef = launchAiSession(
-      aiTool,
-      workDir,
-      itemId,
-      safeTitle,
-      promptFile,
-      mux,
-      { projectRoot: repoRoot, agentName: "ninthwave-reviewer" },
-    );
-    if (!workspaceRef) return null;
-    return { worktreePath, workspaceRef, verdictPath };
-  } finally {
-    try {
-      unlinkSync(promptFile);
-    } catch {
-      // ignore
-    }
-  }
+  const workspaceRef = launchAiSession(
+    aiTool,
+    workDir,
+    itemId,
+    safeTitle,
+    promptFile,
+    mux,
+    { projectRoot: repoRoot, agentName: "ninthwave-reviewer" },
+  );
+  if (!workspaceRef) return null;
+  return { worktreePath, workspaceRef, verdictPath };
 }
 
 /** Result of launching a repair worker session. */
@@ -776,25 +759,17 @@ PROJECT_ROOT: ${repoRoot}`;
   const promptFile = join(tmpdir(), `nw-repair-prompt-${itemId}-${Date.now()}`);
   writeFileSync(promptFile, systemPrompt);
 
-  try {
-    const workspaceRef = launchAiSession(
-      aiTool,
-      worktreePath,
-      itemId,
-      safeTitle,
-      promptFile,
-      mux,
-      { projectRoot: repoRoot, agentName: "ninthwave-repairer" },
-    );
-    if (!workspaceRef) return null;
-    return { workspaceRef };
-  } finally {
-    try {
-      unlinkSync(promptFile);
-    } catch {
-      // ignore
-    }
-  }
+  const workspaceRef = launchAiSession(
+    aiTool,
+    worktreePath,
+    itemId,
+    safeTitle,
+    promptFile,
+    mux,
+    { projectRoot: repoRoot, agentName: "ninthwave-repairer" },
+  );
+  if (!workspaceRef) return null;
+  return { workspaceRef };
 }
 
 /** Result of launching a verifier worker session. */
@@ -867,25 +842,17 @@ REPO_ROOT: ${repoRoot}`;
   const promptFile = join(tmpdir(), `nw-verify-prompt-${itemId}-${Date.now()}`);
   writeFileSync(promptFile, systemPrompt);
 
-  try {
-    const workspaceRef = launchAiSession(
-      aiTool,
-      worktreePath,
-      itemId,
-      safeTitle,
-      promptFile,
-      mux,
-      { projectRoot: repoRoot, agentName: "ninthwave-verifier" },
-    );
-    if (!workspaceRef) return null;
-    return { worktreePath, workspaceRef };
-  } finally {
-    try {
-      unlinkSync(promptFile);
-    } catch {
-      // ignore
-    }
-  }
+  const workspaceRef = launchAiSession(
+    aiTool,
+    worktreePath,
+    itemId,
+    safeTitle,
+    promptFile,
+    mux,
+    { projectRoot: repoRoot, agentName: "ninthwave-verifier" },
+  );
+  if (!workspaceRef) return null;
+  return { worktreePath, workspaceRef };
 }
 
 /**
