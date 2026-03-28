@@ -281,8 +281,9 @@ describe("writeRunMetrics", () => {
 
 describe("orchestrateLoop analytics integration", () => {
   it("writes metrics file on orchestrate_complete", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -340,8 +341,9 @@ describe("orchestrateLoop analytics integration", () => {
   });
 
   it("includes CI retry count in metrics for items with failures", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const io = mockAnalyticsIO();
@@ -361,6 +363,11 @@ describe("orchestrateLoop analytics integration", () => {
         case 4: // CI recovers
           return {
             items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass" }],
+            readyIds: [],
+          };
+        case 5: // Review approves (reviewCompleted was reset by CI failure)
+          return {
+            items: [{ id: "T-1-1", prNumber: 1, prState: "open", ciStatus: "pass", reviewVerdict: { verdict: "approve" as const, summary: "OK", blockerCount: 0, nitCount: 0, preExistingCount: 0 } }],
             readyIds: [],
           };
         default:
@@ -388,8 +395,9 @@ describe("orchestrateLoop analytics integration", () => {
   });
 
   it("skips analytics when analyticsDir is not configured", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -427,8 +435,9 @@ describe("orchestrateLoop analytics integration", () => {
   });
 
   it("handles analytics write failure gracefully", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -483,7 +492,7 @@ describe("orchestrateLoop analytics integration", () => {
 
   it("handles zero-item run gracefully in the loop", async () => {
     // Create orchestrator with no items — all terminal immediately
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
 
     const io = mockAnalyticsIO();
     const logs: LogEntry[] = [];
@@ -965,8 +974,9 @@ describe("commitAnalyticsFiles", () => {
 
 describe("orchestrateLoop analytics auto-commit", () => {
   it("auto-commits analytics files after writing metrics", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -1015,8 +1025,9 @@ describe("orchestrateLoop analytics auto-commit", () => {
   });
 
   it("logs skip when no analytics changes to commit", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -1063,8 +1074,9 @@ describe("orchestrateLoop analytics auto-commit", () => {
   });
 
   it("handles analytics commit failure gracefully", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -1117,8 +1129,9 @@ describe("orchestrateLoop analytics auto-commit", () => {
   });
 
   it("skips auto-commit when analyticsCommit deps not provided", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const logs: LogEntry[] = [];
@@ -1510,8 +1523,9 @@ describe("formatAnalytics with cost data", () => {
 
 describe("orchestrateLoop cost capture", () => {
   it("captures cost data from worker screen before cleanup", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const io = mockAnalyticsIO();
@@ -1572,8 +1586,9 @@ describe("orchestrateLoop cost capture", () => {
   });
 
   it("handles missing cost data gracefully (readScreen returns no cost info)", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const io = mockAnalyticsIO();
@@ -1625,8 +1640,9 @@ describe("orchestrateLoop cost capture", () => {
   });
 
   it("handles readScreen not provided (null cost data)", async () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const io = mockAnalyticsIO();

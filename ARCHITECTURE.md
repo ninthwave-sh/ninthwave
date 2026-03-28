@@ -55,9 +55,7 @@ stateDiagram-v2
     pr_open --> ci_pending : CI started
     ci_pending --> ci_passed : all checks green
     ci_pending --> ci_failed : check failure
-    ci_passed --> review_pending : reviewEnabled=true
-    ci_passed --> merging : reviewEnabled=false
-    review_pending --> reviewing : review worker launched
+    ci_passed --> reviewing : review worker launched
     reviewing --> ci_passed : approved
     reviewing --> ci_failed : CI regression
     ci_failed --> ci_pending : worker notified, retrying

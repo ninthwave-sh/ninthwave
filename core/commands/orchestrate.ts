@@ -1888,7 +1888,6 @@ export interface ParsedWatchArgs {
   isDaemonChild: boolean;
   clickupListId?: string;
   remoteFlag: boolean;
-  reviewEnabled: boolean;
   reviewWipLimit?: number;
   reviewAutoFix?: "off" | "direct" | "pr";
   reviewExternal: boolean;
@@ -1916,7 +1915,6 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   let isDaemonChild = false;
   let clickupListId: string | undefined;
   let remoteFlag = false;
-  let reviewEnabled = true;
   let reviewWipLimit: number | undefined;
   let reviewAutoFix: "off" | "direct" | "pr" | undefined;
   let reviewExternal = false;
@@ -1975,14 +1973,6 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
       case "--clickup-list":
         clickupListId = args[i + 1];
         i += 2;
-        break;
-      case "--review":
-        reviewEnabled = true;
-        i += 1;
-        break;
-      case "--no-review":
-        reviewEnabled = false;
-        i += 1;
         break;
       case "--review-wip-limit":
         reviewWipLimit = parseInt(args[i + 1] ?? "2", 10);
@@ -2068,7 +2058,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   return {
     itemIds, mergeStrategy, wipLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, clickupListId, remoteFlag,
-    reviewEnabled, reviewWipLimit, reviewAutoFix, reviewExternal,
+    reviewWipLimit, reviewAutoFix, reviewExternal,
     verifyMain, watchMode, noWatch, watchIntervalSecs,
     jsonFlag, skipPreflight, crewCode, crewCreate, crewPort, crewUrl, crewName,
     bypassEnabled,
@@ -2100,7 +2090,7 @@ export async function cmdOrchestrate(
   const {
     wipLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, clickupListId, remoteFlag,
-    reviewEnabled, reviewWipLimit, reviewAutoFix, reviewExternal,
+    reviewWipLimit, reviewAutoFix, reviewExternal,
     verifyMain, noWatch, watchIntervalSecs,
     jsonFlag, skipPreflight, crewCreate, crewPort, crewName,
     bypassEnabled,
@@ -2259,7 +2249,6 @@ export async function cmdOrchestrate(
     wipLimit,
     mergeStrategy,
     bypassEnabled,
-    reviewEnabled,
     verifyMain,
     ...(reviewWipLimit !== undefined ? { reviewWipLimit } : {}),
     ...(reviewAutoFix !== undefined ? { reviewAutoFix } : {}),

@@ -205,7 +205,7 @@ describe("detectGhOrg", () => {
 
 describe("orchestrator bootstrap", () => {
   it("emits bootstrap action for cross-repo item with bootstrap: true and no resolvedRepoRoot", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-BST-1", {
       repoAlias: "new-repo",
       bootstrap: true,
@@ -228,7 +228,7 @@ describe("orchestrator bootstrap", () => {
   });
 
   it("emits launch action for regular items (no bootstrap)", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-REG-1");
 
     orch.addItem(wi);
@@ -247,7 +247,7 @@ describe("orchestrator bootstrap", () => {
   });
 
   it("emits launch (not bootstrap) when bootstrap: true but resolvedRepoRoot is already set", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-BST-2", {
       repoAlias: "existing-repo",
       bootstrap: true,
@@ -267,7 +267,7 @@ describe("orchestrator bootstrap", () => {
   });
 
   it("emits launch (not bootstrap) when bootstrap: true but alias is hub-local", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-BST-3", {
       repoAlias: "",
       bootstrap: true,
@@ -284,7 +284,7 @@ describe("orchestrator bootstrap", () => {
   });
 
   it("bootstrapping state counts toward WIP limit", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 1 });
+    const orch = new Orchestrator({ wipLimit: 1 });
 
     // Add bootstrap item
     const wi1 = makeWorkItem("H-BST-4", { repoAlias: "new-repo", bootstrap: true });
@@ -310,7 +310,7 @@ describe("orchestrator bootstrap", () => {
 
 describe("executeBootstrap", () => {
   it("transitions to launching on successful bootstrap (cloned)", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-BST-5", { repoAlias: "new-repo", bootstrap: true });
     orch.addItem(wi);
 
@@ -330,7 +330,7 @@ describe("executeBootstrap", () => {
   });
 
   it("transitions to launching on successful bootstrap (created)", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-BST-6", { repoAlias: "brand-new-repo", bootstrap: true });
     orch.addItem(wi);
 
@@ -350,7 +350,7 @@ describe("executeBootstrap", () => {
   });
 
   it("transitions to stuck on bootstrap failure", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-BST-7", { repoAlias: "new-repo", bootstrap: true });
     orch.addItem(wi);
 
@@ -371,7 +371,7 @@ describe("executeBootstrap", () => {
   });
 
   it("transitions to stuck when bootstrapRepo dep is not provided", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-BST-8", { repoAlias: "new-repo", bootstrap: true });
     orch.addItem(wi);
 
@@ -389,7 +389,7 @@ describe("executeBootstrap", () => {
   });
 
   it("bootstrap success with status exists does not set resolvedRepoRoot", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-BST-9", { repoAlias: "existing", bootstrap: true });
     orch.addItem(wi);
 
@@ -414,7 +414,7 @@ describe("executeBootstrap", () => {
 
 describe("existing cross-repo behavior unchanged", () => {
   it("non-bootstrap cross-repo item goes to launch (not bootstrap)", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-XR-1", { repoAlias: "target-repo", bootstrap: false });
     orch.addItem(wi);
 
@@ -430,7 +430,7 @@ describe("existing cross-repo behavior unchanged", () => {
   });
 
   it("items depending on a bootstrap item wait in queued", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 3 });
+    const orch = new Orchestrator({ wipLimit: 3 });
 
     // Bootstrap item
     const bsWi = makeWorkItem("H-BST-10", { repoAlias: "new-repo", bootstrap: true });
@@ -475,7 +475,7 @@ describe("bootstrapping status display", () => {
 
 describe("bootstrapping state in transitionItem", () => {
   it("bootstrapping state emits no actions from transitionItem (handled by executeBootstrap)", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
     const wi = makeWorkItem("H-BST-11", { repoAlias: "new-repo", bootstrap: true });
     orch.addItem(wi);
 

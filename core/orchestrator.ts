@@ -133,8 +133,6 @@ export interface OrchestratorConfig {
   activityTimeoutMs: number;
   /** Enable stacked branch launches. When true, items with a single in-flight dep in a stackable state can launch early. Default: true. */
   enableStacking: boolean;
-  /** Enable review worker after CI passes. When true, items go through a reviewing state before merge. Default: false. */
-  reviewEnabled: boolean;
   /** Max concurrent review workers. Tracked independently from main wipLimit. Default: 2. */
   reviewWipLimit: number;
   /** How the review worker handles requested fixes: off (report only), direct (push fixes), pr (open fix PR). Default: "off". */
@@ -386,7 +384,6 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   launchTimeoutMs: 30 * 60 * 1000,   // 30 minutes
   activityTimeoutMs: 60 * 60 * 1000, // 60 minutes
   enableStacking: true,
-  reviewEnabled: true,
   reviewWipLimit: 2,
   reviewAutoFix: "off",
   maxMergeRetries: 3,
@@ -660,8 +657,10 @@ export class Orchestrator {
       : 0;
     // Clear rebase flag on any state change — the worker pushed or CI restarted
     item.rebaseRequested = false;
-    // Reset reviewCompleted on CI regression — requires fresh review after fixes
-    if (state === "ci-pending" || state === "ci-failed") {
+    // Reset reviewCompleted on CI failure — requires fresh review after fixes.
+    // ci-pending is not included: the initial ci-pending has reviewCompleted=false by default,
+    // and regressions always go through ci-failed first (which resets it).
+    if (state === "ci-failed") {
       item.reviewCompleted = false;
     }
     // Clear CI failure notification flag on recovery so re-failures can be notified
@@ -1371,9 +1370,9 @@ export class Orchestrator {
   ): Action[] {
     const actions: Action[] = [];
 
-    // Review gate: when review is enabled and item hasn't been reviewed yet,
-    // transition to reviewing state and launch a review worker instead of merging.
-    if (this.config.reviewEnabled && !item.reviewCompleted) {
+    // Review gate: item must pass AI review before merge.
+    // Transition to reviewing state and launch a review worker.
+    if (!item.reviewCompleted) {
       if (item.state !== "reviewing") {
         if (this.reviewWipSlots > 0) {
           this.transition(item, "reviewing", eventTime);
@@ -1405,7 +1404,7 @@ export class Orchestrator {
           }
           break;
         }
-        // Merge as soon as CI passes (and review completes, if review is enabled)
+        // Merge as soon as CI passes and review completes
         this.transition(item, "merging", eventTime);
         actions.push({
           type: "merge",

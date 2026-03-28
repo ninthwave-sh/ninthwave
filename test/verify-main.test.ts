@@ -53,8 +53,9 @@ const NOW = new Date("2026-01-15T12:00:00Z");
 
 describe("merged → verifying transition (verifyMain=true)", () => {
   it("transitions merged → verifying when verifyMain=true and mergeCommitSha is set", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merged");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
 
@@ -64,8 +65,9 @@ describe("merged → verifying transition (verifyMain=true)", () => {
   });
 
   it("transitions merged → done when verifyMain=true but no mergeCommitSha", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merged");
     // No mergeCommitSha set — graceful fallback to done
 
@@ -79,8 +81,9 @@ describe("merged → verifying transition (verifyMain=true)", () => {
 
 describe("merged → done transition (verifyMain=false)", () => {
   it("transitions merged → done when verifyMain=false", () => {
-    const orch = new Orchestrator({ verifyMain: false, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: false });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merged");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
 
@@ -94,8 +97,9 @@ describe("merged → done transition (verifyMain=false)", () => {
 
 describe("verifying → done when CI passes", () => {
   it("transitions verifying → done when mergeCommitCIStatus is pass", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verifying");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
 
@@ -109,8 +113,9 @@ describe("verifying → done when CI passes", () => {
   });
 
   it("stays in verifying when mergeCommitCIStatus is pending", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verifying");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
 
@@ -127,8 +132,9 @@ describe("verifying → done when CI passes", () => {
 
 describe("verifying → verify-failed when CI fails", () => {
   it("transitions verifying → verify-failed when mergeCommitCIStatus is fail", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verifying");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
 
@@ -147,8 +153,9 @@ describe("verifying → verify-failed when CI fails", () => {
 
 describe("verify-failed → stuck after maxVerifyRetries exceeded", () => {
   it("transitions verify-failed → stuck when verifyFailCount >= maxVerifyRetries", () => {
-    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 2, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 2 });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verify-failed");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
     orch.getItem("H-1-1")!.verifyFailCount = 2;
@@ -163,8 +170,9 @@ describe("verify-failed → stuck after maxVerifyRetries exceeded", () => {
   });
 
   it("transitions verify-failed → repairing-main and emits launch-verifier when retries remain", () => {
-    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 2, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 2 });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verify-failed");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
     orch.getItem("H-1-1")!.verifyFailCount = 1;
@@ -179,8 +187,9 @@ describe("verify-failed → stuck after maxVerifyRetries exceeded", () => {
   });
 
   it("verify-failed → done when CI recovers (flaky test)", () => {
-    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 2, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 2 });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verify-failed");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
     orch.getItem("H-1-1")!.verifyFailCount = 1;
@@ -201,8 +210,9 @@ describe("checkCommitCI", () => {
   // we test it indirectly through buildSnapshot with injected checkCommitCI.
 
   it("buildSnapshot polls merge commit CI for items in verifying state", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verifying");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
 
@@ -225,8 +235,9 @@ describe("checkCommitCI", () => {
   });
 
   it("buildSnapshot polls merge commit CI for items in verify-failed state", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verify-failed");
     orch.getItem("H-1-1")!.mergeCommitSha = "def456";
     orch.getItem("H-1-1")!.verifyFailCount = 1;
@@ -250,8 +261,9 @@ describe("checkCommitCI", () => {
   });
 
   it("buildSnapshot skips merge commit CI when checkCommitCI not provided", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verifying");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
 
@@ -293,8 +305,9 @@ describe("--no-verify-main flag", () => {
 
 describe("merge commit SHA retrieval in executeMerge", () => {
   it("captures mergeCommitSha on successful merge when verifyMain=true", () => {
-    const orch = new Orchestrator({ verifyMain: true, mergeStrategy: "auto", reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merging");
     orch.getItem("H-1-1")!.prNumber = 42;
 
@@ -332,8 +345,9 @@ describe("merge commit SHA retrieval in executeMerge", () => {
   });
 
   it("falls back to done when getMergeCommitSha returns null", () => {
-    const orch = new Orchestrator({ verifyMain: true, mergeStrategy: "auto", reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merging");
     orch.getItem("H-1-1")!.prNumber = 42;
 
@@ -372,8 +386,9 @@ describe("merge commit SHA retrieval in executeMerge", () => {
   });
 
   it("falls back to done when getMergeCommitSha throws", () => {
-    const orch = new Orchestrator({ verifyMain: true, mergeStrategy: "auto", reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merging");
     orch.getItem("H-1-1")!.prNumber = 42;
 
@@ -415,8 +430,9 @@ describe("merge commit SHA retrieval in executeMerge", () => {
 
 describe("checkCommitCI ignores ninthwave/review check", () => {
   it("buildSnapshot correctly passes sha to checkCommitCI", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verifying");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha123";
 
@@ -459,9 +475,11 @@ describe("statusDisplayForState for verification states", () => {
 
 describe("dependency resolution with verification", () => {
   it("deps in verifying state do not unblock dependents in readyIds", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("H-1-2", ["H-1-1"]));
+    orch.getItem("H-1-2")!.reviewCompleted = true;
     orch.setState("H-1-1", "verifying");
     orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
 
@@ -478,8 +496,9 @@ describe("dependency resolution with verification", () => {
   });
 
   it("deps in done state unblock dependents in readyIds", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("H-1-2", ["H-1-1"]));
     orch.setState("H-1-1", "done");
 
@@ -494,8 +513,9 @@ describe("dependency resolution with verification", () => {
   });
 
   it("deps in merged state still satisfy readyIds (transient state)", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("H-1-2", ["H-1-1"]));
     orch.setState("H-1-1", "merged");
 
@@ -515,8 +535,9 @@ describe("dependency resolution with verification", () => {
 
 describe("end-to-end: merge → verify → done flow", () => {
   it("complete flow: merging → merged (first cycle) → done (second cycle, no SHA)", () => {
-    const orch = new Orchestrator({ verifyMain: true, mergeStrategy: "auto", reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merging");
     orch.getItem("H-1-1")!.prNumber = 42;
 
@@ -533,8 +554,9 @@ describe("end-to-end: merge → verify → done flow", () => {
   });
 
   it("complete flow with mergeCommitSha: merged → verifying → done", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merged");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-abc";
 
@@ -551,8 +573,9 @@ describe("end-to-end: merge → verify → done flow", () => {
   });
 
   it("complete flow with CI failure: merged → verifying → verify-failed → stuck (max retries)", () => {
-    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 1, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 1 });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merged");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-abc";
 
@@ -577,8 +600,9 @@ describe("end-to-end: merge → verify → done flow", () => {
   });
 
   it("complete flow with verifier: merged → verifying → verify-failed → repairing-main → done", () => {
-    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 3, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 3 });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "merged");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-abc";
 
@@ -614,8 +638,9 @@ describe("end-to-end: merge → verify → done flow", () => {
 
 describe("verify-failed → repairing-main transition triggers launch-verifier", () => {
   it("emits launch-verifier action when transitioning to repairing-main", () => {
-    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 3, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 3 });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verify-failed");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-merge";
     orch.getItem("H-1-1")!.verifyFailCount = 1;
@@ -630,8 +655,9 @@ describe("verify-failed → repairing-main transition triggers launch-verifier",
   });
 
   it("does not emit launch-verifier when no mergeCommitSha", () => {
-    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 3, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true, maxVerifyRetries: 3 });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "verify-failed");
     // No mergeCommitSha set
     orch.getItem("H-1-1")!.verifyFailCount = 1;
@@ -651,8 +677,9 @@ describe("verify-failed → repairing-main transition triggers launch-verifier",
 
 describe("repairing-main state handling", () => {
   it("repairing-main → done when merge commit CI passes", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "repairing-main");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-merge";
     orch.getItem("H-1-1")!.verifyWorkspaceRef = "workspace:5";
@@ -667,8 +694,9 @@ describe("repairing-main state handling", () => {
   });
 
   it("repairing-main → stuck when verifier worker dies (3 consecutive polls)", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "repairing-main");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-merge";
     orch.getItem("H-1-1")!.verifyWorkspaceRef = "workspace:5";
@@ -698,8 +726,9 @@ describe("repairing-main state handling", () => {
   });
 
   it("repairing-main stays when CI still failing and worker alive", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "repairing-main");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-merge";
     orch.getItem("H-1-1")!.verifyWorkspaceRef = "workspace:5";
@@ -713,8 +742,9 @@ describe("repairing-main state handling", () => {
   });
 
   it("repairing-main → done without clean-verifier when no verifyWorkspaceRef", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "repairing-main");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-merge";
     // No verifyWorkspaceRef
@@ -751,8 +781,9 @@ describe("executeLaunchVerifier action", () => {
   };
 
   it("sets verifyWorkspaceRef on successful launch", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "repairing-main");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-merge";
 
@@ -775,8 +806,9 @@ describe("executeLaunchVerifier action", () => {
   });
 
   it("fails when launchVerifier dep is not provided", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "repairing-main");
     orch.getItem("H-1-1")!.mergeCommitSha = "sha-merge";
 
@@ -791,8 +823,9 @@ describe("executeLaunchVerifier action", () => {
   });
 
   it("fails when no mergeCommitSha", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "repairing-main");
     // No mergeCommitSha
 
@@ -834,8 +867,9 @@ describe("executeCleanVerifier action", () => {
   };
 
   it("cleans up verifier workspace and clears verifyWorkspaceRef", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "done");
     orch.getItem("H-1-1")!.verifyWorkspaceRef = "workspace:7";
 
@@ -860,8 +894,9 @@ describe("executeCleanVerifier action", () => {
   });
 
   it("succeeds as no-op when cleanVerifier not provided", () => {
-    const orch = new Orchestrator({ verifyMain: true, reviewEnabled: false });
+    const orch = new Orchestrator({ verifyMain: true });
     orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.setState("H-1-1", "done");
     orch.getItem("H-1-1")!.verifyWorkspaceRef = "workspace:7";
 

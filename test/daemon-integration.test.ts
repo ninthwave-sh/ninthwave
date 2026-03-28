@@ -114,7 +114,7 @@ describe("Daemon lifecycle: startup and shutdown", () => {
 
     // Simulate startup: load work items and create orchestrator
     const items = [makeWorkItem("A-1-1"), makeWorkItem("A-1-2"), makeWorkItem("A-1-3", ["A-1-1"])];
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4 });
+    const orch = new Orchestrator({ wipLimit: 4 });
 
     for (const wi of items) {
       orch.addItem(wi);
@@ -152,9 +152,11 @@ describe("Daemon lifecycle: startup and shutdown", () => {
   });
 
   it("items with no deps start as ready; items with deps stay queued", () => {
-    const orch = new Orchestrator({ reviewEnabled: false });
+    const orch = new Orchestrator();
     orch.addItem(makeWorkItem("B-1-1"));
+    orch.getItem("B-1-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("B-1-2", ["B-1-1"]));
+    orch.getItem("B-1-2")!.reviewCompleted = true;
 
     // First poll: B-1-1 has no deps so it's in readyIds, B-1-2 depends on B-1-1
     const actions = orch.processTransitions(emptySnapshot(["B-1-1"]));
@@ -176,13 +178,14 @@ describe("Daemon lifecycle: single-item flow", () => {
   const NOW = new Date("2026-03-25T10:00:00.000Z");
 
   beforeEach(() => {
-    orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, mergeStrategy: "auto" });
+    orch = new Orchestrator({ wipLimit: 4, mergeStrategy: "auto" });
     deps = mockDeps();
   });
 
   it("completes full lifecycle: queued → ready → launching → implementing → pr-open → ci-pending → ci-passed → merging → merged → done", () => {
     // Phase 1: Add item and promote to ready
     orch.addItem(makeWorkItem("LIFE-1"));
+    orch.getItem("LIFE-1")!.reviewCompleted = true;
     expect(orch.getItem("LIFE-1")!.state).toBe("queued");
 
     // Phase 2: Process with readyIds to promote and launch
@@ -247,6 +250,7 @@ describe("Daemon lifecycle: single-item flow", () => {
   it("transitions through ci-failed and recovery", () => {
     // Setup: item in pr-open state with PR
     orch.addItem(makeWorkItem("CIFAIL-1"));
+    orch.getItem("CIFAIL-1")!.reviewCompleted = true;
     orch.setState("CIFAIL-1", "pr-open");
     orch.getItem("CIFAIL-1")!.prNumber = 50;
     orch.getItem("CIFAIL-1")!.workspaceRef = "workspace:2";
@@ -265,6 +269,7 @@ describe("Daemon lifecycle: single-item flow", () => {
       snapshotWith([{ id: "CIFAIL-1", ciStatus: "pending", prState: "open" }]),
     );
     expect(orch.getItem("CIFAIL-1")!.state).toBe("ci-pending");
+    orch.getItem("CIFAIL-1")!.reviewCompleted = true; // Re-set after CI failure reset
 
     // CI passes → merging
     actions = orch.processTransitions(
@@ -279,8 +284,9 @@ describe("Daemon lifecycle: single-item flow", () => {
 
 describe("Daemon lifecycle: stuck item and retry logic", () => {
   it("worker crash triggers retry, second crash marks stuck", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, maxRetries: 1 });
+    const orch = new Orchestrator({ wipLimit: 4, maxRetries: 1 });
     orch.addItem(makeWorkItem("STUCK-1"));
+    orch.getItem("STUCK-1")!.reviewCompleted = true;
 
     // Launch the item
     orch.processTransitions(emptySnapshot(["STUCK-1"]));
@@ -308,8 +314,9 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
   });
 
   it("worker crash during implementing without PR triggers retry", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, maxRetries: 1 });
+    const orch = new Orchestrator({ wipLimit: 4, maxRetries: 1 });
     orch.addItem(makeWorkItem("STUCK-2"));
+    orch.getItem("STUCK-2")!.reviewCompleted = true;
 
     // Get to implementing state
     orch.processTransitions(emptySnapshot(["STUCK-2"]));
@@ -350,8 +357,9 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
 
   it("CI fail exceeding maxCiRetries marks stuck", () => {
     // maxCiRetries: 1 means item can fail once and recover, but second failure → stuck
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, maxCiRetries: 1 });
+    const orch = new Orchestrator({ wipLimit: 4, maxCiRetries: 1 });
     orch.addItem(makeWorkItem("STUCK-3"));
+    orch.getItem("STUCK-3")!.reviewCompleted = true;
     orch.setState("STUCK-3", "pr-open");
     orch.getItem("STUCK-3")!.prNumber = 77;
     orch.getItem("STUCK-3")!.workspaceRef = "workspace:3";
@@ -386,7 +394,7 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
   });
 
   it("executeWorkspaceClose captures screen output for stuck items", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, maxRetries: 0 });
+    const orch = new Orchestrator({ maxRetries: 0 });
     const warnFn = vi.fn();
     const deps = mockDeps({
       readScreen: vi.fn(() => "Error: OOM killed"),
@@ -394,6 +402,7 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
     });
 
     orch.addItem(makeWorkItem("STUCK-4"));
+    orch.getItem("STUCK-4")!.reviewCompleted = true;
     orch.setState("STUCK-4", "stuck");
     orch.getItem("STUCK-4")!.workspaceRef = "workspace:4";
 
@@ -414,11 +423,13 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
 
 describe("Daemon lifecycle: stacking (dependent items)", () => {
   it("dependent item stays queued until dependency merges, then launches", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 4, mergeStrategy: "auto" });
     const deps = mockDeps();
 
     orch.addItem(makeWorkItem("DEP-1"));
+    orch.getItem("DEP-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("DEP-2", ["DEP-1"]));
+    orch.getItem("DEP-2")!.reviewCompleted = true;
 
     // Phase 1: Launch DEP-1, DEP-2 stays queued
     let actions = orch.processTransitions(emptySnapshot(["DEP-1"]));
@@ -462,9 +473,11 @@ describe("Daemon lifecycle: stacking (dependent items)", () => {
   });
 
   it("dependent item stays queued when dep is in non-stackable state", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, enableStacking: true });
+    const orch = new Orchestrator({ wipLimit: 4, enableStacking: true });
     orch.addItem(makeWorkItem("NS-1"));
+    orch.getItem("NS-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("NS-2", ["NS-1"]));
+    orch.getItem("NS-2")!.reviewCompleted = true;
 
     // Launch NS-1
     orch.processTransitions(emptySnapshot(["NS-1"]));
@@ -479,9 +492,11 @@ describe("Daemon lifecycle: stacking (dependent items)", () => {
   });
 
   it("stacking disabled keeps dependent queued even when dep is in stackable state", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, enableStacking: false });
+    const orch = new Orchestrator({ wipLimit: 4, enableStacking: false });
     orch.addItem(makeWorkItem("NOSTACK-1"));
+    orch.getItem("NOSTACK-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("NOSTACK-2", ["NOSTACK-1"]));
+    orch.getItem("NOSTACK-2")!.reviewCompleted = true;
 
     // Launch and progress NOSTACK-1 to ci-passed
     orch.processTransitions(emptySnapshot(["NOSTACK-1"]));
@@ -489,6 +504,7 @@ describe("Daemon lifecycle: stacking (dependent items)", () => {
       snapshotWith([{ id: "NOSTACK-1", workerAlive: true }]),
     );
     orch.setState("NOSTACK-1", "ci-passed");
+    orch.getItem("NOSTACK-1")!.reviewCompleted = true;
     orch.getItem("NOSTACK-1")!.prNumber = 20;
 
     // Poll: NOSTACK-2 should still be queued since stacking is disabled
@@ -501,10 +517,12 @@ describe("Daemon lifecycle: stacking (dependent items)", () => {
   });
 
   it("stuck dep pauses stacked dependent workers", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, maxRetries: 0, enableStacking: true });
+    const orch = new Orchestrator({ wipLimit: 4, maxRetries: 0, enableStacking: true });
 
     orch.addItem(makeWorkItem("DEPSTK-1"));
+    orch.getItem("DEPSTK-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("DEPSTK-2", ["DEPSTK-1"]));
+    orch.getItem("DEPSTK-2")!.reviewCompleted = true;
 
     // Get DEPSTK-1 to ci-passed so DEPSTK-2 can stack
     orch.processTransitions(emptySnapshot(["DEPSTK-1"]));
@@ -512,6 +530,7 @@ describe("Daemon lifecycle: stacking (dependent items)", () => {
       snapshotWith([{ id: "DEPSTK-1", workerAlive: true }]),
     );
     orch.setState("DEPSTK-1", "ci-passed");
+    orch.getItem("DEPSTK-1")!.reviewCompleted = true;
     orch.getItem("DEPSTK-1")!.prNumber = 30;
 
     // Stack-launch DEPSTK-2
@@ -563,7 +582,7 @@ describe("Daemon lifecycle: stacking (dependent items)", () => {
 
 describe("Daemon lifecycle: stacking with stuck dependency notification", () => {
   it("notifies stacked dependent when dependency transitions to stuck", () => {
-    const orch = new Orchestrator({ reviewEnabled: false,
+    const orch = new Orchestrator({
       wipLimit: 4,
       maxRetries: 0,
       enableStacking: true,
@@ -571,7 +590,9 @@ describe("Daemon lifecycle: stacking with stuck dependency notification", () => 
     });
 
     orch.addItem(makeWorkItem("STKN-1"));
+    orch.getItem("STKN-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("STKN-2", ["STKN-1"]));
+    orch.getItem("STKN-2")!.reviewCompleted = true;
 
     // Progress STKN-1 to ci-passed so STKN-2 can stack
     orch.processTransitions(emptySnapshot(["STKN-1"]));
@@ -582,6 +603,7 @@ describe("Daemon lifecycle: stacking with stuck dependency notification", () => 
     orch.getItem("STKN-1")!.prNumber = 40;
     orch.getItem("STKN-1")!.workspaceRef = "workspace:1";
     orch.setState("STKN-1", "ci-failed");
+    orch.getItem("STKN-1")!.reviewCompleted = true;
     orch.getItem("STKN-1")!.ciFailCount = 1; // over maxCiRetries: 0
 
     // Set up STKN-2 as stacked on STKN-1
@@ -612,10 +634,11 @@ describe("Daemon lifecycle: stacking with stuck dependency notification", () => 
 
 describe("Daemon lifecycle: cleanup after merge", () => {
   it("merge triggers clean action, cleanup runs workspace and worktree", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 4, mergeStrategy: "auto" });
     const deps = mockDeps();
 
     orch.addItem(makeWorkItem("CLN-1"));
+    orch.getItem("CLN-1")!.reviewCompleted = true;
     orch.setState("CLN-1", "pr-open");
     orch.getItem("CLN-1")!.prNumber = 60;
     orch.getItem("CLN-1")!.workspaceRef = "workspace:5";
@@ -647,7 +670,7 @@ describe("Daemon lifecycle: cleanup after merge", () => {
   });
 
   it("cleanup succeeds when remote branch is already deleted", () => {
-    const orch = new Orchestrator({ reviewEnabled: false });
+    const orch = new Orchestrator();
     // cleanSingleWorktree succeeds even if remote branch is gone
     // This tests that no warning is emitted when the branch doesn't exist
     const warnFn = vi.fn();
@@ -657,6 +680,7 @@ describe("Daemon lifecycle: cleanup after merge", () => {
     });
 
     orch.addItem(makeWorkItem("CLN-2"));
+    orch.getItem("CLN-2")!.reviewCompleted = true;
     orch.setState("CLN-2", "done");
     orch.getItem("CLN-2")!.workspaceRef = "workspace:6";
 
@@ -674,13 +698,14 @@ describe("Daemon lifecycle: cleanup after merge", () => {
   });
 
   it("cleanup handles partial failure gracefully", () => {
-    const orch = new Orchestrator({ reviewEnabled: false });
+    const orch = new Orchestrator();
     const deps = mockDeps({
       closeWorkspace: vi.fn(() => false), // workspace close fails
       cleanSingleWorktree: vi.fn(() => true), // worktree cleanup succeeds
     });
 
     orch.addItem(makeWorkItem("CLN-3"));
+    orch.getItem("CLN-3")!.reviewCompleted = true;
     orch.setState("CLN-3", "done");
     orch.getItem("CLN-3")!.workspaceRef = "workspace:7";
 
@@ -695,13 +720,14 @@ describe("Daemon lifecycle: cleanup after merge", () => {
   });
 
   it("cleanup fails when both workspace close and worktree cleanup fail", () => {
-    const orch = new Orchestrator({ reviewEnabled: false });
+    const orch = new Orchestrator();
     const deps = mockDeps({
       closeWorkspace: vi.fn(() => false),
       cleanSingleWorktree: vi.fn(() => false),
     });
 
     orch.addItem(makeWorkItem("CLN-4"));
+    orch.getItem("CLN-4")!.reviewCompleted = true;
     orch.setState("CLN-4", "done");
     orch.getItem("CLN-4")!.workspaceRef = "workspace:8";
 
@@ -720,13 +746,16 @@ describe("Daemon lifecycle: cleanup after merge", () => {
 
 describe("Daemon lifecycle: multi-item orchestration", () => {
   it("processes three independent items through full lifecycle concurrently", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 3, mergeStrategy: "auto" });
+    const orch = new Orchestrator({ wipLimit: 3, mergeStrategy: "auto" });
     const deps = mockDeps();
 
     // Add 3 independent items
     orch.addItem(makeWorkItem("M-1"));
+    orch.getItem("M-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("M-2"));
+    orch.getItem("M-2")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("M-3"));
+    orch.getItem("M-3")!.reviewCompleted = true;
 
     // All three promoted and launched
     let actions = orch.processTransitions(emptySnapshot(["M-1", "M-2", "M-3"]));
@@ -798,12 +827,16 @@ describe("Daemon lifecycle: multi-item orchestration", () => {
   });
 
   it("WIP limit prevents launching more items than allowed", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2 });
+    const orch = new Orchestrator({ wipLimit: 2 });
 
     orch.addItem(makeWorkItem("W-1"));
+    orch.getItem("W-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("W-2"));
+    orch.getItem("W-2")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("W-3"));
+    orch.getItem("W-3")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("W-4"));
+    orch.getItem("W-4")!.reviewCompleted = true;
 
     const actions = orch.processTransitions(
       emptySnapshot(["W-1", "W-2", "W-3", "W-4"]),
@@ -823,11 +856,13 @@ describe("Daemon lifecycle: multi-item orchestration", () => {
 describe("Daemon lifecycle: state persistence", () => {
   it("serializes and restores orchestrator state across restart", () => {
     const io = createMockIO();
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4 });
+    const orch = new Orchestrator({ wipLimit: 4 });
 
     // Load and progress items
     orch.addItem(makeWorkItem("P-1"));
+    orch.getItem("P-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("P-2"));
+    orch.getItem("P-2")!.reviewCompleted = true;
     orch.processTransitions(emptySnapshot(["P-1", "P-2"]));
     orch.processTransitions(
       snapshotWith([
@@ -895,12 +930,13 @@ describe("Daemon lifecycle: state persistence", () => {
 
 describe("Daemon lifecycle: launch failure handling", () => {
   it("launch returning null with retries schedules retry", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, maxRetries: 2 });
+    const orch = new Orchestrator({ wipLimit: 4, maxRetries: 2 });
     const deps = mockDeps({
       launchSingleItem: vi.fn(() => null),
     });
 
     orch.addItem(makeWorkItem("LF-1"));
+    orch.getItem("LF-1")!.reviewCompleted = true;
     orch.setState("LF-1", "launching");
 
     const result = orch.executeAction(
@@ -916,12 +952,13 @@ describe("Daemon lifecycle: launch failure handling", () => {
   });
 
   it("launch returning null with no retries marks stuck", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, maxRetries: 0 });
+    const orch = new Orchestrator({ wipLimit: 4, maxRetries: 0 });
     const deps = mockDeps({
       launchSingleItem: vi.fn(() => null),
     });
 
     orch.addItem(makeWorkItem("LF-2"));
+    orch.getItem("LF-2")!.reviewCompleted = true;
     orch.setState("LF-2", "launching");
 
     const result = orch.executeAction(
@@ -936,12 +973,13 @@ describe("Daemon lifecycle: launch failure handling", () => {
   });
 
   it("launch throwing exception handles gracefully", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 4, maxRetries: 0 });
+    const orch = new Orchestrator({ wipLimit: 4, maxRetries: 0 });
     const deps = mockDeps({
       launchSingleItem: vi.fn(() => { throw new Error("repo not found"); }),
     });
 
     orch.addItem(makeWorkItem("LF-3"));
+    orch.getItem("LF-3")!.reviewCompleted = true;
     orch.setState("LF-3", "launching");
 
     const result = orch.executeAction(

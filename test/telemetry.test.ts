@@ -58,8 +58,9 @@ function stripAnsi(s: string): string {
 
 describe("telemetry: startedAt / endedAt on transitions", () => {
   it("sets startedAt when item transitions to implementing", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto", maxCiRetries: 2, maxRetries: 1 });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto", maxCiRetries: 2, maxRetries: 1 });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     // Transition to ready, then launch
     const snapshot: PollSnapshot = { items: [], readyIds: ["T-1-1"] };
@@ -83,8 +84,9 @@ describe("telemetry: startedAt / endedAt on transitions", () => {
   });
 
   it("sets endedAt when item transitions to done", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto", maxCiRetries: 2, maxRetries: 1 });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto", maxCiRetries: 2, maxRetries: 1 });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     // Fast-track to implementing
     const snap1: PollSnapshot = { items: [], readyIds: ["T-1-1"] };
@@ -119,13 +121,14 @@ describe("telemetry: startedAt / endedAt on transitions", () => {
   });
 
   it("sets endedAt when item transitions to stuck", () => {
-    const orch = new Orchestrator({ reviewEnabled: false,
+    const orch = new Orchestrator({
       wipLimit: 2,
       mergeStrategy: "auto",
       maxCiRetries: 2,
       maxRetries: 0,
     });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     // Launch → implementing
     orch.processTransitions({ items: [], readyIds: ["T-1-1"] });
@@ -145,8 +148,9 @@ describe("telemetry: startedAt / endedAt on transitions", () => {
   });
 
   it("does not overwrite startedAt on re-entry to implementing", () => {
-    const orch = new Orchestrator({ reviewEnabled: false, wipLimit: 2, mergeStrategy: "auto", maxCiRetries: 2, maxRetries: 1 });
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto", maxCiRetries: 2, maxRetries: 1 });
     orch.addItem(makeWorkItem("T-1-1"));
+    orch.getItem("T-1-1")!.reviewCompleted = true;
 
     // First launch → implementing
     orch.processTransitions({ items: [], readyIds: ["T-1-1"] });
@@ -499,7 +503,6 @@ describe("collectRunMetrics includes telemetry fields", () => {
       launchTimeoutMs: 30 * 60 * 1000,
       activityTimeoutMs: 60 * 60 * 1000,
       enableStacking: true,
-      reviewEnabled: false,
       reviewWipLimit: 2,
       reviewAutoFix: "off",
     };
@@ -537,7 +540,6 @@ describe("collectRunMetrics includes telemetry fields", () => {
       launchTimeoutMs: 30 * 60 * 1000,
       activityTimeoutMs: 60 * 60 * 1000,
       enableStacking: true,
-      reviewEnabled: false,
       reviewWipLimit: 2,
       reviewAutoFix: "off",
     };
