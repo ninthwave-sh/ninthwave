@@ -1426,8 +1426,11 @@ export class Orchestrator {
     );
 
     for (const comment of snap.newComments) {
-      // Skip orchestrator's own audit-trail comments
+      // Skip orchestrator's own audit-trail comments (both text prefix and HTML marker)
       if (comment.body.startsWith("**[Orchestrator]**")) continue;
+      if (comment.body.includes("<!-- ninthwave-orchestrator-status -->")) continue;
+      // Skip worker self-comments (any worker ID)
+      if (/\*\*\[Worker:/.test(comment.body)) continue;
 
       if (/\brebase\b/i.test(comment.body)) {
         // "rebase" keyword → trigger daemon-rebase directly (only if not already queued)
