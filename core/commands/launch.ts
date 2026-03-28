@@ -2,11 +2,13 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, copyFileSync } from "fs";
 import { join, basename, dirname } from "path";
-import { tmpdir } from "os";
+import { tmpdir, freemem } from "os";
 import { parseTodos } from "../parser.ts";
 import { die, warn, info, GREEN, BOLD, DIM, RESET } from "../output.ts";
 import { splitIds } from "../todo-utils.ts";
 import { computeBatches, CircularDependencyError } from "./batch-order.ts";
+import { calculateMemoryWipLimit } from "../orchestrator.ts";
+import { computeDefaultWipLimit } from "./orchestrate.ts";
 import { run } from "../shell.ts";
 import {
   fetchOrigin,
@@ -902,6 +904,7 @@ export async function cmdRunItems(
   worktreeDir: string,
   projectRoot: string,
   muxOverride?: Multiplexer,
+  wipLimitOverride?: number,
 ): Promise<void> {
   const items = parseTodos(workDir, worktreeDir);
   const itemMap = new Map<string, TodoItem>();
@@ -963,6 +966,17 @@ export async function cmdRunItems(
     });
     console.log(`  Batch ${b}: ${labels.join(", ")}`);
   }
+  // Compute WIP limit: explicit override honored directly, otherwise RAM-calculated
+  let effectiveWipLimit: number;
+  if (wipLimitOverride !== undefined) {
+    effectiveWipLimit = wipLimitOverride;
+    info(`WIP limit: ${effectiveWipLimit} concurrent session(s) (explicit override)`);
+  } else {
+    const configuredLimit = computeDefaultWipLimit();
+    effectiveWipLimit = calculateMemoryWipLimit(configuredLimit, freemem());
+    const freeGB = Math.round(freemem() / (1024 ** 3));
+    info(`WIP limit: ${effectiveWipLimit} concurrent session(s) (${freeGB}GB free)`);
+  }
   console.log();
 
   // Pre-flight: check for uncommitted TODO files
@@ -1000,12 +1014,25 @@ export async function cmdRunItems(
 
   const mux = muxOverride ?? getMux();
   const launched: string[] = [];
+  const skipped: string[] = [];
+  let wipReached = false;
 
-  // Launch batch by batch
-  for (let b = 1; b <= batchCount; b++) {
+  // Launch batch by batch, respecting WIP limit
+  for (let b = 1; b <= batchCount && !wipReached; b++) {
     const batchItems = ids.filter((id) => batchAssignments.get(id) === b);
 
     for (const id of batchItems) {
+      if (launched.length >= effectiveWipLimit) {
+        wipReached = true;
+        // Collect all remaining items as skipped
+        const remainingInBatch = batchItems.slice(batchItems.indexOf(id));
+        skipped.push(...remainingInBatch);
+        for (let rb = b + 1; rb <= batchCount; rb++) {
+          skipped.push(...ids.filter((sid) => batchAssignments.get(sid) === rb));
+        }
+        break;
+      }
+
       const item = itemMap.get(id)!;
       const result = launchSingleItem(item, workDir, worktreeDir, projectRoot, aiTool, mux);
       if (!result) {
@@ -1022,6 +1049,19 @@ export async function cmdRunItems(
   for (const id of launched) {
     const item = itemMap.get(id)!;
     console.log(`  - ${id}: ${item.title}`);
+  }
+
+  if (skipped.length > 0) {
+    console.log();
+    warn(
+      `WIP limit reached (${effectiveWipLimit}). ${skipped.length} item(s) skipped:`,
+    );
+    for (const id of skipped) {
+      const item = itemMap.get(id)!;
+      console.log(`  ${DIM}- ${id}: ${item.title}${RESET}`);
+    }
+    console.log();
+    info(`Use 'nw watch' to process all items with automatic queue management.`);
   }
 }
 
@@ -1128,10 +1168,21 @@ export async function cmdStart(
     getWorktreeInfo(todoId, crossRepoIndex, worktreeDir),
   );
 
+  // Compute WIP limit from RAM
+  const configuredLimit = computeDefaultWipLimit();
+  const effectiveWipLimit = calculateMemoryWipLimit(configuredLimit, freemem());
+  const freeGB = Math.round(freemem() / (1024 ** 3));
+  info(`WIP limit: ${effectiveWipLimit} concurrent session(s) (${freeGB}GB free)`);
+
   const mux = muxOverride ?? getMux();
   const launched: string[] = [];
+  const skipped: string[] = [];
 
   for (const id of ids) {
+    if (launched.length >= effectiveWipLimit) {
+      skipped.push(...ids.slice(ids.indexOf(id)));
+      break;
+    }
     const item = itemMap.get(id)!;
     launchSingleItem(item, workDir, worktreeDir, projectRoot, aiTool, mux);
     launched.push(id);
@@ -1149,6 +1200,19 @@ export async function cmdStart(
     } else {
       console.log(`  - ${id}: ${item.title} [${basename(targetRepo)}]`);
     }
+  }
+
+  if (skipped.length > 0) {
+    console.log();
+    warn(
+      `WIP limit reached (${effectiveWipLimit}). ${skipped.length} item(s) skipped:`,
+    );
+    for (const id of skipped) {
+      const item = itemMap.get(id)!;
+      console.log(`  ${DIM}- ${id}: ${item.title}${RESET}`);
+    }
+    console.log();
+    info(`Use 'nw watch' to process all items with automatic queue management.`);
   }
 }
 

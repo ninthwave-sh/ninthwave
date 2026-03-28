@@ -4,7 +4,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { join, basename } from "path";
 import { BOLD, DIM, RESET } from "../output.ts";
 import { run } from "../shell.ts";
-import { ID_PATTERN_GLOBAL } from "../types.ts";
+import { ID_PATTERN_GLOBAL, ID_IN_FILENAME } from "../types.ts";
 import {
   isDaemonRunning,
   readStateFile,
@@ -102,7 +102,8 @@ function loadTodoMetadata(projectRoot: string): Map<string, TodoMetadata> {
         // Extract title from the first # heading
         const titleMatch = content.match(/^# (.+)$/m);
         if (titleMatch) {
-          const id = entry.replace(/\.md$/, "");
+          const idMatch = entry.match(ID_IN_FILENAME);
+          const id = idMatch ? idMatch[1]! : entry.replace(/\.md$/, "");
           // Extract dependencies from **Depends on:** line
           const deps: string[] = [];
           const depsMatch = content.match(/^\*\*Depends on:\*\*\s+(.+)$/m);

@@ -81,7 +81,15 @@ if (allAreIds) {
     die(`Todos directory not found at ${workDir}`);
   }
 
-  await cmdRunItems(allPositional, workDir, worktreeDir, projectRoot);
+  // Parse --wip-limit flag from args
+  let wipLimit: number | undefined;
+  const wipIdx = args.indexOf("--wip-limit");
+  if (wipIdx !== -1 && args[wipIdx + 1]) {
+    wipLimit = parseInt(args[wipIdx + 1], 10);
+    if (isNaN(wipLimit) || wipLimit < 1) wipLimit = undefined;
+  }
+
+  await cmdRunItems(allPositional, workDir, worktreeDir, projectRoot, undefined, wipLimit);
   process.exit(0);
 }
 

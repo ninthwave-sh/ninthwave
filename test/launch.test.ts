@@ -1560,7 +1560,7 @@ describe("cmdRunItems", () => {
 
     // M-CI-1 and C-UO-1 have no inter-dependencies
     const output = await captureOutput(() =>
-      cmdRunItems(["M-CI-1", "C-UO-1"], workDir, worktreeDir, repo, mockMux),
+      cmdRunItems(["M-CI-1", "C-UO-1"], workDir, worktreeDir, repo, mockMux, 10),
     );
 
     expect(output).toContain("2 item(s) in 1 batch(es)");
@@ -1575,7 +1575,7 @@ describe("cmdRunItems", () => {
     const worktreeDir = join(repo, ".worktrees");
 
     const output = await captureOutput(() =>
-      cmdRunItems(["H-D-1", "H-D-2", "H-D-3", "H-D-4"], workDir, worktreeDir, repo, mockMux),
+      cmdRunItems(["H-D-1", "H-D-2", "H-D-3", "H-D-4"], workDir, worktreeDir, repo, mockMux, 10),
     );
 
     // Should show 3 batches: [A], [B, C], [D]
