@@ -19,6 +19,7 @@ export interface ParsedWatchArgs {
   reviewExternal: boolean;
   reviewWipLimit?: number;
   fixForward: boolean;
+  skipReview: boolean;
   watchMode: boolean;
   noWatch: boolean;
   watchIntervalSecs?: number;
@@ -46,6 +47,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   let reviewExternal = false;
   let reviewWipLimit: number | undefined;
   let fixForward = true;
+  let skipReview = false;
   let watchMode = false;
   let noWatch = false;
   let watchIntervalSecs: number | undefined;
@@ -138,6 +140,14 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
         fixForward = true;
         i += 1;
         break;
+      case "--no-review":
+        skipReview = true;
+        i += 1;
+        break;
+      case "--review":
+        skipReview = false;
+        i += 1;
+        break;
       case "--watch":
         // Accepted silently for backwards compat (watch is now default for daemon)
         watchMode = true;
@@ -198,7 +208,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
     itemIds, mergeStrategy, wipLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, clickupListId, remoteFlag,
     reviewAutoFix, reviewExternal, reviewWipLimit,
-    fixForward, watchMode, noWatch, watchIntervalSecs,
+    fixForward, skipReview, watchMode, noWatch, watchIntervalSecs,
     jsonFlag, skipPreflight, crewCode, crewCreate, crewPort, crewUrl, crewName,
     bypassEnabled,
   };

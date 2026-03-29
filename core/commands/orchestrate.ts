@@ -1573,7 +1573,7 @@ export async function cmdOrchestrate(
     wipLimitOverride, pollIntervalOverride, frictionDir,
     daemonMode, isDaemonChild, clickupListId, remoteFlag,
     reviewAutoFix, reviewExternal, reviewWipLimit,
-    fixForward, noWatch, watchIntervalSecs,
+    fixForward, skipReview: cliSkipReview, noWatch, watchIntervalSecs,
     jsonFlag, skipPreflight, crewName,
     bypassEnabled,
   } = parsed;
@@ -1700,6 +1700,7 @@ export async function cmdOrchestrate(
   const workItems = parseWorkItems(workDir, worktreeDir, projectRoot);
 
   // Interactive mode: no --items and stdin is a TTY
+  let interactiveSkipReview = false;
   if (shouldEnterInteractive(itemIds.length > 0)) {
     const result = await runInteractiveFlow(workItems, wipLimit);
     if (!result) {
@@ -1708,6 +1709,10 @@ export async function cmdOrchestrate(
     itemIds = result.itemIds;
     mergeStrategy = result.mergeStrategy;
     wipLimit = result.wipLimit;
+    // Capture review mode from interactive selection
+    if (result.reviewMode === "off") {
+      interactiveSkipReview = true;
+    }
     if (result.crewAction) {
       if (result.crewAction.type === "create") {
         crewCreate = true;
@@ -1748,11 +1753,14 @@ export async function cmdOrchestrate(
   }
 
   // Create orchestrator
+  // skipReview: CLI --no-review, interactive "off" mode, or --review-wip-limit 0 disables AI review gate
+  const skipReview = cliSkipReview || interactiveSkipReview || reviewWipLimit === 0;
   const orch = new Orchestrator({
     wipLimit,
     mergeStrategy,
     bypassEnabled,
     fixForward,
+    skipReview,
     ...(reviewAutoFix !== undefined ? { reviewAutoFix } : {}),
   });
   for (const id of itemIds) {
@@ -2313,8 +2321,13 @@ export async function cmdOrchestrate(
         // Update review config based on user's review mode selection
         if (interactiveResult.reviewMode === "all") {
           loopConfig.reviewExternal = true;
+          orch.setSkipReview(false);
         } else if (interactiveResult.reviewMode === "off") {
           loopConfig.reviewExternal = false;
+          orch.setSkipReview(true);
+        } else {
+          // "items" mode: review work items only, not external PRs
+          orch.setSkipReview(false);
         }
 
         // Restore keyboard shortcuts for the main TUI

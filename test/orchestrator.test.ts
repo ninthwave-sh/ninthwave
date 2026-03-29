@@ -6943,4 +6943,149 @@ describe("Orchestrator", () => {
     });
   });
 
+  // ── skipReview ─────────────────────────────────────────────────────────
+
+  describe("skipReview", () => {
+    it("skipReview=true causes ci-passed to skip reviewing and chain to merge evaluation (auto strategy)", () => {
+      const orch = new Orchestrator({ skipReview: true, mergeStrategy: "auto" });
+      orch.addItem(makeWorkItem("H-1-1"));
+      orch.setState("H-1-1", "ci-passed");
+      const item = orch.getItem("H-1-1")!;
+      item.prNumber = 10;
+      item.workspaceRef = "workspace:1";
+
+      const actions = orch.processTransitions(
+        snapshotWith([{
+          id: "H-1-1",
+          workerAlive: true,
+          ciStatus: "pass",
+          prState: "open",
+          isMergeable: true,
+        }]),
+      );
+
+      // Should merge directly -- no launch-review action
+      expect(item.reviewCompleted).toBe(true);
+      expect(item.state).toBe("merging");
+      expect(actions.some(a => a.type === "launch-review")).toBe(false);
+      expect(actions.some(a => a.type === "merge")).toBe(true);
+    });
+
+    it("skipReview=true causes ci-passed to chain to review-pending (manual strategy)", () => {
+      const orch = new Orchestrator({ skipReview: true, mergeStrategy: "manual" });
+      orch.addItem(makeWorkItem("H-1-1"));
+      orch.setState("H-1-1", "ci-passed");
+      const item = orch.getItem("H-1-1")!;
+      item.prNumber = 10;
+      item.workspaceRef = "workspace:1";
+
+      const actions = orch.processTransitions(
+        snapshotWith([{
+          id: "H-1-1",
+          workerAlive: true,
+          ciStatus: "pass",
+          prState: "open",
+          isMergeable: true,
+        }]),
+      );
+
+      // Manual strategy: should go to review-pending, not merge
+      expect(item.reviewCompleted).toBe(true);
+      expect(item.state).toBe("review-pending");
+      expect(actions.some(a => a.type === "launch-review")).toBe(false);
+      expect(actions.some(a => a.type === "merge")).toBe(false);
+    });
+
+    it("skipReview=true drains items in reviewing state -- sets reviewCompleted, transitions to ci-passed, emits clean-review", () => {
+      const orch = new Orchestrator({ skipReview: false, mergeStrategy: "auto" });
+      orch.addItem(makeWorkItem("H-1-1"));
+      orch.setState("H-1-1", "reviewing");
+      const item = orch.getItem("H-1-1")!;
+      item.prNumber = 10;
+      item.workspaceRef = "workspace:1";
+      item.reviewWorkspaceRef = "workspace:review-1";
+
+      // Toggle skipReview at runtime -- should drain reviewing items
+      orch.setSkipReview(true);
+
+      // reviewCompleted should be set immediately by setSkipReview
+      expect(item.reviewCompleted).toBe(true);
+
+      // Next processTransitions should clean up and chain to merge
+      const actions = orch.processTransitions(
+        snapshotWith([{
+          id: "H-1-1",
+          workerAlive: true,
+          ciStatus: "pass",
+          prState: "open",
+          isMergeable: true,
+        }]),
+      );
+
+      expect(actions.some(a => a.type === "clean-review")).toBe(true);
+      expect(actions.some(a => a.type === "merge")).toBe(true);
+      expect(item.state).toBe("merging");
+    });
+
+    it("setSkipReview(true) at runtime works for in-flight items", () => {
+      const orch = new Orchestrator({ skipReview: false, mergeStrategy: "auto" });
+      orch.addItem(makeWorkItem("H-1-1"));
+      orch.addItem(makeWorkItem("H-1-2"));
+      orch.setState("H-1-1", "reviewing");
+      orch.setState("H-1-2", "ci-passed");
+      const item1 = orch.getItem("H-1-1")!;
+      item1.prNumber = 10;
+      item1.workspaceRef = "workspace:1";
+      item1.reviewWorkspaceRef = "workspace:review-1";
+      const item2 = orch.getItem("H-1-2")!;
+      item2.prNumber = 20;
+      item2.workspaceRef = "workspace:2";
+
+      // Toggle skipReview -- should drain reviewing items
+      orch.setSkipReview(true);
+
+      expect(item1.reviewCompleted).toBe(true);
+      // item2 was in ci-passed, not reviewing -- not directly affected by drain
+      // but evaluateMerge will bypass review gate due to config.skipReview
+
+      const actions = orch.processTransitions(
+        snapshotWith([
+          { id: "H-1-1", workerAlive: true, ciStatus: "pass", prState: "open", isMergeable: true },
+          { id: "H-1-2", workerAlive: true, ciStatus: "pass", prState: "open", isMergeable: true },
+        ]),
+      );
+
+      // Both items' review gate should be bypassed. prioritizeMergeActions only
+      // allows one merge per cycle, so the higher-priority item merges first and
+      // the other is deferred back to ci-passed (it merges next cycle).
+      expect(item1.state).toBe("merging");
+      expect(item2.state).toBe("ci-passed"); // deferred by priority queue
+      expect(item2.reviewCompleted).toBe(true); // review gate still bypassed
+    });
+
+    it("skipReview=false (default) still requires review gate", () => {
+      const orch = new Orchestrator({ skipReview: false, mergeStrategy: "auto" });
+      orch.addItem(makeWorkItem("H-1-1"));
+      orch.setState("H-1-1", "ci-passed");
+      const item = orch.getItem("H-1-1")!;
+      item.prNumber = 10;
+      item.workspaceRef = "workspace:1";
+
+      const actions = orch.processTransitions(
+        snapshotWith([{
+          id: "H-1-1",
+          workerAlive: true,
+          ciStatus: "pass",
+          prState: "open",
+          isMergeable: true,
+        }]),
+      );
+
+      // Should enter reviewing state, not merge directly
+      expect(item.state).toBe("reviewing");
+      expect(actions.some(a => a.type === "launch-review")).toBe(true);
+      expect(actions.some(a => a.type === "merge")).toBe(false);
+    });
+  });
+
 });

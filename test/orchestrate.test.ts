@@ -3797,6 +3797,26 @@ describe("parseWatchArgs", () => {
     expect(result.bypassEnabled).toBe(false);
     expect(result.mergeStrategy).toBe("auto");
   });
+
+  it("--no-review sets skipReview=true", () => {
+    const result = parseWatchArgs(["--items", "A-1", "--no-review"]);
+    expect(result.skipReview).toBe(true);
+  });
+
+  it("--review sets skipReview=false", () => {
+    const result = parseWatchArgs(["--items", "A-1", "--review"]);
+    expect(result.skipReview).toBe(false);
+  });
+
+  it("defaults skipReview to false when neither --no-review nor --review passed", () => {
+    const result = parseWatchArgs(["--items", "A-1"]);
+    expect(result.skipReview).toBe(false);
+  });
+
+  it("--review overrides earlier --no-review", () => {
+    const result = parseWatchArgs(["--items", "A-1", "--no-review", "--review"]);
+    expect(result.skipReview).toBe(false);
+  });
 });
 
 // ── validateItemIds ────────────────────────────────────────────────────

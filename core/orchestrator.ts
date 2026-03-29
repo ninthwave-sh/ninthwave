@@ -141,6 +141,8 @@ export interface OrchestratorConfig {
   fixForward: boolean;
   /** Max CI fix-forward failures on main before marking stuck. Default: 2. */
   maxFixForwardRetries: number;
+  /** When true, the AI review gate is bypassed -- ci-passed chains straight to merge evaluation. Default: false. */
+  skipReview: boolean;
   /** Optional callback invoked on every state transition. Receives item ID, previous state, new state, detected timestamp, and detection latency in ms. */
   onTransition?: (itemId: string, from: string, to: string, timestamp: string, latencyMs: number) => void;
   /** Optional callback for structured events that don't result in state transitions (e.g., timeout suppression). */
@@ -395,6 +397,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   maxReviewRounds: 3,
   fixForward: true,
   maxFixForwardRetries: 2,
+  skipReview: false,
 };
 
 // ── Memory-aware WIP limit ──────────────────────────────────────────
@@ -546,6 +549,25 @@ export class Orchestrator {
       throw new Error('Cannot set merge strategy to "bypass" without --dangerously-bypass flag');
     }
     (this.config as { mergeStrategy: MergeStrategy }).mergeStrategy = strategy;
+  }
+
+  /**
+   * Enable or disable the AI review gate at runtime.
+   * When skipReview is toggled on, items already in "reviewing" state are drained:
+   * reviewCompleted is set to true so the next processTransitions cycle will
+   * clean up the review worker and chain to evaluateMerge.
+   */
+  setSkipReview(skip: boolean): void {
+    (this.config as { skipReview: boolean }).skipReview = skip;
+    if (skip) {
+      // Drain in-flight review items: mark reviewCompleted so the next cycle
+      // transitions them out of reviewing state naturally.
+      for (const item of this.items.values()) {
+        if (item.state === "reviewing") {
+          item.reviewCompleted = true;
+        }
+      }
+    }
   }
 
   /** Add a TODO item to orchestration. Starts in 'queued' state. */
@@ -1174,6 +1196,16 @@ export class Orchestrator {
   ): Action[] {
     const actions: Action[] = [];
 
+    // Drain: skipReview toggled on while item was in reviewing state.
+    // reviewCompleted was set by setSkipReview(); clean up the review worker
+    // and chain to evaluateMerge.
+    if (item.reviewCompleted && this.config.skipReview) {
+      this.transition(item, "ci-passed", snap?.eventTime);
+      actions.push({ type: "clean-review", itemId: item.id });
+      actions.push(...this.evaluateMerge(item, snap, snap?.eventTime));
+      return actions;
+    }
+
     // External merge takes priority
     if (snap?.prState === "merged") {
       this.transition(item, "merged", snap?.eventTime);
@@ -1483,6 +1515,11 @@ export class Orchestrator {
     const actions: Action[] = [];
 
     // Review gate: item must pass AI review before merge.
+    // When skipReview is enabled, bypass the gate entirely -- treat as already reviewed.
+    if (this.config.skipReview && !item.reviewCompleted) {
+      item.reviewCompleted = true;
+    }
+
     // Transition to reviewing state and launch a review worker.
     if (!item.reviewCompleted) {
       if (item.state !== "reviewing") {
