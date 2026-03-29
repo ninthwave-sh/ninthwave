@@ -74,10 +74,10 @@ import {
   buildStatusLayout,
   renderFullScreenFrame,
   renderHelpOverlay,
+  renderDetailOverlay,
   clampScrollOffset,
   buildPanelLayout,
   renderPanelFrame,
-  formatItemDetail,
   MIN_FULLSCREEN_ROWS,
   type StatusItem,
   type ViewOptions,
@@ -238,22 +238,34 @@ export function renderTuiPanelFrame(
     const helpLines = renderHelpOverlay(termWidth, termRows);
     const content = helpLines.join("\n");
     write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+  } else if (tuiState.detailItemId) {
+    // Render detail overlay for the selected item
+    const detailStatusItem = statusItems.find((i) => i.id === tuiState.detailItemId);
+    if (detailStatusItem) {
+      const orchItem = items.find((i) => i.id === tuiState.detailItemId);
+      const overlayLines = renderDetailOverlay(detailStatusItem, termWidth, termRows, {
+        repoUrl: tuiState.viewOptions.repoUrl,
+        priority: orchItem?.workItem.priority,
+        dependencies: orchItem?.workItem.dependencies,
+        ciFailCount: orchItem?.ciFailCount,
+        retryCount: orchItem?.retryCount,
+      });
+      const content = overlayLines.join("\n");
+      write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+    } else {
+      // Item no longer exists -- clear detail view and render normal frame
+      tuiState.detailItemId = null;
+      const filteredLogs = filterLogsByLevel(tuiState.logBuffer, tuiState.logLevelFilter);
+      const panelLayout = buildPanelLayout(
+        tuiState.panelMode, statusItems, filteredLogs, termWidth, termRows,
+        { wipLimit, viewOptions: tuiState.viewOptions, logScrollOffset: tuiState.logScrollOffset, statusScrollOffset: tuiState.scrollOffset, selectedIndex: tuiState.selectedIndex },
+      );
+      const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
+      const content = frameLines.join("\n");
+      write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+    }
   } else {
     const filteredLogs = filterLogsByLevel(tuiState.logBuffer, tuiState.logLevelFilter);
-
-    // Generate detail lines if an item is selected for detail view
-    let detailLines: string[] | undefined;
-    if (tuiState.detailItemId) {
-      const detailStatusItem = statusItems.find((i) => i.id === tuiState.detailItemId);
-      if (detailStatusItem) {
-        detailLines = formatItemDetail(detailStatusItem, {
-          repoUrl: tuiState.viewOptions.repoUrl,
-        });
-      } else {
-        // Item no longer exists -- clear detail view
-        tuiState.detailItemId = null;
-      }
-    }
 
     const panelLayout = buildPanelLayout(
       tuiState.panelMode,
@@ -266,7 +278,6 @@ export function renderTuiPanelFrame(
         viewOptions: tuiState.viewOptions,
         logScrollOffset: tuiState.logScrollOffset,
         statusScrollOffset: tuiState.scrollOffset,
-        detailLines,
         selectedIndex: tuiState.selectedIndex,
       },
     );
@@ -369,21 +380,19 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
       const helpLines = renderHelpOverlay(termWidth, termRows);
       const content = helpLines.join("\n");
       write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+    } else if (tuiState.detailItemId) {
+      const detailItem = data.items.find((i) => i.id === tuiState.detailItemId);
+      if (detailItem) {
+        const overlayLines = renderDetailOverlay(detailItem, termWidth, termRows, {
+          repoUrl: tuiState.viewOptions.repoUrl,
+        });
+        const content = overlayLines.join("\n");
+        write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
+      } else {
+        tuiState.detailItemId = null;
+      }
     } else {
       const filteredLogs = filterLogsByLevel(logBuffer, tuiState.logLevelFilter);
-
-      // Generate detail lines if an item is selected for detail view
-      let detailLines: string[] | undefined;
-      if (tuiState.detailItemId) {
-        const detailItem = data.items.find((i) => i.id === tuiState.detailItemId);
-        if (detailItem) {
-          detailLines = formatItemDetail(detailItem, {
-            repoUrl: tuiState.viewOptions.repoUrl,
-          });
-        } else {
-          tuiState.detailItemId = null;
-        }
-      }
 
       const panelLayout = buildPanelLayout(
         tuiState.panelMode,
@@ -396,7 +405,6 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
           viewOptions: tuiState.viewOptions,
           logScrollOffset: tuiState.logScrollOffset,
           statusScrollOffset: tuiState.scrollOffset,
-          detailLines,
           selectedIndex: tuiState.selectedIndex,
         },
       );

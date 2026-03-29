@@ -1534,8 +1534,6 @@ export function buildPanelLayout(
     viewOptions?: ViewOptions;
     logScrollOffset?: number;
     statusScrollOffset?: number;
-    /** Pre-formatted detail lines to replace the log panel (item detail view). */
-    detailLines?: string[];
     /** Selected item index for highlight (0-based, -1 for none). */
     selectedIndex?: number;
   },
@@ -1611,13 +1609,9 @@ export function buildPanelLayout(
     };
   }
 
-  // Split mode: status top (60%), logs/detail bottom (40%)
-  const detailLines = opts?.detailLines;
-  const isDetailMode = detailLines != null && detailLines.length > 0;
+  // Split mode: status top (60%), logs bottom (40%)
   const footerLines = buildPanelFooter(items, logEntries.length, termWidth, opts?.viewOptions);
-  const separatorLine = isDetailMode
-    ? buildDetailSeparator(termWidth)
-    : buildPanelSeparator(logEntries.length, termWidth);
+  const separatorLine = buildPanelSeparator(logEntries.length, termWidth);
 
   // Available rows = total - footer - separator (1 line)
   const availableRows = Math.max(2, termRows - footerLines.length - 1);
@@ -1639,21 +1633,6 @@ export function buildPanelLayout(
     itemLines: statusLayout.itemLines,
     footerLines: [], // managed by panel footer
   };
-
-  if (isDetailMode) {
-    // Detail view replaces the log panel
-    const visibleDetail = detailLines.slice(0, logRows);
-    return {
-      mode: "split",
-      statusPanel,
-      logPanel: {
-        lines: visibleDetail,
-        totalEntries: detailLines.length,
-        scrollOffset: 0,
-      },
-      footerLines: [separatorLine, ...footerLines],
-    };
-  }
 
   // Build log panel
   const clampedLogOffset = clampScrollOffset(logScrollOffset, logEntries.length, logRows);
@@ -1689,19 +1668,6 @@ function buildPanelSeparator(logCount: number, termWidth: number): string {
   return `${DIM}${"─".repeat(leftDashes)}${RESET}${BOLD}${label}${RESET}${DIM}${"─".repeat(2)}${RESET} ${hints}${DIM}${"─".repeat(rightDashes)}${RESET}`;
 }
 
-/**
- * Build the separator line between status and detail panels.
- * Format: "──── Detail ──── esc: back ────"
- */
-function buildDetailSeparator(termWidth: number): string {
-  const label = ` Detail `;
-  const hints = ` esc: back `;
-  const usedWidth = label.length + hints.length + 4;
-  const remainingDashes = Math.max(0, termWidth - usedWidth);
-  const leftDashes = Math.max(2, Math.floor(remainingDashes / 2));
-  const rightDashes = Math.max(2, remainingDashes - leftDashes);
-  return `${DIM}${"─".repeat(leftDashes)}${RESET}${BOLD}${label}${RESET}${DIM}${"─".repeat(2)}${RESET} ${hints}${DIM}${"─".repeat(rightDashes)}${RESET}`;
-}
 
 /**
  * Build footer lines for panel modes.
@@ -2114,4 +2080,130 @@ export function renderHelpOverlay(
   }
 
   return output;
+}
+
+// ─── Detail overlay ─────────────────────────────────────────────────────────
+
+/**
+ * Render a full-screen detail overlay for a single work item.
+ * Styled identically to renderHelpOverlay() -- box-drawing border, centered.
+ */
+export function renderDetailOverlay(
+  item: StatusItem,
+  termWidth: number,
+  termRows: number,
+  opts?: {
+    repoUrl?: string;
+    progressLabel?: string;
+    tokensIn?: number;
+    tokensOut?: number;
+    priority?: string;
+    dependencies?: string[];
+    ciFailCount?: number;
+    retryCount?: number;
+  },
+): string[] {
+  // ── Build content lines from formatItemDetail + extras ────────────
+
+  const contentLines: string[] = [];
+
+  // Core detail lines
+  const coreLines = formatItemDetail(item, {
+    repoUrl: opts?.repoUrl,
+    progressLabel: opts?.progressLabel,
+    tokensIn: opts?.tokensIn,
+    tokensOut: opts?.tokensOut,
+  });
+  contentLines.push(...coreLines);
+
+  // Extra fields from orchestrator data
+  if (opts?.priority) {
+    contentLines.push(`  ${DIM}Priority:${RESET}  ${opts.priority}`);
+  }
+
+  if (opts?.dependencies && opts.dependencies.length > 0) {
+    contentLines.push(`  ${DIM}Depends:${RESET}   ${opts.dependencies.join(", ")}`);
+  }
+
+  if (opts?.ciFailCount != null && opts.ciFailCount > 0) {
+    contentLines.push(`  ${DIM}CI fails:${RESET}  ${opts.ciFailCount}`);
+  }
+
+  if (opts?.retryCount != null && opts.retryCount > 0) {
+    contentLines.push(`  ${DIM}Retries:${RESET}   ${opts.retryCount}`);
+  }
+
+  if (item.worktreePath) {
+    contentLines.push(`  ${DIM}Worktree:${RESET}  ${item.worktreePath}`);
+  }
+
+  // ── Compute box dimensions ─────────────────────────────────────────
+
+  const maxContentWidth = Math.max(
+    ...contentLines.map((l) => stripAnsiForWidth(l).length),
+  );
+  const innerWidth = Math.min(maxContentWidth + 4, termWidth - 4);
+  const boxWidth = innerWidth + 2;
+
+  // ── Draw box ───────────────────────────────────────────────────────
+
+  const boxLines: string[] = [];
+  const leftMargin = Math.max(0, Math.floor((termWidth - boxWidth) / 2));
+  const margin = " ".repeat(leftMargin);
+
+  // Top border
+  boxLines.push(`${margin}┌${"─".repeat(innerWidth)}┐`);
+
+  // Title
+  const title = item.id;
+  const titlePad = Math.max(0, Math.floor((innerWidth - title.length) / 2));
+  boxLines.push(`${margin}│${" ".repeat(titlePad)}${BOLD}${title}${RESET}${" ".repeat(Math.max(0, innerWidth - titlePad - title.length))}│`);
+  boxLines.push(`${margin}│${" ".repeat(innerWidth)}│`);
+
+  // Content lines
+  const maxContentDisplay = innerWidth - 2;
+  for (const line of contentLines) {
+    const displayLen = stripAnsiForWidth(line).length;
+    let rendered = line;
+    if (displayLen > maxContentDisplay) {
+      let visible = 0;
+      let cutIdx = 0;
+      const plain = stripAnsiForWidth(line);
+      for (let i = 0; i < plain.length && visible < maxContentDisplay - 3; i++) {
+        visible++;
+        cutIdx = i + 1;
+      }
+      rendered = plain.slice(0, cutIdx) + "...";
+    }
+    const renderedLen = stripAnsiForWidth(rendered).length;
+    const rightPad = Math.max(0, innerWidth - 2 - renderedLen);
+    boxLines.push(`${margin}│  ${rendered}${" ".repeat(rightPad)}│`);
+  }
+
+  // Empty line before footer hint
+  boxLines.push(`${margin}│${" ".repeat(innerWidth)}│`);
+
+  // Footer hint
+  const hint = "Press Escape to close";
+  const hintPad = Math.max(0, Math.floor((innerWidth - hint.length) / 2));
+  boxLines.push(`${margin}│${" ".repeat(hintPad)}${DIM}${hint}${RESET}${" ".repeat(Math.max(0, innerWidth - hintPad - hint.length))}│`);
+
+  // Bottom border
+  boxLines.push(`${margin}└${"─".repeat(innerWidth)}┘`);
+
+  // ── Vertically center the box ──────────────────────────────────────
+
+  const totalBoxHeight = boxLines.length;
+  const topPadding = Math.max(0, Math.floor((termRows - totalBoxHeight) / 2));
+
+  const result: string[] = [];
+  for (let i = 0; i < topPadding; i++) {
+    result.push("");
+  }
+  result.push(...boxLines);
+  while (result.length < termRows) {
+    result.push("");
+  }
+
+  return result;
 }

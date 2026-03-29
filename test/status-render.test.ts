@@ -52,6 +52,7 @@ import {
   type PanelLayout,
   type LogEntry,
   renderHelpOverlay,
+  renderDetailOverlay,
 } from "../core/status-render.ts";
 import {
   detectTuiMode,
@@ -3049,79 +3050,68 @@ describe("formatItemDetail", () => {
   });
 });
 
-// ── Item detail panel integration with buildPanelLayout ─────────────────────
+// ── Item detail overlay ─────────────────────────────────────────────
 
-describe("buildPanelLayout with detailLines", () => {
-  it("replaces log panel with detail lines in split mode", () => {
-    const items = [
-      makeStatusItem({ id: "H-1", state: "implementing" }),
-      makeStatusItem({ id: "H-2", state: "ci-pending" }),
-    ];
-    const logEntries: LogEntry[] = [
-      { timestamp: "2026-03-28T10:00:00Z", itemId: "H-1", message: "Starting" },
-    ];
-    const detailLines = [
-      "  H-1  Panel layout",
-      "",
-      "  State: Implementing",
-      "  PR:    --",
-    ];
-    const layout = buildPanelLayout("split", items, logEntries, 80, 50, {
-      detailLines,
-    });
-    expect(layout.mode).toBe("split");
-    expect(layout.logPanel).not.toBeNull();
-    // Detail lines should appear in the log panel slot
-    expect(layout.logPanel!.lines.some((l) => stripAnsi(l).includes("H-1"))).toBe(true);
-    // Log entries should NOT appear (replaced by detail)
-    const allText = layout.logPanel!.lines.map(stripAnsi).join("\n");
-    expect(allText).not.toContain("Starting");
+describe("renderDetailOverlay", () => {
+  it("renders a centered box with item ID, state, and Escape hint", () => {
+    const item = makeStatusItem({ id: "H-DT-1", state: "implementing", title: "Test feature" });
+    const lines = renderDetailOverlay(item, 80, 40);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("H-DT-1");
+    expect(text).toContain("Implementing");
+    expect(text).toContain("Press Escape to close");
   });
 
-  it("shows separator with 'Detail' label when detailLines provided", () => {
-    const items = [makeStatusItem({ id: "H-1", state: "implementing" })];
-    const layout = buildPanelLayout("split", items, [], 80, 50, {
-      detailLines: ["  Detail content"],
+  it("includes PR link when repoUrl provided", () => {
+    const item = makeStatusItem({ id: "H-PR-1", state: "review", prNumber: 42 });
+    const lines = renderDetailOverlay(item, 80, 40, {
+      repoUrl: "https://github.com/org/repo",
     });
-    const allFooter = layout.footerLines.map(stripAnsi).join("\n");
-    expect(allFooter).toContain("Detail");
-    expect(allFooter).toContain("esc: back");
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("#42");
   });
 
-  it("shows log separator when no detailLines", () => {
-    const items = [makeStatusItem({ id: "H-1", state: "implementing" })];
-    const logEntries: LogEntry[] = [
-      { timestamp: "2026-03-28T10:00:00Z", itemId: "H-1", message: "Log msg" },
-    ];
-    const layout = buildPanelLayout("split", items, logEntries, 80, 50);
-    const allFooter = layout.footerLines.map(stripAnsi).join("\n");
-    expect(allFooter).toContain("Logs");
-    expect(allFooter).not.toContain("Detail");
+  it("shows extra fields: priority, dependencies, CI fails, retries", () => {
+    const item = makeStatusItem({ id: "H-EX-1", state: "ci-failed", failureReason: "test timeout" });
+    const lines = renderDetailOverlay(item, 100, 40, {
+      priority: "high",
+      dependencies: ["H-EX-0", "H-EX-2"],
+      ciFailCount: 3,
+      retryCount: 1,
+    });
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("high");
+    expect(text).toContain("H-EX-0, H-EX-2");
+    expect(text).toContain("3");
+    expect(text).toContain("1");
   });
 
-  it("does not show detail in logs-only mode", () => {
-    const items = [makeStatusItem({ id: "H-1", state: "implementing" })];
-    const logEntries: LogEntry[] = [
-      { timestamp: "2026-03-28T10:00:00Z", itemId: "H-1", message: "Log msg" },
-    ];
-    const layout = buildPanelLayout("logs-only", items, logEntries, 80, 50, {
-      detailLines: ["  Should not appear"],
+  it("shows worktree path for stuck items", () => {
+    const item = makeStatusItem({
+      id: "H-WT-1",
+      state: "implementing",
+      worktreePath: "/tmp/worktrees/H-WT-1",
     });
-    expect(layout.mode).toBe("logs-only");
-    // Log panel should show logs, not detail
-    const panelText = layout.logPanel!.lines.map(stripAnsi).join("\n");
-    expect(panelText).toContain("Log msg");
+    const lines = renderDetailOverlay(item, 100, 40);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("/tmp/worktrees/H-WT-1");
   });
 
-  it("truncates detail lines to fit available rows", () => {
-    const items = [makeStatusItem({ id: "H-1", state: "implementing" })];
-    // Generate many detail lines
-    const detailLines = Array.from({ length: 50 }, (_, i) => `  Line ${i}`);
-    const layout = buildPanelLayout("split", items, [], 80, 40, {
-      detailLines,
+  it("fills terminal height with blank lines", () => {
+    const item = makeStatusItem({ id: "H-FL-1", state: "merged" });
+    const lines = renderDetailOverlay(item, 80, 30);
+    expect(lines.length).toBe(30);
+  });
+
+  it("omits zero CI fails and retries", () => {
+    const item = makeStatusItem({ id: "H-ZR-1", state: "implementing" });
+    const lines = renderDetailOverlay(item, 80, 40, {
+      ciFailCount: 0,
+      retryCount: 0,
     });
-    // Log panel lines should be fewer than total detail lines
-    expect(layout.logPanel!.lines.length).toBeLessThan(50);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).not.toContain("CI fails");
+    expect(text).not.toContain("Retries");
   });
 });
 
