@@ -17,6 +17,7 @@ function stubDeps(overrides: Partial<SelectAiToolDeps> = {}): SelectAiToolDeps {
     prompt: overrides.prompt ?? (async () => ""),
     loadConfig: overrides.loadConfig ?? (() => ({})),
     saveConfig: overrides.saveConfig ?? (() => {}),
+    loadUserConfig: overrides.loadUserConfig ?? (() => ({})),
   };
 }
 
@@ -130,6 +131,74 @@ describe("selectAiTool", () => {
       }),
     );
     expect(result).toBe("claude"); // first in profile order
+  });
+
+  it("uses user config ai_tool when no --tool override", async () => {
+    const save = vi.fn();
+    const result = await selectAiTool(
+      { projectRoot: "/fake", isInteractive: true },
+      stubDeps({
+        loadUserConfig: () => ({ ai_tool: "opencode" }),
+        commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
+        saveConfig: save,
+      }),
+    );
+    expect(result).toBe("opencode");
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "opencode" });
+  });
+
+  it("--tool override takes precedence over user config", async () => {
+    const save = vi.fn();
+    const result = await selectAiTool(
+      { toolOverride: "claude", projectRoot: "/fake", isInteractive: true },
+      stubDeps({
+        loadUserConfig: () => ({ ai_tool: "opencode" }),
+        saveConfig: save,
+      }),
+    );
+    expect(result).toBe("claude");
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "claude" });
+  });
+
+  it("user config takes precedence over installed tool detection", async () => {
+    const save = vi.fn();
+    const result = await selectAiTool(
+      { projectRoot: "/fake", isInteractive: false },
+      stubDeps({
+        loadUserConfig: () => ({ ai_tool: "copilot" }),
+        commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
+        saveConfig: save,
+      }),
+    );
+    // user config wins even though copilot is not in installed list detection
+    expect(result).toBe("copilot");
+  });
+
+  it("warns for unknown tool in user config", async () => {
+    const save = vi.fn();
+    const result = await selectAiTool(
+      { projectRoot: "/fake", isInteractive: true },
+      stubDeps({
+        loadUserConfig: () => ({ ai_tool: "my-custom-ai" }),
+        saveConfig: save,
+      }),
+    );
+    expect(result).toBe("my-custom-ai");
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "my-custom-ai" });
+  });
+
+  it("skips user config when ai_tool is not set", async () => {
+    const save = vi.fn();
+    const result = await selectAiTool(
+      { projectRoot: "/fake", isInteractive: true },
+      stubDeps({
+        loadUserConfig: () => ({}), // no ai_tool set
+        commandExists: (cmd) => cmd === "claude",
+        saveConfig: save,
+      }),
+    );
+    // Falls through to installed tool detection
+    expect(result).toBe("claude");
   });
 });
 

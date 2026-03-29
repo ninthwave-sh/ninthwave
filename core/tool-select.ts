@@ -5,7 +5,8 @@
 import { createInterface } from "readline";
 import { AI_TOOL_PROFILES, isAiToolId } from "./ai-tools.ts";
 import type { AiToolId, AiToolProfile } from "./ai-tools.ts";
-import { loadConfig, saveConfig } from "./config.ts";
+import { loadConfig, saveConfig, loadUserConfig } from "./config.ts";
+import type { UserConfig } from "./config.ts";
 import { run } from "./shell.ts";
 import { die, warn, info, BOLD, DIM, RESET } from "./output.ts";
 
@@ -28,6 +29,7 @@ export interface SelectAiToolDeps {
   prompt?: PromptFn;
   loadConfig?: (root: string) => { ai_tool?: string };
   saveConfig?: (root: string, updates: { ai_tool?: string }) => void;
+  loadUserConfig?: () => UserConfig;
 }
 
 // ── Default implementations ──────────────────────────────────────────
@@ -63,10 +65,14 @@ export function detectInstalledAITools(
 /**
  * Select which AI tool to use for worker sessions.
  *
- * - --tool override: use directly, save, return
- * - 1 tool installed: auto-select, save, return
- * - Multiple + interactive: prompt with last-used pre-selected
- * - Multiple + non-interactive: use saved preference or first installed
+ * Priority chain:
+ * 1. --tool CLI override: use directly, save, return
+ * 2. User config (~/.ninthwave/config.json ai_tool): use if set, save, return
+ * 3. Detect installed tools
+ * 4. None found: error with install instructions
+ * 5. Single tool: auto-select, save, return
+ * 6. Multiple + non-interactive: use saved project preference or first installed
+ * 7. Multiple + interactive: prompt with last-used pre-selected
  */
 export async function selectAiTool(
   options: SelectAiToolOptions,
@@ -76,6 +82,7 @@ export async function selectAiTool(
   const promptFn = deps.prompt ?? defaultPrompt;
   const doLoadConfig = deps.loadConfig ?? loadConfig;
   const doSaveConfig = deps.saveConfig ?? saveConfig;
+  const doLoadUserConfig = deps.loadUserConfig ?? loadUserConfig;
 
   // 1. Explicit --tool override
   if (options.toolOverride) {
@@ -86,10 +93,20 @@ export async function selectAiTool(
     return options.toolOverride;
   }
 
-  // 2. Detect installed tools
+  // 2. User-level config (~/.ninthwave/config.json)
+  const userConfig = doLoadUserConfig();
+  if (userConfig.ai_tool) {
+    if (!isAiToolId(userConfig.ai_tool)) {
+      warn(`Unknown AI tool in ~/.ninthwave/config.json: "${userConfig.ai_tool}". Known tools: ${AI_TOOL_PROFILES.map(p => p.id).join(", ")}. Proceeding anyway.`);
+    }
+    doSaveConfig(options.projectRoot, { ai_tool: userConfig.ai_tool });
+    return userConfig.ai_tool;
+  }
+
+  // 3. Detect installed tools
   const installed = detectInstalledAITools(commandExists);
 
-  // 3. None found
+  // 4. None found
   if (installed.length === 0) {
     die(
       "No AI coding tool found. Install one:\n" +
@@ -97,14 +114,14 @@ export async function selectAiTool(
     );
   }
 
-  // 4. Single tool --auto-select
+  // 5. Single tool --auto-select
   if (installed.length === 1) {
     const tool = installed[0]!;
     doSaveConfig(options.projectRoot, { ai_tool: tool.id });
     return tool.id;
   }
 
-  // 5. Multiple tools, non-interactive --use saved preference or first installed
+  // 6. Multiple tools, non-interactive --use saved preference or first installed
   const config = doLoadConfig(options.projectRoot);
   const savedTool = config.ai_tool;
 
@@ -115,7 +132,7 @@ export async function selectAiTool(
     return installed[0]!.id;
   }
 
-  // 6. Multiple tools, interactive --prompt with pre-selection
+  // 7. Multiple tools, interactive --prompt with pre-selection
   const defaultIdx = savedTool
     ? installed.findIndex(t => t.id === savedTool)
     : -1;

@@ -1,9 +1,9 @@
-// Tests for project config loading (JSON format).
+// Tests for project config and user config loading (JSON format).
 
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { join } from "path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
-import { loadConfig, saveConfig } from "../core/config.ts";
+import { loadConfig, saveConfig, loadUserConfig } from "../core/config.ts";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 
 afterEach(() => {
@@ -218,5 +218,83 @@ describe("saveConfig", () => {
 
     const config = loadConfig(repo);
     expect(config.ai_tool).toBe("copilot");
+  });
+});
+
+describe("loadUserConfig", () => {
+  it("returns {} when config file is missing", () => {
+    const tmpHome = setupTempRepo(); // use temp dir as fake home
+    const config = loadUserConfig(tmpHome);
+    expect(config).toEqual({});
+  });
+
+  it("returns ai_tool from valid JSON", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ ai_tool: "opencode" }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.ai_tool).toBe("opencode");
+  });
+
+  it("returns {} for malformed JSON and warns", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, "config.json"), "not valid json {{{");
+
+    const warnSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const config = loadUserConfig(tmpHome);
+    expect(config).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("malformed JSON"),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("returns {} when JSON is an array and warns", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, "config.json"), "[1, 2, 3]");
+
+    const warnSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const config = loadUserConfig(tmpHome);
+    expect(config).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("not a JSON object"),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("ignores non-string ai_tool values", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ ai_tool: 42 }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.ai_tool).toBeUndefined();
+  });
+
+  it("ignores unknown keys", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ ai_tool: "claude", some_other_key: "ignored" }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.ai_tool).toBe("claude");
+    expect(Object.keys(config)).toEqual(["ai_tool"]);
   });
 });

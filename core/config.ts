@@ -1,7 +1,8 @@
-// Project configuration loading and saving for the ninthwave CLI.
+// Project and user configuration loading and saving for the ninthwave CLI.
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
+import { homedir } from "os";
 
 /** Project config shape. */
 export interface ProjectConfig {
@@ -75,4 +76,41 @@ export function saveConfig(
 
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n");
+}
+
+// ── User-level config (~/.ninthwave/config.json) ──────────────────────
+
+/** User config shape. Only ai_tool for now; extend as needed. */
+export interface UserConfig {
+  ai_tool?: string;
+}
+
+/**
+ * Load user-level config from ~/.ninthwave/config.json.
+ * Returns {} when the file is missing or malformed (malformed triggers a warning).
+ *
+ * @param homeOverride - Override the home directory (for testing). Defaults to os.homedir().
+ */
+export function loadUserConfig(homeOverride?: string): UserConfig {
+  const home = homeOverride ?? homedir();
+  const configPath = join(home, ".ninthwave", "config.json");
+
+  if (!existsSync(configPath)) return {};
+
+  try {
+    const raw = readFileSync(configPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      console.error("Warning: ~/.ninthwave/config.json is not a JSON object, ignoring.");
+      return {};
+    }
+    const result: UserConfig = {};
+    if (typeof parsed.ai_tool === "string") {
+      result.ai_tool = parsed.ai_tool;
+    }
+    return result;
+  } catch {
+    console.error("Warning: ~/.ninthwave/config.json contains malformed JSON, ignoring.");
+    return {};
+  }
 }
