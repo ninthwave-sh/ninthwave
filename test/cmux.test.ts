@@ -283,9 +283,19 @@ describe("verifyDelivery", () => {
     expect(verifyDelivery("workspace:1", "hello", runner)).toBe(false);
   });
 
-  it("returns true when read-screen fails (assume success)", () => {
+  it("returns true when read-screen fails and usedPasteBuffer is true (default)", () => {
     const runner = vi.fn(() => fail("not connected"));
     expect(verifyDelivery("workspace:1", "hello", runner)).toBe(true);
+  });
+
+  it("returns false when read-screen fails and usedPasteBuffer is false (keystroke path)", () => {
+    const runner = vi.fn(() => fail("not connected"));
+    expect(verifyDelivery("workspace:1", "hello", runner, false)).toBe(false);
+  });
+
+  it("returns true when read-screen fails and usedPasteBuffer is explicitly true", () => {
+    const runner = vi.fn(() => fail("not connected"));
+    expect(verifyDelivery("workspace:1", "hello", runner, true)).toBe(true);
   });
 
   it("returns true when screen is empty", () => {

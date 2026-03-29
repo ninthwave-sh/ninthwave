@@ -93,12 +93,19 @@ export function isWorkerProcessing(screenContent: string): boolean {
 
 /**
  * Detect error state from screen content.
+ *
+ * Uses line-anchored matching: each line is trimmed and checked for a
+ * prefix match against error indicators. This prevents false positives
+ * from code content that contains "Error:" mid-line (e.g., Python
+ * tracebacks in test output).
  */
 export function isWorkerInError(screenContent: string): boolean {
   if (!screenContent.trim()) return false;
-  return ERROR_INDICATORS.some((indicator) =>
-    screenContent.includes(indicator),
-  );
+  const lines = screenContent.split("\n");
+  return lines.some((line) => {
+    const trimmed = line.trimStart();
+    return ERROR_INDICATORS.some((indicator) => trimmed.startsWith(indicator));
+  });
 }
 
 /**

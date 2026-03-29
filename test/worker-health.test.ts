@@ -187,18 +187,18 @@ describe("isWorkerInError", () => {
     expect(isWorkerInError(screen)).toBe(true);
   });
 
-  it("detects 'Killed' text", () => {
+  it("detects 'Killed' text at line start", () => {
     const screen = "Killed";
     expect(isWorkerInError(screen)).toBe(true);
   });
 
-  it("detects 'OOMKilled' text", () => {
-    const screen = "Process OOMKilled by system";
+  it("detects 'OOMKilled' text at line start", () => {
+    const screen = "OOMKilled by system";
     expect(isWorkerInError(screen)).toBe(true);
   });
 
-  it("detects 'SIGKILL' text", () => {
-    const screen = "Process received SIGKILL";
+  it("detects 'SIGKILL' text at line start", () => {
+    const screen = "SIGKILL received\nProcess terminated";
     expect(isWorkerInError(screen)).toBe(true);
   });
 
@@ -208,6 +208,50 @@ describe("isWorkerInError", () => {
 
   it("returns false for normal output", () => {
     const screen = "✓ All tests passed\nDone in 2.3s";
+    expect(isWorkerInError(screen)).toBe(false);
+  });
+
+  it("returns false for 'Error:' appearing mid-line in code content", () => {
+    // Python traceback or code output containing Error: mid-line should NOT
+    // trigger false positive error detection.
+    const screen =
+      "  File 'test.py', line 42\n    raise ValueError('Error: bad input')\nTest passed";
+    expect(isWorkerInError(screen)).toBe(false);
+  });
+
+  it("returns false for 'Error:' in quoted/nested context mid-line", () => {
+    const screen =
+      '  expect(() => fn()).toThrow("Error: missing param")\n  ✓ test passed';
+    expect(isWorkerInError(screen)).toBe(false);
+  });
+
+  it("returns true for 'Error:' at the start of a line", () => {
+    const screen = "Loading...\nError: Could not connect\nRetrying...";
+    expect(isWorkerInError(screen)).toBe(true);
+  });
+
+  it("returns true for 'Error:' at start of line with leading whitespace", () => {
+    const screen = "Output:\n  Error: file not found\nDone";
+    expect(isWorkerInError(screen)).toBe(true);
+  });
+
+  it("returns true for 'FATAL' at line start", () => {
+    const screen = "Starting...\nFATAL: out of memory\nAborted";
+    expect(isWorkerInError(screen)).toBe(true);
+  });
+
+  it("returns false for 'FATAL' appearing mid-line", () => {
+    const screen = "Checking for FATAL errors... none found\nAll clear";
+    expect(isWorkerInError(screen)).toBe(false);
+  });
+
+  it("returns true for 'panic:' at line start", () => {
+    const screen = "goroutine 1 [running]:\npanic: runtime error\n  at main.go:42";
+    expect(isWorkerInError(screen)).toBe(true);
+  });
+
+  it("returns false for 'panic:' mid-line in log message", () => {
+    const screen = "Recovered from panic: nil pointer\nService resumed";
     expect(isWorkerInError(screen)).toBe(false);
   });
 });

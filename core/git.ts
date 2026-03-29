@@ -279,6 +279,12 @@ export function daemonRebase(repoRoot: string, branch: string): boolean {
   const fetchMain = run("git", ["-C", repoRoot, "fetch", "origin", "main", "--quiet"]);
   if (fetchMain.exitCode !== 0) return false;
 
+  // Fetch the branch itself so local tracking ref is current (a worker may
+  // have pushed since the last fetch, and without this the rebase would
+  // operate on stale local state).
+  const fetchBranch = run("git", ["-C", repoRoot, "fetch", "origin", branch, "--quiet"]);
+  if (fetchBranch.exitCode !== 0) return false;
+
   // Attempt the rebase
   const rebaseResult = run("git", ["-C", repoRoot, "rebase", "origin/main"]);
 

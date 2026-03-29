@@ -1,10 +1,13 @@
 import {
+  closeSync,
+  constants,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   unlinkSync,
-  writeFileSync,
+  writeSync,
 } from "fs";
 import { join, basename } from "path";
 import type { WorktreeInfo } from "./types.ts";
@@ -21,11 +24,20 @@ export function allocatePartition(
   let n = 1;
   while (true) {
     const path = join(partitionDir, String(n));
-    if (!existsSync(path)) {
-      writeFileSync(path, todoId);
+    try {
+      // Atomic create: O_CREAT | O_EXCL fails with EEXIST if the file
+      // already exists, preventing a TOCTOU race between concurrent workers.
+      const fd = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY);
+      writeSync(fd, todoId);
+      closeSync(fd);
       return n;
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+        n++;
+        continue;
+      }
+      throw e;
     }
-    n++;
   }
 }
 

@@ -12,6 +12,9 @@ import { info, BOLD, CYAN, GREEN, RED, RESET } from "./output.ts";
 import { run, GIT_TIMEOUT, GH_TIMEOUT } from "./shell.ts";
 import type { WorktreeInfo } from "./types.ts";
 
+/** Regex for valid GitHub repo names (used for alias validation). */
+export const VALID_ALIAS_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
 /**
  * Resolve a repo alias to an absolute path.
  * Resolution chain: repos.conf -> sibling convention (../<alias>) -> error.
@@ -24,6 +27,12 @@ export function resolveRepo(
 ): string {
   if (!alias || alias === "self" || alias === "hub") {
     return projectRoot;
+  }
+
+  if (!VALID_ALIAS_RE.test(alias)) {
+    throw new Error(
+      `Invalid repo alias '${alias}': must match GitHub repo name restrictions (alphanumeric, dots, hyphens, underscores; must start with alphanumeric)`,
+    );
   }
 
   const confPath = reposConf ?? join(projectRoot, ".ninthwave", "repos.conf");
@@ -215,6 +224,13 @@ export function bootstrapRepo(
   // bootstrap: true without a Repo: field (or hub-local aliases) → no-op
   if (!alias || alias === "self" || alias === "hub") {
     return { status: "exists" };
+  }
+
+  if (!VALID_ALIAS_RE.test(alias)) {
+    return {
+      status: "failed",
+      reason: `Invalid repo alias '${alias}': must match GitHub repo name restrictions`,
+    };
   }
 
   // Check if the repo already exists locally

@@ -44,6 +44,16 @@ describe("allocatePartition", () => {
     const n = allocatePartition(PARTITION_DIR, "A-1-3");
     expect(n).toBe(3);
   });
+
+  it("uses atomic file creation (EEXIST moves to next slot)", () => {
+    // Pre-create a lock file to simulate a concurrent worker
+    mkdirSync(PARTITION_DIR, { recursive: true });
+    writeFileSync(join(PARTITION_DIR, "1"), "CONCURRENT-1");
+
+    // allocatePartition should see EEXIST on slot 1 and move to slot 2
+    const n = allocatePartition(PARTITION_DIR, "ATOMIC-1");
+    expect(n).toBe(2);
+  });
 });
 
 describe("releasePartition", () => {
