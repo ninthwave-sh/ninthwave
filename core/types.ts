@@ -1,5 +1,15 @@
 // Shared types for the ninthwave CLI.
 
+// ── Structured logging ────────────────────────────────────────────────
+
+/** Structured log entry emitted as newline-delimited JSON to stdout (JSON mode) or log file (TUI mode). */
+export interface LogEntry {
+  ts: string;
+  level: "info" | "warn" | "error" | "debug";
+  event: string;
+  [key: string]: unknown;
+}
+
 export type Priority = "critical" | "high" | "medium" | "low";
 export type Status = "open" | "in-progress";
 

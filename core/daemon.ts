@@ -1,9 +1,11 @@
-// Daemon mode utilities: PID file management, state serialization, stale PID detection.
+// Daemon mode utilities: PID file management, state serialization, stale PID detection,
+// and daemon fork (detached background process launch).
 
 import {
   existsSync,
   readFileSync,
   writeFileSync,
+  openSync,
   unlinkSync,
   mkdirSync,
   readdirSync,
@@ -12,6 +14,7 @@ import {
   statSync,
 } from "fs";
 import { dirname, join } from "path";
+import { spawn as nodeSpawn } from "node:child_process";
 import type { OrchestratorItem } from "./orchestrator.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -761,4 +764,48 @@ export function migrateRuntimeState(projectRoot: string): void {
       // best-effort -- archive will be recreated
     }
   }
+}
+
+// ── Daemon fork ─────────────────────────────────────────────────────
+
+/**
+ * Fork the orchestrate command into a detached background process.
+ * Writes PID file, redirects output to log file, and returns immediately.
+ *
+ * @param childArgs - args to pass to the child (original args with --daemon replaced by --_daemon-child)
+ * @param projectRoot - project root for PID/log file paths
+ * @param spawnFn - injectable for testing; defaults to node:child_process spawn
+ * @param openFn - injectable for testing; defaults to fs.openSync
+ * @param daemonIO - injectable I/O for PID file; defaults to real fs
+ */
+export function forkDaemon(
+  childArgs: string[],
+  projectRoot: string,
+  spawnFn: typeof nodeSpawn = nodeSpawn,
+  openFn: typeof openSync = openSync,
+  daemonIO: DaemonIO = { writeFileSync, readFileSync: () => "" as any, unlinkSync: () => {}, existsSync, mkdirSync, renameSync },
+): { pid: number; logPath: string } {
+  const stateDir = userStateDir(projectRoot);
+  if (!daemonIO.existsSync(stateDir)) {
+    daemonIO.mkdirSync(stateDir, { recursive: true });
+  }
+
+  const logPath = logFilePath(projectRoot);
+
+  // Rotate logs at daemon startup to bound total log storage (~20MB max)
+  rotateLogs(logPath);
+
+  const logFd = openFn(logPath, "a");
+
+  const child = spawnFn(process.argv[0]!, [process.argv[1]!, "orchestrate", ...childArgs], {
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+    cwd: projectRoot,
+  });
+  child.unref();
+
+  const pid = child.pid!;
+  writePidFile(projectRoot, pid, daemonIO);
+
+  return { pid, logPath };
 }
