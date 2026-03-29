@@ -781,12 +781,16 @@ export const CREW_REMOTE_DOT = `${CYAN}\u25CF${RESET}`; // ● in cyan
  * When disconnected, shows OFFLINE indicator.
  */
 export function formatCrewStatusPanel(status: CrewStatusInfo, termWidth: number = 80): string {
+  let content: string;
   if (!status.connected) {
-    const text = ` Crew ${status.crewCode} | OFFLINE -- reconnecting...`;
-    return `${CREW_BG}${text}${" ".repeat(Math.max(0, termWidth - text.length))}${RESET}`;
+    content = `Crew ${status.crewCode} | OFFLINE -- reconnecting...`;
+  } else {
+    content = `Crew ${status.crewCode}  |  ${status.daemonCount} daemons  |  ${status.availableCount} avail  |  ${status.claimedCount} claimed  |  ${status.completedCount} done`;
   }
-  const text = ` Crew ${status.crewCode}  |  ${status.daemonCount} daemons  |  ${status.availableCount} avail  |  ${status.claimedCount} claimed  |  ${status.completedCount} done`;
-  return `${CREW_BG}${text}${" ".repeat(Math.max(0, termWidth - text.length))}${RESET}`;
+  const totalPad = Math.max(0, termWidth - content.length);
+  const leftPad = Math.floor(totalPad / 2);
+  const rightPad = totalPad - leftPad;
+  return `${CREW_BG}${" ".repeat(leftPad)}${content}${" ".repeat(rightPad)}${RESET}`;
 }
 
 /**
@@ -811,7 +815,7 @@ export function formatStatusTable(
 ): string {
   const lines: string[] = [];
 
-  lines.push(`${BOLD}ninthwave${RESET}`);
+  lines.push(`${BOLD}Ninthwave${RESET}`);
   lines.push("");
 
   if (items.length === 0) {
@@ -1165,8 +1169,8 @@ export function formatTitleMetrics(
   termWidth: number = 80,
   sessionStartedAt?: string,
 ): string {
-  const title = `${BOLD}ninthwave${RESET}`;
-  const titlePlain = "ninthwave";
+  const title = `${BOLD}Ninthwave${RESET}`;
+  const titlePlain = "Ninthwave";
 
   // Compute metrics
   const metrics = computeSessionMetrics(items, sessionStartedAt);
@@ -1218,7 +1222,7 @@ export function buildStatusLayout(
   const footerLines: string[] = [];
 
   if (items.length === 0) {
-    headerLines.push(`${BOLD}ninthwave${RESET}`);
+    headerLines.push(`${BOLD}Ninthwave${RESET}`);
     headerLines.push("");
     headerLines.push(`  ${DIM}No active items${RESET}`);
     headerLines.push("");
@@ -2008,7 +2012,7 @@ export function renderHelpOverlay(
 
   // Credits section
   sections.push([
-    `${DIM}ninthwave -- parallel AI coding orchestration${RESET}`,
+    `${DIM}Ninthwave -- parallel AI coding orchestration${RESET}`,
     `${DIM}Apache-2.0 -- ninthwave.sh${RESET}`,
   ]);
 

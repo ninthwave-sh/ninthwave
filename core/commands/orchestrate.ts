@@ -159,7 +159,7 @@ export function orchestratorItemsToStatusItems(
   return items.map((item) => ({
     id: item.id,
     title: item.workItem.title,
-    state: mapDaemonItemState(item.state),
+    state: remoteItemIds?.has(item.id) ? "implementing" : mapDaemonItemState(item.state),
     prNumber: item.prNumber ?? null,
     ageMs: Date.now() - new Date(item.lastTransition).getTime(),
     repoLabel: item.resolvedRepoRoot ? basename(item.resolvedRepoRoot) : "",

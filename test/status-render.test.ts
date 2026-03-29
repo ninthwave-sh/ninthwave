@@ -820,7 +820,7 @@ describe("formatStatusTable", () => {
   it("renders header row with column names", () => {
     const items = [makeStatusItem()];
     const table = stripAnsi(formatStatusTable(items, 80));
-    expect(table).toContain("ninthwave");
+    expect(table).toContain("Ninthwave");
     expect(table).not.toContain("ninthwave status");
     expect(table).toContain("ID");
     expect(table).toContain("STATE");
@@ -1392,6 +1392,23 @@ describe("orchestratorItemsToStatusItems", () => {
     const result = orchestratorItemsToStatusItems([]);
     expect(result).toEqual([]);
   });
+
+  it("overrides state to implementing for remote items", () => {
+    const items = [
+      makeOrchestratorItem("R-1", "queued"),
+      makeOrchestratorItem("R-2", "ready"),
+      makeOrchestratorItem("R-3", "implementing"),
+    ];
+    const remoteIds = new Set(["R-1", "R-2"]);
+    const result = orchestratorItemsToStatusItems(items, remoteIds);
+    expect(result[0]!.state).toBe("implementing");
+    expect(result[0]!.remote).toBe(true);
+    expect(result[1]!.state).toBe("implementing");
+    expect(result[1]!.remote).toBe(true);
+    // Non-remote item keeps its own state
+    expect(result[2]!.state).toBe("implementing");
+    expect(result[2]!.remote).toBe(false);
+  });
 });
 
 // ── renderTuiFrame ─────────────────────────────────────────────────────────────
@@ -1654,7 +1671,7 @@ describe("formatStatusTable with ViewOptions", () => {
   it("backward compatible: calling without viewOptions still works", () => {
     const items = [makeStatusItem()];
     const table = stripAnsi(formatStatusTable(items, 80));
-    expect(table).toContain("ninthwave");
+    expect(table).toContain("Ninthwave");
     expect(table).toContain("TEST-1");
   });
 
@@ -1770,7 +1787,7 @@ describe("buildStatusLayout", () => {
 
     // Header should include the title and column headers
     const headerText = layout.headerLines.map(stripAnsi).join("\n");
-    expect(headerText).toContain("ninthwave");
+    expect(headerText).toContain("Ninthwave");
     expect(headerText).toContain("ID");
     expect(headerText).toContain("STATE");
 
@@ -1841,7 +1858,7 @@ describe("buildStatusLayout", () => {
       sessionStartedAt: new Date(now - 3_600_000).toISOString(),
     });
     const headerText = layout.headerLines.map(stripAnsi).join("\n");
-    expect(headerText).toContain("ninthwave");
+    expect(headerText).toContain("Ninthwave");
     expect(headerText).toContain("Lead:");
     expect(headerText).toContain("Thru:");
   });
@@ -2165,7 +2182,7 @@ describe("formatTitleMetrics", () => {
   it("shows plain title when no metrics available", () => {
     const items = [makeStatusItem({ id: "A-1", state: "implementing" })];
     const text = stripAnsi(formatTitleMetrics(items, 80));
-    expect(text).toBe("ninthwave");
+    expect(text).toBe("Ninthwave");
   });
 
   it("shows right-aligned Lead/Thru/Session when metrics available", () => {
@@ -2180,7 +2197,7 @@ describe("formatTitleMetrics", () => {
     ];
     const termWidth = 120;
     const text = stripAnsi(formatTitleMetrics(items, termWidth, new Date(now - 3_600_000).toISOString()));
-    expect(text).toContain("ninthwave");
+    expect(text).toContain("Ninthwave");
     expect(text).toContain("Lead:");
     expect(text).toContain("Thru:");
     expect(text).toContain("Session:");
@@ -2199,7 +2216,7 @@ describe("formatTitleMetrics", () => {
       }),
     ];
     const text = stripAnsi(formatTitleMetrics(items, 50, new Date(now - 3_600_000).toISOString()));
-    expect(text).toBe("ninthwave");
+    expect(text).toBe("Ninthwave");
     expect(text).not.toContain("Lead:");
   });
 
@@ -2215,7 +2232,7 @@ describe("formatTitleMetrics", () => {
     ];
     // Width of 60 -- right at the threshold, should still show metrics if they fit
     const text60 = stripAnsi(formatTitleMetrics(items, 60, new Date(now - 3_600_000).toISOString()));
-    expect(text60).toContain("ninthwave");
+    expect(text60).toContain("Ninthwave");
   });
 
   it("shows only Lead when throughput is null (no sessionStartedAt)", () => {
@@ -2230,7 +2247,7 @@ describe("formatTitleMetrics", () => {
     ];
     // No sessionStartedAt → throughput and session duration are null
     const text = stripAnsi(formatTitleMetrics(items, 80));
-    expect(text).toContain("ninthwave");
+    expect(text).toContain("Ninthwave");
     expect(text).toContain("Lead:");
     expect(text).not.toContain("Thru:");
     expect(text).not.toContain("Session:");
@@ -2284,7 +2301,7 @@ describe("formatTitleMetrics", () => {
     // Session: 12h 30m
     const sessionStart = new Date(now - 45_000_000).toISOString();
 
-    const plainTitle = "ninthwave";
+    const plainTitle = "Ninthwave";
     // Get the actual metrics string at a wide width
     const wideText = stripAnsi(formatTitleMetrics(items, 200, sessionStart));
     const metricsStr = wideText.trimEnd().slice(wideText.trimEnd().lastIndexOf("Lead:"));
@@ -2315,7 +2332,7 @@ describe("formatTitleMetrics", () => {
     );
     const sessionStart = new Date(now - 45_000_000).toISOString();
 
-    const plainTitle = "ninthwave";
+    const plainTitle = "Ninthwave";
     const wideText = stripAnsi(formatTitleMetrics(items, 200, sessionStart));
     const metricsStr = wideText.trimEnd().slice(wideText.trimEnd().lastIndexOf("Lead:"));
     const minWidth = plainTitle.length + 4 + metricsStr.length;
@@ -2326,7 +2343,7 @@ describe("formatTitleMetrics", () => {
 
     const text = stripAnsi(formatTitleMetrics(items, tooNarrow, sessionStart));
     // Should gracefully fall back to plain title without metrics
-    expect(text).toBe("ninthwave");
+    expect(text).toBe("Ninthwave");
     expect(text).not.toContain("Lead:");
   });
 });
@@ -2381,6 +2398,25 @@ describe("crew mode TUI rendering", () => {
     expect(text).toContain("3 avail");
     expect(text).toContain("5 claimed");
     expect(text).toContain("2 done");
+  });
+
+  it("formatCrewStatusPanel centers content within terminal width", () => {
+    const output = formatCrewStatusPanel({
+      crewCode: "ABC",
+      daemonCount: 2,
+      availableCount: 1,
+      claimedCount: 1,
+      completedCount: 0,
+      connected: true,
+    }, 80);
+    const text = stripAnsi(output);
+    expect(text.length).toBe(80);
+    // Content should have leading padding (centered, not left-aligned)
+    expect(text.startsWith(" ")).toBe(true);
+    const trimmed = text.trim();
+    const leading = text.indexOf(trimmed);
+    const trailing = text.length - leading - trimmed.length;
+    expect(Math.abs(leading - trailing)).toBeLessThanOrEqual(1);
   });
 
   it("formatCrewStatusPanel shows OFFLINE when disconnected", () => {
@@ -2496,7 +2532,7 @@ describe("renderHelpOverlay", () => {
     expect(text).toContain("bypass");
     expect(text).toContain("Keyboard Shortcuts");
     expect(text).toContain("Shift+Tab");
-    expect(text).toContain("ninthwave");
+    expect(text).toContain("Ninthwave");
     expect(text).toContain("Apache-2.0");
     expect(text).toContain("ninthwave.sh");
   });
@@ -2584,7 +2620,7 @@ describe("renderTuiFrame with showHelp", () => {
 
     const output = chunks.join("");
     const text = stripAnsi(output);
-    expect(text).toContain("ninthwave");
+    expect(text).toContain("Ninthwave");
   });
 });
 
