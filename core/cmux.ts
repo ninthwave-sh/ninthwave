@@ -1,6 +1,7 @@
 import { run } from "./shell.ts";
 import { sendMessageImpl } from "./send-message.ts";
 import { setStatusImpl, setProgressImpl } from "./cmux-status.ts";
+import { resolveCmuxBinary } from "./cmux-resolve.ts";
 import type { RunResult } from "./types.ts";
 export type { SendMessageDeps, Runner, Sleeper } from "./send-message.ts";
 export { verifyDelivery } from "./send-message.ts";
@@ -8,9 +9,16 @@ export { verifyDelivery } from "./send-message.ts";
 /** Shell runner signature for dependency injection. */
 export type ShellRunner = (cmd: string, args: string[]) => RunResult;
 
+/** Resolved cmux binary path (cached at module load). */
+let _cmuxBin: string | null | undefined;
+function cmuxBin(): string {
+  if (_cmuxBin === undefined) _cmuxBin = resolveCmuxBinary();
+  return _cmuxBin ?? "cmux";
+}
+
 /** Check if the cmux binary is available. */
 export function isAvailable(): boolean {
-  const result = run("cmux", ["--version"]);
+  const result = run(cmuxBin(), ["version"]);
   return result.exitCode === 0;
 }
 
@@ -22,7 +30,7 @@ export function launchWorkspace(
   cwd: string,
   command: string,
 ): string | null {
-  const result = run("cmux", [
+  const result = run(cmuxBin(), [
     "new-workspace",
     "--cwd",
     cwd,
@@ -46,7 +54,7 @@ export function sendMessage(
   message: string,
 ): boolean {
   return sendMessageImpl(workspaceRef, message, {
-    runner: (cmd, args) => run(cmd, args),
+    runner: (_cmd, args) => run(cmuxBin(), args),
     sleep: (ms) => Bun.sleepSync(ms),
   });
 }
@@ -56,7 +64,7 @@ export function readScreen(
   workspaceRef: string,
   lines: number = 10,
 ): string {
-  const result = run("cmux", [
+  const result = run(cmuxBin(), [
     "read-screen",
     "--workspace",
     workspaceRef,
@@ -69,14 +77,14 @@ export function readScreen(
 
 /** List all cmux workspaces. Returns the raw output string. */
 export function listWorkspaces(): string {
-  const result = run("cmux", ["list-workspaces"]);
+  const result = run(cmuxBin(), ["list-workspaces"]);
   if (result.exitCode !== 0) return "";
   return result.stdout;
 }
 
 /** Close a cmux workspace. Returns true on success. */
 export function closeWorkspace(workspaceRef: string): boolean {
-  const result = run("cmux", [
+  const result = run(cmuxBin(), [
     "close-workspace",
     "--workspace",
     workspaceRef,
@@ -97,7 +105,7 @@ export function setStatus(
   icon: string,
   color: string,
 ): boolean {
-  return setStatusImpl(ref, key, text, icon, color, run);
+  return setStatusImpl(ref, key, text, icon, color, (_cmd, args) => run(cmuxBin(), args));
 }
 
 /**
@@ -111,7 +119,7 @@ export function setProgress(
   value: number,
   label?: string,
 ): boolean {
-  return setProgressImpl(ref, value, label, run);
+  return setProgressImpl(ref, value, label, (_cmd, args) => run(cmuxBin(), args));
 }
 
 /**
@@ -123,7 +131,7 @@ export function setProgress(
  * `cmux send` delivers the command text (with trailing `\n` for Enter).
  */
 export function splitPane(command: string): string | null {
-  return splitPaneImpl(command, run);
+  return splitPaneImpl(command, (_cmd, args) => run(cmuxBin(), args));
 }
 
 /**
