@@ -221,7 +221,7 @@ This would isolate the branching logic from the prompt construction and session 
 
 The `MuxType` union (line 79) is `"cmux"` -- a single variant. `detectMuxType()` (lines 108-121) checks for cmux and errors if not found. The `getMux()` function (lines 131-139) always returns `CmuxAdapter` regardless of detection.
 
-The abstraction was designed for multi-tool support (ETHOS.md principle #6: "No vendor lock-in"). However, the adapter pattern adds:
+The abstraction was designed for multi-tool support (ETHOS.md principle #5: "No vendor lock-in"). However, the adapter pattern adds:
 - 293 LOC in `mux.ts` (interface + adapter + detection + auto-launch)
 - 156 LOC in `cmux.ts` (concrete implementation)
 - Indirection: every mux call goes through `Multiplexer` → `CmuxAdapter` → `cmux.*` → `run("cmux", ...)`
@@ -339,15 +339,15 @@ Removing layer 2 would require either increasing `launchTimeoutMs` to accommodat
 | Feature | Tag | Rationale |
 |---|---|---|
 | `delivery.ts` (63 LOC) | **KEEP** | Shared retry and verification logic used by `send-message.ts`. The `sendWithRetry` function is generic and `checkDelivery` encapsulates a non-trivial heuristic. Without this module, the retry logic would be duplicated or inlined. 63 LOC is minimal. |
-| `Multiplexer` interface in `mux.ts` | **KEEP** | Required by ETHOS.md principle #6 (no vendor lock-in). Provides testability via mock implementations. The interface is the contract that enables future backends (tmux, Zellij). |
+| `Multiplexer` interface in `mux.ts` | **KEEP** | Required by ETHOS.md principle #5 (no vendor lock-in). Provides testability via mock implementations. The interface is the contract that enables future backends (tmux, Zellij). |
 | `CmuxAdapter` in `mux.ts` | **QUESTIONABLE** | Pure passthrough -- every method delegates to `cmux.*` with no transformation. Could be replaced by having `cmux.ts` export an object conforming to `Multiplexer`. But the adapter pattern is standard and the overhead is ~35 LOC. |
 | `mux.ts` auto-launch logic | **KEEP** | The `ensureMuxOrAutoLaunch` function (lines 237-257) is essential UX -- users running `nw watch` outside cmux get auto-launched into a cmux session. The detection chain (`checkAutoLaunch`, lines 166-198) handles recursive launch guards, non-TTY environments, and missing cmux. |
 | `mux.ts` `waitForReady` | **QUESTIONABLE** | Legacy ready-detection used as fallback in `launchAiSession` (launch.ts:313). The primary path uses `sendWithReadyWait` from `worker-health.ts`. Could be removed if the legacy fallback is deemed unnecessary. |
 | Partition-based port isolation | **KEEP** | Essential for parallel workers. Without partitions, workers running tests on the same project would collide on default ports (3000, 5432, etc.). The partition number is passed as `YOUR_PARTITION` in the system prompt, and workers use it to offset ports. Even if "most projects don't have port conflicts," the ones that do would be silently broken. |
 | Three-layer health monitoring | **KEEP** | Each layer addresses a distinct failure mode (see Finding 14). Removing any layer creates a blind spot. |
-| `seedAgentFiles` in `launch.ts` | **KEEP** | Required for cross-repo items where the target repo doesn't have agent files. Also handles first-time setup. The three-target seeding (`.claude/agents`, `.opencode/agents`, `.github/agents`) supports multi-tool compatibility (ETHOS.md principle #6). |
+| `seedAgentFiles` in `launch.ts` | **KEEP** | Required for cross-repo items where the target repo doesn't have agent files. Also handles first-time setup. The three-target seeding (`.claude/agents`, `.opencode/agents`, `.github/agents`) supports multi-tool compatibility (ETHOS.md principle #5). |
 | `cleanStaleBranchForReuse` in `launch.ts` | **KEEP** | Addresses a real bug: reused work item IDs with merged branches cause workers to immediately detect the merged PR and exit. The title-matching heuristic (`prTitleMatchesWorkItem`) distinguishes same-ID-same-work from same-ID-different-work. |
-| `detectAiTool` in `launch.ts` | **KEEP** | Multi-tool detection chain (env vars → process tree → PATH check). Required for ETHOS.md principle #6. The 5-step chain is thorough. |
+| `detectAiTool` in `launch.ts` | **KEEP** | Multi-tool detection chain (env vars → process tree → PATH check). Required for ETHOS.md principle #5. The 5-step chain is thorough. |
 
 ### Summary
 

@@ -2,7 +2,7 @@
 
 ## Summary
 
-The Orchestrator class (`core/orchestrator.ts`, 2,662 LOC) is a well-structured state machine with a clean pure/impure separation: `processTransitions()` computes actions from snapshots, and `executeAction()` performs side effects via injected dependencies. The design faithfully follows the "deterministic core, advisory AI" ethos (ETHOS.md principle #3).
+The Orchestrator class (`core/orchestrator.ts`, 2,662 LOC) is a well-structured state machine with a clean pure/impure separation: `processTransitions()` computes actions from snapshots, and `executeAction()` performs side effects via injected dependencies. The design faithfully follows the "deterministic core, advisory AI" ethos (ETHOS.md principle #2).
 
 The state machine has 19 states in code (the `OrchestratorItemState` union at lines 22-41) but only 16 are documented in ARCHITECTURE.md. Three states -- `repairing`, `verify-failed`, and `repairing-main` -- were added after the docs were written and are undocumented. All 19 states are reachable through explicit transition paths; there are no dead states.
 
