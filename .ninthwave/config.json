@@ -1,4 +1,5 @@
 {
   "review_external": false,
-  "schedule_enabled": false
+  "schedule_enabled": false,
+  "ai_tool": "claude"
 }
