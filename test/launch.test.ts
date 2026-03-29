@@ -1327,6 +1327,28 @@ describe("launchAiSession agentName", () => {
     // OpenCode should use sendMessage for post-launch delivery
     expect(mockMux.sendMessage.mock.calls.length).toBeGreaterThan(0);
   });
+
+  it("custom/unknown tool falls back to raw command launch with post-launch send", () => {
+    const mockMux = createMockMux();
+    // Return processing indicators so sendWithReadyWait succeeds immediately
+    mockMux.readScreen = vi.fn(() => "⠋ Thinking...\nLine2\nLine3\nLine4");
+    const repo = setupTempRepo();
+    const promptFile = join(repo, "prompt.txt");
+    writeFileSync(promptFile, "implement the work item");
+
+    const wsRef = launchAiSession("my-custom-tool", repo, "T-1", "Test", promptFile, mockMux);
+
+    expect(wsRef).not.toBeNull();
+    // Command should be the raw tool string (not a launcher script or known tool command)
+    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const cmd = launchCall[1] as string;
+    expect(cmd).toBe("my-custom-tool");
+    // Post-launch send should occur (prompt delivered via sendMessage)
+    expect(mockMux.sendMessage.mock.calls.length).toBeGreaterThan(0);
+    // Sent message should include the prompt file content
+    const sentMsg = mockMux.sendMessage.mock.calls[0][1] as string;
+    expect(sentMsg).toContain("implement the work item");
+  });
 });
 
 describe("launchSingleItem agentName default", () => {

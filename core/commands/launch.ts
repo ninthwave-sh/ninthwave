@@ -1,10 +1,9 @@
 // Launch functions: create worktrees and start AI coding sessions for work items.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { join, basename } from "path";
 import { tmpdir } from "os";
-import { run } from "../shell.ts";
-import { die, warn, info } from "../output.ts";
+import { warn, info } from "../output.ts";
 import {
   fetchOrigin as defaultFetchOrigin,
   ffMerge as defaultFfMerge,
@@ -21,6 +20,12 @@ import { allocatePartition, getPartitionFor, releasePartition } from "../partiti
 import { resolveRepo, writeCrossRepoIndex, removeCrossRepoIndex, ensureWorktreeExcluded } from "../cross-repo.ts";
 import { readWorkItem } from "../work-item-files.ts";
 import { prList as defaultPrList } from "../gh.ts";
+import {
+  isAiToolId,
+  getToolProfile,
+  defaultLaunchDeps,
+  type LaunchDeps,
+} from "../ai-tools.ts";
 
 /** Injectable dependencies for launch git operations, for testing. */
 export interface LaunchGitDeps {
@@ -82,44 +87,24 @@ export function launchAiSession(
   promptFile: string,
   mux: Multiplexer,
   options: { projectRoot?: string; agentName?: string } = {},
+  deps: LaunchDeps = defaultLaunchDeps,
 ): string | null {
   const agentName = options.agentName ?? "ninthwave-implementer";
   const wsName = `${id} ${safeTitle}`;
   let cmd = "";
   let initialPrompt = "Start";
 
-  switch (tool) {
-    case "claude":
-      cmd = `claude --name '${wsName}' --permission-mode bypassPermissions --agent ${agentName} --append-system-prompt "$(cat '.nw-prompt')" -- Start`;
-      initialPrompt = ""; // embedded as positional arg -- skip post-launch send
-      break;
-    case "opencode":
-      cmd = `opencode --agent ${agentName} --title '${wsName}'`;
-      initialPrompt = `${readFileSync(promptFile, "utf-8")}\n\nStart implementing this work item now.`;
-      break;
-    case "copilot": {
-      // Write a launcher script that reads the prompt from a file and passes
-      // it to copilot via -i. This avoids all shell quoting issues with
-      // multiline/unicode content going through multiplexers.
-      const launcherScript = `/tmp/nw-launch-${id}-${Date.now()}.sh`;
-      const promptDataFile = `/tmp/nw-prompt-${id}-${Date.now()}`;
-      writeFileSync(
-        promptDataFile,
-        `${readFileSync(promptFile, "utf-8")}\n\nStart implementing this work item now.`,
-      );
-      writeFileSync(
-        launcherScript,
-        `#!/bin/bash\nPROMPT=$(cat '${promptDataFile}')\nrm -f '${promptDataFile}' '${launcherScript}'\nexec copilot --agent=${agentName} --allow-all -i "$PROMPT"\n`,
-      );
-      run("chmod", ["+x", launcherScript]);
-      cmd = launcherScript;
-      initialPrompt = ""; // embedded in cmd via -i -- skip post-launch send
-      break;
-    }
-    default:
-      die(
-        `Unknown AI tool: ${tool}. Ensure claude, opencode, or copilot is in your PATH.`,
-      );
+  if (isAiToolId(tool)) {
+    // Known tool: dispatch through its registered profile.
+    const profile = getToolProfile(tool);
+    const result = profile.buildLaunchCmd({ wsName, agentName, promptFile, id }, deps);
+    cmd = result.cmd;
+    initialPrompt = result.initialPrompt;
+  } else {
+    // Unknown/custom tool (e.g. NINTHWAVE_AI_TOOL override): launch the raw
+    // command string and deliver the prompt post-launch via sendMessage.
+    cmd = tool;
+    initialPrompt = `${deps.readFileSync(promptFile, "utf-8")}\n\nStart implementing this work item now.`;
   }
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);

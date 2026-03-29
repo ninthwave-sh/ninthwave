@@ -11,6 +11,7 @@ import type {
   ScheduleWorkerEntry,
 } from "./schedule-state.ts";
 import type { CrewBroker } from "./crew.ts";
+import { isAiToolId, getToolProfile } from "./ai-tools.ts";
 
 // ── Check schedules ─────────────────────────────────────────────────
 
@@ -117,7 +118,11 @@ export function launchScheduledTask(
     .replace(/\$/g, "\\$")
     .replace(/`/g, "\\`");
 
-  const command = `cd "${projectRoot}" && ${aiTool} --print "${escapedPrompt}"`;
+  // For known AI tools, derive the command name from the profile (makes derivation
+  // explicit and ensures future profiles stay consistent); for custom tools
+  // (NINTHWAVE_AI_TOOL override), use the raw string as-is.
+  const toolCmd = isAiToolId(aiTool) ? getToolProfile(aiTool).id : aiTool;
+  const command = `cd "${projectRoot}" && ${toolCmd} --print "${escapedPrompt}"`;
 
   const ref = deps.launchWorkspace(projectRoot, command, `schedule-${task.id}`);
   return ref;
