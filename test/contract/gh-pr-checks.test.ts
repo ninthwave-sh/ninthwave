@@ -43,22 +43,22 @@ function stubCheckPrStatus(opts: {
   mergeable?: string;
 }): void {
   prListSpy.mockImplementation((_root: string, _branch: string, state: string) => {
-    if (state === "open") return [{ number: 100, title: "Test PR" }];
-    return [];
+    if (state === "open") return { ok: true, data: [{ number: 100, title: "Test PR" }] };
+    return { ok: true, data: [] };
   });
-  prViewSpy.mockReturnValue({
+  prViewSpy.mockReturnValue({ ok: true, data: {
     reviewDecision: opts.reviewDecision ?? "",
     mergeable: opts.mergeable ?? "UNKNOWN",
     updatedAt: "2026-03-29T12:00:00Z",
-  });
-  prChecksSpy.mockReturnValue(
+  } });
+  prChecksSpy.mockReturnValue({ ok: true, data:
     opts.checks.map((c) => ({
       state: c.state,
       name: c.name,
       url: c.url ?? `https://github.com/runs/${c.name}`,
       completedAt: c.completedAt,
     })),
-  );
+  });
 }
 
 // ── 1. prChecks output contract ─────────────────────────────────────
@@ -82,48 +82,54 @@ describe("prChecks output contract", () => {
 
   for (const state of ALL_STATES) {
     it(`returns correct state/name/url/completedAt for ${state}`, () => {
-      prChecksSpy.mockReturnValue([
+      prChecksSpy.mockReturnValue({ ok: true, data: [
         {
           state,
           name: `ci-${state.toLowerCase()}`,
           url: `https://github.com/runs/${state}`,
           completedAt: "2026-03-29T12:34:56Z",
         },
-      ]);
+      ] });
 
       const result = prChecks("/repo", 1);
 
-      expect(result).toHaveLength(1);
-      expect(result[0]).toEqual({
-        state,
-        name: `ci-${state.toLowerCase()}`,
-        url: `https://github.com/runs/${state}`,
-        completedAt: "2026-03-29T12:34:56Z",
-      });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0]).toEqual({
+          state,
+          name: `ci-${state.toLowerCase()}`,
+          url: `https://github.com/runs/${state}`,
+          completedAt: "2026-03-29T12:34:56Z",
+        });
+      }
     });
   }
 
   it("preserves all fields for multiple checks in a single response", () => {
-    prChecksSpy.mockReturnValue([
+    prChecksSpy.mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "build", url: "https://ci/1", completedAt: "2026-03-29T10:00:00Z" },
       { state: "FAILURE", name: "lint", url: "https://ci/2", completedAt: "2026-03-29T10:01:00Z" },
       { state: "PENDING", name: "deploy", url: "https://ci/3", completedAt: undefined },
-    ]);
+    ] });
 
     const result = prChecks("/repo", 1);
 
-    expect(result).toHaveLength(3);
-    expect(result.map((c) => c.state)).toEqual(["SUCCESS", "FAILURE", "PENDING"]);
-    expect(result.map((c) => c.name)).toEqual(["build", "lint", "deploy"]);
-    expect(result[0]!.completedAt).toBe("2026-03-29T10:00:00Z");
-    expect(result[2]!.completedAt).toBeUndefined();
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data).toHaveLength(3);
+      expect(result.data.map((c) => c.state)).toEqual(["SUCCESS", "FAILURE", "PENDING"]);
+      expect(result.data.map((c) => c.name)).toEqual(["build", "lint", "deploy"]);
+      expect(result.data[0]!.completedAt).toBe("2026-03-29T10:00:00Z");
+      expect(result.data[2]!.completedAt).toBeUndefined();
+    }
   });
 
   it("returns empty array when no checks exist", () => {
-    prChecksSpy.mockReturnValue([]);
+    prChecksSpy.mockReturnValue({ ok: true, data: [] });
 
     const result = prChecks("/repo", 1);
-    expect(result).toEqual([]);
+    expect(result).toEqual({ ok: true, data: [] });
   });
 });
 

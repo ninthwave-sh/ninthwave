@@ -65,8 +65,8 @@ export function cmdMergedIds(
 
     // Check via gh PR status
     if (!merged) {
-      const mergedPrs = prList(repoRoot, branch, "merged");
-      if (mergedPrs.length > 0) merged = true;
+      const result = prList(repoRoot, branch, "merged");
+      if (result.ok && result.data.length > 0) merged = true;
     }
 
     if (merged) {

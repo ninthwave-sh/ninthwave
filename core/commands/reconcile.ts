@@ -198,7 +198,8 @@ function defaultWorktreeHasCommits(id: string, worktreeDir: string, _projectRoot
 
 function defaultBranchHasOpenPR(id: string, projectRoot: string): boolean {
   const branch = `ninthwave/${id}`;
-  return prList(projectRoot, branch, "open").length > 0;
+  const result = prList(projectRoot, branch, "open");
+  return result.ok && result.data.length > 0;
 }
 
 /** Build default dependencies from real implementations. */

@@ -10,8 +10,11 @@ export function cmdCiFailures(
   const prNumber = args[0] ?? "";
   if (!prNumber) die("Usage: ninthwave ci-failures <PR_NUMBER>");
 
-  const checks = prChecks(projectRoot, parseInt(prNumber, 10));
-  const failures = checks.filter((c) => c.state === "FAILURE");
+  const checksResult = prChecks(projectRoot, parseInt(prNumber, 10));
+  if (!checksResult.ok) {
+    die(`Failed to get CI checks: ${checksResult.error}`);
+  }
+  const failures = checksResult.data.filter((c) => c.state === "FAILURE");
 
   if (failures.length === 0) {
     console.log("No failing checks found");

@@ -1781,7 +1781,7 @@ describe("multi-round review cycle", () => {
 
 function makeStaleBranchDeps(overrides: Partial<StaleBranchCleanupDeps> = {}): StaleBranchCleanupDeps {
   return {
-    prList: () => [],
+    prList: () => ({ ok: true as const, data: [] as Array<{ number: number; title: string }> }),
     branchExists: () => false,
     deleteBranch: () => {},
     deleteRemoteBranch: () => {},
@@ -1798,8 +1798,8 @@ describe("cleanStaleBranchForReuse", () => {
 
     const deps = makeStaleBranchDeps({
       prList: (_repo, _branch, state) => {
-        if (state === "merged") return [{ number: 10, title: "fix: old work (H-1-1)" }];
-        return [];
+        if (state === "merged") return { ok: true as const, data: [{ number: 10, title: "fix: old work (H-1-1)" }] };
+        return { ok: true as const, data: [] as Array<{ number: number; title: string }> };
       },
       branchExists: () => true,
       deleteBranch: (_repo, branch) => { deletedLocal.push(branch); },
@@ -1818,8 +1818,8 @@ describe("cleanStaleBranchForReuse", () => {
 
     const deps = makeStaleBranchDeps({
       prList: (_repo, _branch, state) => {
-        if (state === "merged") return [{ number: 10, title: "feat: add feature X (H-1-1)" }];
-        return [];
+        if (state === "merged") return { ok: true as const, data: [{ number: 10, title: "feat: add feature X (H-1-1)" }] };
+        return { ok: true as const, data: [] as Array<{ number: number; title: string }> };
       },
       branchExists: () => true,
       deleteBranch: () => { deleteCalled = true; },
@@ -1836,7 +1836,7 @@ describe("cleanStaleBranchForReuse", () => {
     let deleteCalled = false;
 
     const deps = makeStaleBranchDeps({
-      prList: () => [],
+      prList: () => ({ ok: true as const, data: [] as Array<{ number: number; title: string }> }),
       deleteBranch: () => { deleteCalled = true; },
       deleteRemoteBranch: () => { deleteCalled = true; },
     });
@@ -1853,8 +1853,8 @@ describe("cleanStaleBranchForReuse", () => {
 
     const deps = makeStaleBranchDeps({
       prList: (_repo, _branch, state) => {
-        if (state === "merged") return [{ number: 10, title: "fix: old work" }];
-        return [];
+        if (state === "merged") return { ok: true as const, data: [{ number: 10, title: "fix: old work" }] };
+        return { ok: true as const, data: [] as Array<{ number: number; title: string }> };
       },
       branchExists: () => true,
       deleteBranch: () => { throw new Error("branch locked"); },
@@ -1877,8 +1877,8 @@ describe("cleanStaleBranchForReuse", () => {
 
     const deps = makeStaleBranchDeps({
       prList: (_repo, _branch, state) => {
-        if (state === "merged") return [{ number: 10, title: "fix: old work" }];
-        return [];
+        if (state === "merged") return { ok: true as const, data: [{ number: 10, title: "fix: old work" }] };
+        return { ok: true as const, data: [] as Array<{ number: number; title: string }> };
       },
       branchExists: () => false,
       deleteBranch: () => { localDeleteCalled = true; },
@@ -1897,8 +1897,8 @@ describe("cleanStaleBranchForReuse", () => {
 
     const deps = makeStaleBranchDeps({
       prList: (_repo, _branch, state) => {
-        if (state === "merged") return [{ number: 10, title: "fix: old work" }];
-        return [];
+        if (state === "merged") return { ok: true as const, data: [{ number: 10, title: "fix: old work" }] };
+        return { ok: true as const, data: [] as Array<{ number: number; title: string }> };
       },
       branchExists: () => false,
       deleteRemoteBranch: () => { throw new Error("network error"); },

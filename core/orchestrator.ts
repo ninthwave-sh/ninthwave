@@ -193,6 +193,8 @@ export interface PollSnapshot {
   items: ItemSnapshot[];
   /** IDs of items whose dependencies are all in 'done' state. */
   readyIds: string[];
+  /** Count of items where GitHub API returned errors (hold-state applied). */
+  apiErrorCount?: number;
 }
 
 // ── Actions ──────────────────────────────────────────────────────────

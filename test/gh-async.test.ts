@@ -24,7 +24,7 @@ describe("prListAsync", () => {
 
     const result = await prListAsync("/repo", "ninthwave/T-1-1", "open");
 
-    expect(result).toEqual([{ number: 42, title: "Fix bug" }]);
+    expect(result).toEqual({ ok: true, data: [{ number: 42, title: "Fix bug" }] });
     expect(runAsyncSpy).toHaveBeenCalledWith(
       "gh",
       ["pr", "list", "--head", "ninthwave/T-1-1", "--state", "open", "--json", "number,title", "--limit", "100"],
@@ -32,22 +32,23 @@ describe("prListAsync", () => {
     );
   });
 
-  it("returns empty array on gh failure", async () => {
-    runAsyncSpy.mockReturnValue(fail());
+  it("returns ok:false on gh failure", async () => {
+    runAsyncSpy.mockReturnValue(fail("api error"));
     const result = await prListAsync("/repo", "ninthwave/T-1-1", "open");
-    expect(result).toEqual([]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("api error");
   });
 
-  it("returns empty array on invalid JSON", async () => {
+  it("returns ok:false on invalid JSON", async () => {
     runAsyncSpy.mockReturnValue(ok("not json"));
     const result = await prListAsync("/repo", "ninthwave/T-1-1", "open");
-    expect(result).toEqual([]);
+    expect(result.ok).toBe(false);
   });
 
-  it("returns empty array on empty stdout", async () => {
+  it("returns ok:true with empty array on empty stdout", async () => {
     runAsyncSpy.mockReturnValue(ok(""));
     const result = await prListAsync("/repo", "ninthwave/T-1-1", "open");
-    expect(result).toEqual([]);
+    expect(result).toEqual({ ok: true, data: [] });
   });
 });
 
@@ -58,7 +59,7 @@ describe("prViewAsync", () => {
 
     const result = await prViewAsync("/repo", 42, ["reviewDecision", "mergeable"]);
 
-    expect(result).toEqual(data);
+    expect(result).toEqual({ ok: true, data });
     expect(runAsyncSpy).toHaveBeenCalledWith(
       "gh",
       ["pr", "view", "42", "--json", "reviewDecision,mergeable"],
@@ -66,16 +67,17 @@ describe("prViewAsync", () => {
     );
   });
 
-  it("returns empty object on gh failure", async () => {
-    runAsyncSpy.mockReturnValue(fail());
+  it("returns ok:false on gh failure", async () => {
+    runAsyncSpy.mockReturnValue(fail("not found"));
     const result = await prViewAsync("/repo", 42, ["state"]);
-    expect(result).toEqual({});
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("not found");
   });
 
-  it("returns empty object on invalid JSON", async () => {
+  it("returns ok:false on invalid JSON", async () => {
     runAsyncSpy.mockReturnValue(ok("bad json"));
     const result = await prViewAsync("/repo", 42, ["state"]);
-    expect(result).toEqual({});
+    expect(result.ok).toBe(false);
   });
 });
 
@@ -89,27 +91,28 @@ describe("prChecksAsync", () => {
 
     const result = await prChecksAsync("/repo", 42);
 
-    expect(result).toEqual([
+    expect(result).toEqual({ ok: true, data: [
       { state: "SUCCESS", name: "test", url: "https://ci/1", completedAt: "2026-01-01T00:00:00Z" },
       { state: "PENDING", name: "lint", url: "https://ci/2", completedAt: undefined },
-    ]);
+    ] });
   });
 
-  it("returns empty array on gh failure", async () => {
-    runAsyncSpy.mockReturnValue(fail());
+  it("returns ok:false on gh failure", async () => {
+    runAsyncSpy.mockReturnValue(fail("timeout"));
     const result = await prChecksAsync("/repo", 42);
-    expect(result).toEqual([]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("timeout");
   });
 
-  it("returns empty array on invalid JSON", async () => {
+  it("returns ok:false on invalid JSON", async () => {
     runAsyncSpy.mockReturnValue(ok("invalid"));
     const result = await prChecksAsync("/repo", 42);
-    expect(result).toEqual([]);
+    expect(result.ok).toBe(false);
   });
 
-  it("returns empty array on empty stdout", async () => {
+  it("returns ok:true with empty array on empty stdout", async () => {
     runAsyncSpy.mockReturnValue(ok(""));
     const result = await prChecksAsync("/repo", 42);
-    expect(result).toEqual([]);
+    expect(result).toEqual({ ok: true, data: [] });
   });
 });

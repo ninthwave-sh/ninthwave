@@ -41,17 +41,17 @@ afterEach(() => {
 describe("checkPrStatusAsync", () => {
   it("returns open PR with CI info", async () => {
     prListAsyncSpy.mockImplementation(async (_root: string, _branch: string, state: string) => {
-      if (state === "open") return [{ number: 10, title: "Fix" }];
-      return [];
+      if (state === "open") return { ok: true, data: [{ number: 10, title: "Fix" }] };
+      return { ok: true, data: [] };
     });
-    prViewAsyncSpy.mockResolvedValue({
+    prViewAsyncSpy.mockResolvedValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
       updatedAt: "2026-01-01T00:00:00Z",
-    });
-    prChecksAsyncSpy.mockResolvedValue([
+    } });
+    prChecksAsyncSpy.mockResolvedValue({ ok: true, data: [
       { state: "SUCCESS", name: "test", url: "https://ci/1", completedAt: "2026-01-01T01:00:00Z" },
-    ]);
+    ] });
 
     const result = await checkPrStatusAsync("T-1-1", "/repo");
 
@@ -62,9 +62,9 @@ describe("checkPrStatusAsync", () => {
 
   it("returns merged PR", async () => {
     prListAsyncSpy.mockImplementation(async (_root: string, _branch: string, state: string) => {
-      if (state === "open") return [];
-      if (state === "merged") return [{ number: 5, title: "Done" }];
-      return [];
+      if (state === "open") return { ok: true, data: [] };
+      if (state === "merged") return { ok: true, data: [{ number: 5, title: "Done" }] };
+      return { ok: true, data: [] };
     });
 
     const result = await checkPrStatusAsync("T-1-1", "/repo");
@@ -75,7 +75,7 @@ describe("checkPrStatusAsync", () => {
   });
 
   it("returns no-pr when no PRs found", async () => {
-    prListAsyncSpy.mockResolvedValue([]);
+    prListAsyncSpy.mockResolvedValue({ ok: true, data: [] });
 
     const result = await checkPrStatusAsync("T-1-1", "/repo");
 
@@ -84,6 +84,14 @@ describe("checkPrStatusAsync", () => {
 
   it("returns empty string when gh unavailable", async () => {
     isAvailableSpy.mockReturnValue(false);
+
+    const result = await checkPrStatusAsync("T-1-1", "/repo");
+
+    expect(result).toBe("");
+  });
+
+  it("returns empty string when API fails (hold state)", async () => {
+    prListAsyncSpy.mockResolvedValue({ ok: false, error: "API timeout" });
 
     const result = await checkPrStatusAsync("T-1-1", "/repo");
 
@@ -233,5 +241,57 @@ describe("buildSnapshotAsync", () => {
     expect(snapshot.items).toHaveLength(1);
     expect(snapshot.items[0]!.prState).toBe("merged");
     expect(snapshot.items[0]!.prNumber).toBe(20);
+  });
+
+  it("tracks apiErrorCount when checkPr returns empty string (API error)", async () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("BA-6-1"));
+    orch.addItem(makeWorkItem("BA-6-2"));
+    orch.getItem("BA-6-1")!.reviewCompleted = true;
+    orch.getItem("BA-6-2")!.reviewCompleted = true;
+    orch.setState("BA-6-1", "ci-pending");
+    orch.setState("BA-6-2", "implementing");
+
+    // Both items return empty string (API error)
+    const asyncCheckPr = async () => "";
+
+    const snapshot = await buildSnapshotAsync(
+      orch,
+      "/project",
+      "/project/.worktrees",
+      fakeMux,
+      () => null,
+      asyncCheckPr,
+    );
+
+    // Items should still be in snapshot (for liveness/heartbeat data)
+    expect(snapshot.items).toHaveLength(2);
+    // apiErrorCount should count both failures
+    expect(snapshot.apiErrorCount).toBe(2);
+    // PR data should be empty (hold state)
+    for (const item of snapshot.items) {
+      expect(item.prNumber).toBeUndefined();
+      expect(item.ciStatus).toBeUndefined();
+    }
+  });
+
+  it("apiErrorCount is undefined when all API calls succeed", async () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("BA-7-1"));
+    orch.getItem("BA-7-1")!.reviewCompleted = true;
+    orch.setState("BA-7-1", "implementing");
+
+    const asyncCheckPr = async () => "BA-7-1\t10\tci-passed\tMERGEABLE\t2026-01-01T00:00:00Z";
+
+    const snapshot = await buildSnapshotAsync(
+      orch,
+      "/project",
+      "/project/.worktrees",
+      fakeMux,
+      () => null,
+      asyncCheckPr,
+    );
+
+    expect(snapshot.apiErrorCount).toBeUndefined();
   });
 });

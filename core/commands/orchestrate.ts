@@ -525,6 +525,9 @@ export function buildSnapshot(
   const items: ItemSnapshot[] = [];
   const readyIds: string[] = [];
   const heartbeatStates = new Set(["launching", "implementing", "ci-failed", "ci-pending", "ci-passed", "review-pending", "merging", "pr-open"]);
+  let apiErrorCount = 0;
+  /** States that require PR polling -- used to count API errors only for items that actually poll GitHub. */
+  const prPollStates = new Set(["implementing", "pr-open", "ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing", "repairing", "merging", "launching"]);
 
   // Cache workspace listing once for all isWorkerAlive checks in this snapshot
   const cachedWorkspaces = mux.listWorkspaces();
@@ -566,6 +569,10 @@ export function buildSnapshot(
     // Check PR status via gh -- use the item's resolved repo root for cross-repo items
     const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
     const statusLine = checkPr(orchItem.id, repoRoot);
+    // Empty string from checkPr means API error -- hold state for this item
+    if (!statusLine && prPollStates.has(orchItem.state)) {
+      apiErrorCount++;
+    }
     if (statusLine) {
       const parts = statusLine.split("\t");
       const prNumStr = parts[1];
@@ -689,7 +696,7 @@ export function buildSnapshot(
     items.push(snap);
   }
 
-  return { items, readyIds };
+  return { items, readyIds, apiErrorCount: apiErrorCount > 0 ? apiErrorCount : undefined };
 }
 
 /**
@@ -713,6 +720,8 @@ export async function buildSnapshotAsync(
   const items: ItemSnapshot[] = [];
   const readyIds: string[] = [];
   const heartbeatStates = new Set(["launching", "implementing", "ci-failed", "ci-pending", "ci-passed", "review-pending", "merging", "pr-open"]);
+  let apiErrorCount = 0;
+  const prPollStates = new Set(["implementing", "pr-open", "ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing", "repairing", "merging", "launching"]);
 
   // Cache workspace listing once for all isWorkerAlive checks in this snapshot
   const cachedWorkspaces = mux.listWorkspaces();
@@ -753,6 +762,10 @@ export async function buildSnapshotAsync(
     // Check PR status via async gh -- yields to event loop per call
     const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
     const statusLine = await checkPr(orchItem.id, repoRoot);
+    // Empty string from checkPr means API error -- hold state for this item
+    if (!statusLine && prPollStates.has(orchItem.state)) {
+      apiErrorCount++;
+    }
     if (statusLine) {
       const parts = statusLine.split("\t");
       const prNumStr = parts[1];
@@ -866,7 +879,7 @@ export async function buildSnapshotAsync(
     items.push(snap);
   }
 
-  return { items, readyIds };
+  return { items, readyIds, apiErrorCount: apiErrorCount > 0 ? apiErrorCount : undefined };
 }
 
 /**
@@ -2172,6 +2185,17 @@ export async function orchestrateLoop(
     // Build snapshot from external state
     const snapshot = await deps.buildSnapshot(orch, ctx.projectRoot, ctx.worktreeDir);
     __lastSnapshot = snapshot;
+
+    // Log warning when GitHub API is unreachable for all polled items
+    if (snapshot.apiErrorCount && snapshot.apiErrorCount > 0) {
+      log({
+        ts: new Date().toISOString(),
+        level: "warn",
+        event: "github_api_errors",
+        apiErrorCount: snapshot.apiErrorCount,
+        message: "GitHub API unreachable, holding state",
+      });
+    }
 
     // Process transitions (pure state machine)
     let actions = orch.processTransitions(snapshot);

@@ -2,6 +2,11 @@ import { run, runAsync } from "./shell.ts";
 import type { RunResult } from "./types.ts";
 import { loadConfig } from "./config.ts";
 
+// ── Result type ─────────────────────────────────────────────────────
+
+/** Discriminated union: success with data vs API failure with error message. */
+export type GhResult<T> = { ok: true; data: T } | { ok: false; error: string };
+
 // ── Branding constants ──────────────────────────────────────────────
 /** Markdown footer appended to PR comments. */
 export const NINTHWAVE_FOOTER = "*Powered by [Ninthwave](https://ninthwave.sh)*";
@@ -21,12 +26,12 @@ export function isAvailable(): boolean {
   return result.exitCode === 0;
 }
 
-/** List PRs for a branch with a given state. Returns array of {number}. */
+/** List PRs for a branch with a given state. Returns GhResult with array of {number, title}. */
 export function prList(
   repoRoot: string,
   branch: string,
   state: string,
-): Array<{ number: number; title: string }> {
+): GhResult<Array<{ number: number; title: string }>> {
   const result = ghInRepo(repoRoot, [
     "pr",
     "list",
@@ -39,20 +44,21 @@ export function prList(
     "--limit",
     "100",
   ]);
-  if (result.exitCode !== 0 || !result.stdout) return [];
+  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr list exited with code ${result.exitCode}` };
+  if (!result.stdout) return { ok: true, data: [] };
   try {
-    return JSON.parse(result.stdout) as Array<{ number: number; title: string }>;
+    return { ok: true, data: JSON.parse(result.stdout) as Array<{ number: number; title: string }> };
   } catch {
-    return [];
+    return { ok: false, error: "Failed to parse gh pr list output" };
   }
 }
 
-/** View a PR by number, returning requested fields. */
+/** View a PR by number, returning requested fields. Returns GhResult. */
 export function prView(
   repoRoot: string,
   prNumber: number,
   fields: string[],
-): Record<string, unknown> {
+): GhResult<Record<string, unknown>> {
   const result = ghInRepo(repoRoot, [
     "pr",
     "view",
@@ -60,19 +66,20 @@ export function prView(
     "--json",
     fields.join(","),
   ]);
-  if (result.exitCode !== 0 || !result.stdout) return {};
+  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr view exited with code ${result.exitCode}` };
+  if (!result.stdout) return { ok: true, data: {} };
   try {
-    return JSON.parse(result.stdout) as Record<string, unknown>;
+    return { ok: true, data: JSON.parse(result.stdout) as Record<string, unknown> };
   } catch {
-    return {};
+    return { ok: false, error: "Failed to parse gh pr view output" };
   }
 }
 
-/** Get CI check status for a PR. Includes completedAt for detection latency measurement. */
+/** Get CI check status for a PR. Includes completedAt for detection latency measurement. Returns GhResult. */
 export function prChecks(
   repoRoot: string,
   prNumber: number,
-): { state: string; name: string; url: string; completedAt?: string }[] {
+): GhResult<{ state: string; name: string; url: string; completedAt?: string }[]> {
   const result = ghInRepo(repoRoot, [
     "pr",
     "checks",
@@ -80,7 +87,8 @@ export function prChecks(
     "--json",
     "state,name,link,completedAt",
   ]);
-  if (result.exitCode !== 0 || !result.stdout) return [];
+  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr checks exited with code ${result.exitCode}` };
+  if (!result.stdout) return { ok: true, data: [] };
   try {
     const raw = JSON.parse(result.stdout) as Array<{
       state: string;
@@ -88,14 +96,17 @@ export function prChecks(
       link: string;
       completedAt?: string;
     }>;
-    return raw.map((c) => ({
-      state: c.state,
-      name: c.name,
-      url: c.link,
-      completedAt: c.completedAt || undefined,
-    }));
+    return {
+      ok: true,
+      data: raw.map((c) => ({
+        state: c.state,
+        name: c.name,
+        url: c.link,
+        completedAt: c.completedAt || undefined,
+      })),
+    };
   } catch {
-    return [];
+    return { ok: false, error: "Failed to parse gh pr checks output" };
   }
 }
 
@@ -109,12 +120,12 @@ export function ghInRepoAsync(repoRoot: string, args: string[]): Promise<RunResu
   return runAsync("gh", args, { cwd: repoRoot });
 }
 
-/** Async: list PRs for a branch with a given state. */
+/** Async: list PRs for a branch with a given state. Returns GhResult. */
 export async function prListAsync(
   repoRoot: string,
   branch: string,
   state: string,
-): Promise<Array<{ number: number; title: string }>> {
+): Promise<GhResult<Array<{ number: number; title: string }>>> {
   const result = await ghInRepoAsync(repoRoot, [
     "pr",
     "list",
@@ -127,20 +138,21 @@ export async function prListAsync(
     "--limit",
     "100",
   ]);
-  if (result.exitCode !== 0 || !result.stdout) return [];
+  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr list exited with code ${result.exitCode}` };
+  if (!result.stdout) return { ok: true, data: [] };
   try {
-    return JSON.parse(result.stdout) as Array<{ number: number; title: string }>;
+    return { ok: true, data: JSON.parse(result.stdout) as Array<{ number: number; title: string }> };
   } catch {
-    return [];
+    return { ok: false, error: "Failed to parse gh pr list output" };
   }
 }
 
-/** Async: view a PR by number, returning requested fields. */
+/** Async: view a PR by number, returning requested fields. Returns GhResult. */
 export async function prViewAsync(
   repoRoot: string,
   prNumber: number,
   fields: string[],
-): Promise<Record<string, unknown>> {
+): Promise<GhResult<Record<string, unknown>>> {
   const result = await ghInRepoAsync(repoRoot, [
     "pr",
     "view",
@@ -148,19 +160,20 @@ export async function prViewAsync(
     "--json",
     fields.join(","),
   ]);
-  if (result.exitCode !== 0 || !result.stdout) return {};
+  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr view exited with code ${result.exitCode}` };
+  if (!result.stdout) return { ok: true, data: {} };
   try {
-    return JSON.parse(result.stdout) as Record<string, unknown>;
+    return { ok: true, data: JSON.parse(result.stdout) as Record<string, unknown> };
   } catch {
-    return {};
+    return { ok: false, error: "Failed to parse gh pr view output" };
   }
 }
 
-/** Async: get CI check status for a PR. */
+/** Async: get CI check status for a PR. Returns GhResult. */
 export async function prChecksAsync(
   repoRoot: string,
   prNumber: number,
-): Promise<{ state: string; name: string; url: string; completedAt?: string }[]> {
+): Promise<GhResult<{ state: string; name: string; url: string; completedAt?: string }[]>> {
   const result = await ghInRepoAsync(repoRoot, [
     "pr",
     "checks",
@@ -168,7 +181,8 @@ export async function prChecksAsync(
     "--json",
     "state,name,link,completedAt",
   ]);
-  if (result.exitCode !== 0 || !result.stdout) return [];
+  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr checks exited with code ${result.exitCode}` };
+  if (!result.stdout) return { ok: true, data: [] };
   try {
     const raw = JSON.parse(result.stdout) as Array<{
       state: string;
@@ -176,14 +190,17 @@ export async function prChecksAsync(
       link: string;
       completedAt?: string;
     }>;
-    return raw.map((c) => ({
-      state: c.state,
-      name: c.name,
-      url: c.link,
-      completedAt: c.completedAt || undefined,
-    }));
+    return {
+      ok: true,
+      data: raw.map((c) => ({
+        state: c.state,
+        name: c.name,
+        url: c.link,
+        completedAt: c.completedAt || undefined,
+      })),
+    };
   } catch {
-    return [];
+    return { ok: false, error: "Failed to parse gh pr checks output" };
   }
 }
 
@@ -246,8 +263,9 @@ export function prComment(
  * Conservative: treats unknown as mergeable to avoid spurious rebase requests.
  */
 export function checkPrMergeable(repoRoot: string, prNumber: number): boolean {
-  const data = prView(repoRoot, prNumber, ["mergeable"]);
-  const mergeable = data.mergeable as string | undefined;
+  const result = prView(repoRoot, prNumber, ["mergeable"]);
+  if (!result.ok) return true; // Conservative: treat API error as mergeable to avoid spurious rebase requests
+  const mergeable = result.data.mergeable as string | undefined;
   // GitHub returns "MERGEABLE", "CONFLICTING", or "UNKNOWN"
   return mergeable !== "CONFLICTING";
 }
@@ -292,8 +310,9 @@ export function resolveGithubToken(projectRoot: string): string | undefined {
  * @returns The merge commit SHA, or null if it can't be determined.
  */
 export function getMergeCommitSha(repoRoot: string, prNumber: number): string | null {
-  const data = prView(repoRoot, prNumber, ["mergeCommit"]);
-  const mergeCommit = data.mergeCommit as { oid?: string } | undefined;
+  const result = prView(repoRoot, prNumber, ["mergeCommit"]);
+  if (!result.ok) return null;
+  const mergeCommit = result.data.mergeCommit as { oid?: string } | undefined;
   return mergeCommit?.oid ?? null;
 }
 
@@ -416,8 +435,9 @@ export function setCommitStatus(
  * @returns The head commit SHA, or null if the PR can't be queried.
  */
 export function prHeadSha(repoRoot: string, prNumber: number): string | null {
-  const data = prView(repoRoot, prNumber, ["headRefOid"]);
-  const sha = data.headRefOid as string | undefined;
+  const result = prView(repoRoot, prNumber, ["headRefOid"]);
+  if (!result.ok) return null;
+  const sha = result.data.headRefOid as string | undefined;
   return sha ?? null;
 }
 

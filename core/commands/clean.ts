@@ -131,8 +131,8 @@ function isMerged(
   }
 
   // Check via gh PR status
-  const merged = prList(repoRoot, branch, "merged");
-  return merged.length > 0;
+  const result = prList(repoRoot, branch, "merged");
+  return result.ok && result.data.length > 0;
 }
 
 /**

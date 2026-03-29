@@ -328,7 +328,7 @@ export function launchAiSession(
 
 /** Dependencies for stale branch cleanup, injectable for testing. */
 export interface StaleBranchCleanupDeps {
-  prList: (repoRoot: string, branch: string, state: string) => Array<{ number: number; title: string }>;
+  prList: (repoRoot: string, branch: string, state: string) => import("../gh.ts").GhResult<Array<{ number: number; title: string }>>;
   branchExists: (repoRoot: string, branch: string) => boolean;
   deleteBranch: (repoRoot: string, branch: string) => void;
   deleteRemoteBranch: (repoRoot: string, branch: string) => void;
@@ -367,10 +367,11 @@ export function cleanStaleBranchForReuse(
   const branchName = `ninthwave/${itemId}`;
 
   // Check for merged PRs on this branch
-  const mergedPrs = deps.prList(targetRepo, branchName, "merged");
-  if (mergedPrs.length === 0) {
-    return false; // No merged PRs -- nothing to clean
+  const mergedResult = deps.prList(targetRepo, branchName, "merged");
+  if (!mergedResult.ok || mergedResult.data.length === 0) {
+    return false; // No merged PRs or API error -- nothing to clean
   }
+  const mergedPrs = mergedResult.data;
 
   // Check if any merged PR title matches the current work item title
   const hasMatchingTitle = mergedPrs.some((pr) =>
@@ -530,7 +531,8 @@ export function launchSingleItem(
 
       // Check if there's an open PR for this branch -- if so, a prior session
       // already did the work. Reuse the branch to preserve the PR and its commits.
-      const openPrs = prList(targetRepo, branchName, "open");
+      const openPrResult = prList(targetRepo, branchName, "open");
+      const openPrs = openPrResult.ok ? openPrResult.data : [];
       if (openPrs.length > 0 && !options.forceWorkerLaunch) {
         const existingPr = openPrs[0]!;
         info(

@@ -866,7 +866,7 @@ describe("launchSingleItem resource cleanup on failure", () => {
 describe("cleanStaleBranchForReuse no-external-worktree regression", () => {
   it("works correctly when no external worktrees exist", () => {
     const deps = {
-      prList: vi.fn(() => [{ number: 1, title: "fix: old change (OLD-1)" }]),
+      prList: vi.fn(() => ({ ok: true as const, data: [{ number: 1, title: "fix: old change (OLD-1)" }] })),
       branchExists: vi.fn(() => true),
       deleteBranch: vi.fn(),
       deleteRemoteBranch: vi.fn(),
@@ -889,7 +889,7 @@ describe("cleanStaleBranchForReuse no-external-worktree regression", () => {
 
   it("returns false when no merged PRs exist", () => {
     const deps = {
-      prList: vi.fn(() => []),
+      prList: vi.fn(() => ({ ok: true as const, data: [] as Array<{ number: number; title: string }> })),
       branchExists: vi.fn(() => false),
       deleteBranch: vi.fn(),
       deleteRemoteBranch: vi.fn(),
@@ -910,7 +910,7 @@ describe("cleanStaleBranchForReuse no-external-worktree regression", () => {
 
   it("warns but continues when branch deletion fails", () => {
     const deps = {
-      prList: vi.fn(() => [{ number: 1, title: "fix: stale (X-1)" }]),
+      prList: vi.fn(() => ({ ok: true as const, data: [{ number: 1, title: "fix: stale (X-1)" }] })),
       branchExists: vi.fn(() => true),
       deleteBranch: vi.fn(() => { throw new Error("Cannot delete"); }),
       deleteRemoteBranch: vi.fn(),

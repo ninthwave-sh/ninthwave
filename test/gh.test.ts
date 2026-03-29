@@ -362,3 +362,10 @@ describe("applyGithubToken", () => {
     expect(process.env.GH_TOKEN).toBe("ghp_existing");
   });
 });
+
+// ── GhResult type contract ──────────────────────────────────────────
+// NOTE: prList/prView/prChecks GhResult contract tests are in
+// test/gh-async.test.ts (via shell.runAsync spy) and
+// test/contract/gh-pr-status.test.ts (via gh module spies).
+// Cannot test sync variants here because watch.test.ts's vi.mock leaks
+// (bun test shared-process model -- see CLAUDE.md).

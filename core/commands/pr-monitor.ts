@@ -159,11 +159,15 @@ export function checkPrStatus(id: string, repoRoot: string): string {
 
   if (!gh.isAvailable()) return "";
 
-  // Check for open PR
-  const openPrs = prList(repoRoot, branch, "open");
+  // Check for open PR -- distinguish API error from "no PRs"
+  const openResult = prList(repoRoot, branch, "open");
+  if (!openResult.ok) return ""; // API error: hold state (return empty to signal no data)
+  const openPrs = openResult.data;
   if (openPrs.length === 0) {
     // Check if merged
-    const mergedPrs = prList(repoRoot, branch, "merged");
+    const mergedResult = prList(repoRoot, branch, "merged");
+    if (!mergedResult.ok) return ""; // API error: hold state
+    const mergedPrs = mergedResult.data;
     if (mergedPrs.length > 0) {
       // Include PR title as 6th field so callers can detect ID collisions
       // (a new TODO reusing an old merged PR's branch name).
@@ -176,16 +180,20 @@ export function checkPrStatus(id: string, repoRoot: string): string {
   const prNumber = openPrs[0]!.number;
 
   // Check CI and review status (include updatedAt for detection latency)
-  const prData = prView(repoRoot, prNumber, [
+  const prViewResult = prView(repoRoot, prNumber, [
     "reviewDecision",
     "mergeable",
     "updatedAt",
   ]);
+  if (!prViewResult.ok) return ""; // API error: hold state
+  const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
   const isMergeable = (prData.mergeable as string) ?? "";
   const prUpdatedAt = (prData.updatedAt as string) ?? "";
 
-  const checks = prChecks(repoRoot, prNumber);
+  const checksResult = prChecks(repoRoot, prNumber);
+  if (!checksResult.ok) return ""; // API error: hold state
+  const checks = checksResult.data;
   const nonSkipped = checks.filter((c) => c.state !== "SKIPPED");
   let ciStatus = "unknown";
   if (nonSkipped.length > 0) {
@@ -239,11 +247,15 @@ export async function checkPrStatusAsync(id: string, repoRoot: string): Promise<
 
   if (!gh.isAvailable()) return "";
 
-  // Check for open PR
-  const openPrs = await prListAsync(repoRoot, branch, "open");
+  // Check for open PR -- distinguish API error from "no PRs"
+  const openResult = await prListAsync(repoRoot, branch, "open");
+  if (!openResult.ok) return ""; // API error: hold state
+  const openPrs = openResult.data;
   if (openPrs.length === 0) {
     // Check if merged
-    const mergedPrs = await prListAsync(repoRoot, branch, "merged");
+    const mergedResult = await prListAsync(repoRoot, branch, "merged");
+    if (!mergedResult.ok) return ""; // API error: hold state
+    const mergedPrs = mergedResult.data;
     if (mergedPrs.length > 0) {
       const prTitle = mergedPrs[0]!.title ?? "";
       return `${id}\t${mergedPrs[0]!.number}\tmerged\t\t\t${prTitle}`;
@@ -254,16 +266,20 @@ export async function checkPrStatusAsync(id: string, repoRoot: string): Promise<
   const prNumber = openPrs[0]!.number;
 
   // Check CI and review status (include updatedAt for detection latency)
-  const prData = await prViewAsync(repoRoot, prNumber, [
+  const prViewResult = await prViewAsync(repoRoot, prNumber, [
     "reviewDecision",
     "mergeable",
     "updatedAt",
   ]);
+  if (!prViewResult.ok) return ""; // API error: hold state
+  const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
   const isMergeable = (prData.mergeable as string) ?? "";
   const prUpdatedAt = (prData.updatedAt as string) ?? "";
 
-  const checks = await prChecksAsync(repoRoot, prNumber);
+  const checksResult = await prChecksAsync(repoRoot, prNumber);
+  if (!checksResult.ok) return ""; // API error: hold state
+  const checks = checksResult.data;
   const nonSkipped = checks.filter((c) => c.state !== "SKIPPED");
   let ciStatus = "unknown";
   if (nonSkipped.length > 0) {
@@ -483,11 +499,13 @@ export async function cmdPrWatch(
 
     // Check if PR state changed
     try {
-      const data = prView(projectRoot, parseInt(prNumber, 10), ["state"]);
-      const state = data.state as string;
-      if (state === "MERGED" || state === "CLOSED") {
-        console.log(`state_change\t${prNumber}\t${state}`);
-        return;
+      const viewResult = prView(projectRoot, parseInt(prNumber, 10), ["state"]);
+      if (viewResult.ok) {
+        const state = viewResult.data.state as string;
+        if (state === "MERGED" || state === "CLOSED") {
+          console.log(`state_change\t${prNumber}\t${state}`);
+          return;
+        }
       }
     } catch {
       // ignore

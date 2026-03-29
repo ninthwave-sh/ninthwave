@@ -8,9 +8,9 @@ import { setupTempRepo, cleanupTempRepos, captureOutput, captureOutputAsync } fr
 // Mock gh module
 // lint-ignore: no-leaked-mock
 vi.mock("../core/gh.ts", () => ({
-  prList: vi.fn(() => []),
-  prView: vi.fn(() => ({})),
-  prChecks: vi.fn(() => []),
+  prList: vi.fn(() => ({ ok: true, data: [] })),
+  prView: vi.fn(() => ({ ok: true, data: {} })),
+  prChecks: vi.fn(() => ({ ok: true, data: [] })),
   getRepoOwner: vi.fn(() => "owner/repo"),
   apiGet: vi.fn(() => "0"),
   isAvailable: vi.fn(() => true),
@@ -55,9 +55,9 @@ describe("cmdWatchReady", () => {
     // No open PRs, but has merged PRs
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [];
-        if (state === "merged") return [{ number: 42 }];
-        return [];
+        if (state === "open") return { ok: true, data: [] };
+        if (state === "merged") return { ok: true, data: [{ number: 42 }] };
+        return { ok: true, data: [] };
       },
     );
 
@@ -71,7 +71,7 @@ describe("cmdWatchReady", () => {
     const worktreeDir = join(repo, ".worktrees");
     mkdirSync(join(worktreeDir, "ninthwave-M-CI-1"), { recursive: true });
 
-    (gh.prList as Mock).mockReturnValue([]);
+    (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
     const result = cmdWatchReady(worktreeDir, repo);
     expect(result).toContain("M-CI-1");
@@ -85,17 +85,17 @@ describe("cmdWatchReady", () => {
 
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "FAILURE", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = cmdWatchReady(worktreeDir, repo);
     expect(result).toContain("failing");
@@ -108,17 +108,17 @@ describe("cmdWatchReady", () => {
 
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "APPROVED",
       mergeable: "MERGEABLE",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = cmdWatchReady(worktreeDir, repo);
     expect(result).toContain("ready");
@@ -133,17 +133,17 @@ describe("cmdWatchReady", () => {
 
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = cmdWatchReady(worktreeDir, repo);
     expect(result).toContain("ci-passed");
@@ -156,17 +156,17 @@ describe("cmdWatchReady", () => {
 
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "APPROVED",
       mergeable: "CONFLICTING",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = cmdWatchReady(worktreeDir, repo);
     expect(result).toContain("ci-passed");
@@ -179,17 +179,17 @@ describe("cmdWatchReady", () => {
 
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 5 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 5 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "PENDING", name: "build", url: "" },
-    ]);
+    ] });
 
     const result = cmdWatchReady(worktreeDir, repo);
     expect(result).toContain("pending");
@@ -238,9 +238,9 @@ describe("checkPrStatus", () => {
   it("returns merged status when PR is merged", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [];
-        if (state === "merged") return [{ number: 99, title: "fix: some work (H-1-1)" }];
-        return [];
+        if (state === "open") return { ok: true, data: [] };
+        if (state === "merged") return { ok: true, data: [{ number: 99, title: "fix: some work (H-1-1)" }] };
+        return { ok: true, data: [] };
       },
     );
 
@@ -249,7 +249,7 @@ describe("checkPrStatus", () => {
   });
 
   it("returns no-pr when no PR exists", () => {
-    (gh.prList as Mock).mockReturnValue([]);
+    (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t\tno-pr");
@@ -265,17 +265,17 @@ describe("checkPrStatus", () => {
   it("returns ready when CI passes and PR is approved and mergeable", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "APPROVED",
       mergeable: "MERGEABLE",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tready\tMERGEABLE\t");
@@ -284,17 +284,17 @@ describe("checkPrStatus", () => {
   it("returns ci-passed when CI passes but not approved", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tci-passed\tMERGEABLE\t");
@@ -303,17 +303,17 @@ describe("checkPrStatus", () => {
   it("returns ci-passed when CI passes but not mergeable", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "APPROVED",
       mergeable: "CONFLICTING",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tci-passed\tCONFLICTING\t");
@@ -322,17 +322,17 @@ describe("checkPrStatus", () => {
   it("returns failing when CI fails", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "FAILURE", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
@@ -341,17 +341,17 @@ describe("checkPrStatus", () => {
   it("returns pending when CI is pending", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "PENDING", name: "build", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tpending\tMERGEABLE\t");
@@ -362,14 +362,14 @@ describe("checkPrStatus", () => {
   it("returns failing for ERROR check state (commit status API)", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({ reviewDecision: "", mergeable: "MERGEABLE" });
-    (gh.prChecks as Mock).mockReturnValue([
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: { reviewDecision: "", mergeable: "MERGEABLE" } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "ERROR", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
@@ -378,14 +378,14 @@ describe("checkPrStatus", () => {
   it("returns failing for CANCELLED check state", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({ reviewDecision: "", mergeable: "MERGEABLE" });
-    (gh.prChecks as Mock).mockReturnValue([
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: { reviewDecision: "", mergeable: "MERGEABLE" } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "CANCELLED", name: "build", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
@@ -394,14 +394,14 @@ describe("checkPrStatus", () => {
   it("returns failing for TIMED_OUT check state", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({ reviewDecision: "", mergeable: "MERGEABLE" });
-    (gh.prChecks as Mock).mockReturnValue([
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: { reviewDecision: "", mergeable: "MERGEABLE" } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "TIMED_OUT", name: "build", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
@@ -410,14 +410,14 @@ describe("checkPrStatus", () => {
   it("returns failing for STARTUP_FAILURE check state", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({ reviewDecision: "", mergeable: "MERGEABLE" });
-    (gh.prChecks as Mock).mockReturnValue([
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: { reviewDecision: "", mergeable: "MERGEABLE" } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "STARTUP_FAILURE", name: "build", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
@@ -426,15 +426,15 @@ describe("checkPrStatus", () => {
   it("returns failing when mix of SUCCESS and ERROR checks", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({ reviewDecision: "", mergeable: "MERGEABLE" });
-    (gh.prChecks as Mock).mockReturnValue([
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: { reviewDecision: "", mergeable: "MERGEABLE" } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "lint", url: "" },
       { state: "ERROR", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tfailing\tMERGEABLE\t");
@@ -443,14 +443,14 @@ describe("checkPrStatus", () => {
   it("includes CONFLICTING mergeable status in 4th field", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({ reviewDecision: "", mergeable: "CONFLICTING" });
-    (gh.prChecks as Mock).mockReturnValue([
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: { reviewDecision: "", mergeable: "CONFLICTING" } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "FAILURE", name: "test", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tfailing\tCONFLICTING\t");
@@ -459,14 +459,14 @@ describe("checkPrStatus", () => {
   it("returns UNKNOWN when mergeable field is empty", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({ reviewDecision: "", mergeable: "" });
-    (gh.prChecks as Mock).mockReturnValue([
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: { reviewDecision: "", mergeable: "" } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "PENDING", name: "build", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tpending\tUNKNOWN\t");
@@ -476,18 +476,18 @@ describe("checkPrStatus", () => {
   it("includes completedAt from CI checks as eventTime in 5th field", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
       updatedAt: "2026-03-24T10:00:00Z",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "test", url: "", completedAt: "2026-03-24T10:05:00Z" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tci-passed\tMERGEABLE\t2026-03-24T10:05:00Z");
@@ -496,18 +496,18 @@ describe("checkPrStatus", () => {
   it("uses updatedAt as eventTime when CI has no completedAt", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
       updatedAt: "2026-03-24T10:00:00Z",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "PENDING", name: "build", url: "" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tpending\tMERGEABLE\t2026-03-24T10:00:00Z");
@@ -516,19 +516,19 @@ describe("checkPrStatus", () => {
   it("uses latest completedAt when multiple checks complete", () => {
     (gh.prList as Mock).mockImplementation(
       (_root: string, _branch: string, state: string) => {
-        if (state === "open") return [{ number: 10 }];
-        return [];
+        if (state === "open") return { ok: true, data: [{ number: 10 }] };
+        return { ok: true, data: [] };
       },
     );
-    (gh.prView as Mock).mockReturnValue({
+    (gh.prView as Mock).mockReturnValue({ ok: true, data: {
       reviewDecision: "",
       mergeable: "MERGEABLE",
       updatedAt: "2026-03-24T10:00:00Z",
-    });
-    (gh.prChecks as Mock).mockReturnValue([
+    } });
+    (gh.prChecks as Mock).mockReturnValue({ ok: true, data: [
       { state: "SUCCESS", name: "lint", url: "", completedAt: "2026-03-24T10:03:00Z" },
       { state: "SUCCESS", name: "test", url: "", completedAt: "2026-03-24T10:05:00Z" },
-    ]);
+    ] });
 
     const result = checkPrStatus("H-1-1", "/fake/repo");
     expect(result).toBe("H-1-1\t10\tci-passed\tMERGEABLE\t2026-03-24T10:05:00Z");
@@ -567,7 +567,7 @@ describe("cmdWatchReady cross-repo", () => {
     writeFileSync(indexPath, "X-CR-1\t/target-repo\t/target-repo/.worktrees/ninthwave-X-CR-1\n");
 
     // Mock prList to return no-pr for this cross-repo item
-    (gh.prList as Mock).mockReturnValue([]);
+    (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
     const result = cmdWatchReady(worktreeDir, repo);
     expect(result).toContain("X-CR-1");
@@ -580,7 +580,7 @@ describe("cmdWatchReady cross-repo", () => {
     mkdirSync(worktreeDir, { recursive: true });
     // No .cross-repo-index file -- should not crash
 
-    (gh.prList as Mock).mockReturnValue([]);
+    (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
     const result = cmdWatchReady(worktreeDir, repo);
     expect(result).toBe("");
@@ -605,7 +605,7 @@ describe("getWatchReadyState", () => {
     mkdirSync(join(worktreeDir, "ninthwave-A-1-1"), { recursive: true });
     mkdirSync(join(worktreeDir, "ninthwave-B-2-1"), { recursive: true });
 
-    (gh.prList as Mock).mockReturnValue([]);
+    (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
     const result = getWatchReadyState(worktreeDir, repo);
     expect(result).toContain("A-1-1");
@@ -619,7 +619,7 @@ describe("getWatchReadyState", () => {
     mkdirSync(join(worktreeDir, "ninthwave-A-1-1"), { recursive: true });
     mkdirSync(join(worktreeDir, "other-dir"), { recursive: true });
 
-    (gh.prList as Mock).mockReturnValue([]);
+    (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
     const result = getWatchReadyState(worktreeDir, repo);
     expect(result).toContain("A-1-1");
@@ -643,7 +643,7 @@ describe("getWatchReadyState cross-repo", () => {
     const indexPath = join(worktreeDir, ".cross-repo-index");
     writeFileSync(indexPath, "X-CR-2\t/other-repo\t/other-repo/.worktrees/ninthwave-X-CR-2\n");
 
-    (gh.prList as Mock).mockReturnValue([]);
+    (gh.prList as Mock).mockReturnValue({ ok: true, data: [] });
 
     const result = getWatchReadyState(worktreeDir, repo);
     expect(result).toContain("X-CR-2");

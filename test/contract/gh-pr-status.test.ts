@@ -41,71 +41,71 @@ afterAll(() => {
 // and `gh pr checks` after parsing in core/gh.ts.
 
 /** gh pr list --json number,title --state merged */
-const MERGED_PR = [
+const MERGED_PR = { ok: true as const, data: [
   { number: 42, title: "fix: resolve race condition in worker health (H-RC-1)" },
-];
+] };
 
 /** gh pr list --json number,title --state open */
-const OPEN_PR = [
+const OPEN_PR = { ok: true as const, data: [
   { number: 123, title: "feat: add retry logic for failed CI (H-CI-2)" },
-];
+] };
 
 /** gh pr view --json reviewDecision,mergeable,updatedAt -- pending review */
-const VIEW_PENDING: Record<string, unknown> = {
+const VIEW_PENDING = { ok: true as const, data: {
   reviewDecision: "",
   mergeable: "UNKNOWN",
   updatedAt: "2026-03-29T10:30:00Z",
-};
+} as Record<string, unknown> };
 
 /** gh pr view -- approved and mergeable */
-const VIEW_APPROVED_MERGEABLE: Record<string, unknown> = {
+const VIEW_APPROVED_MERGEABLE = { ok: true as const, data: {
   reviewDecision: "APPROVED",
   mergeable: "MERGEABLE",
   updatedAt: "2026-03-29T11:00:00Z",
-};
+} as Record<string, unknown> };
 
 /** gh pr view -- review required, mergeable */
-const VIEW_NOT_APPROVED: Record<string, unknown> = {
+const VIEW_NOT_APPROVED = { ok: true as const, data: {
   reviewDecision: "REVIEW_REQUIRED",
   mergeable: "MERGEABLE",
   updatedAt: "2026-03-29T11:15:00Z",
-};
+} as Record<string, unknown> };
 
 /** gh pr view -- approved but has merge conflicts */
-const VIEW_APPROVED_CONFLICTING: Record<string, unknown> = {
+const VIEW_APPROVED_CONFLICTING = { ok: true as const, data: {
   reviewDecision: "APPROVED",
   mergeable: "CONFLICTING",
   updatedAt: "2026-03-29T11:20:00Z",
-};
+} as Record<string, unknown> };
 
 /** gh pr checks -- two checks still pending */
-const CHECKS_PENDING = [
+const CHECKS_PENDING = { ok: true as const, data: [
   { state: "PENDING", name: "CI / test", url: "https://github.com/runs/1" },
   { state: "PENDING", name: "CI / lint", url: "https://github.com/runs/2" },
-];
+] };
 
 /** gh pr checks -- one failure, one success */
-const CHECKS_FAILING = [
+const CHECKS_FAILING = { ok: true as const, data: [
   { state: "FAILURE", name: "CI / test", url: "https://github.com/runs/1", completedAt: "2026-03-29T10:45:00Z" },
   { state: "SUCCESS", name: "CI / lint", url: "https://github.com/runs/2", completedAt: "2026-03-29T10:44:00Z" },
-];
+] };
 
 /** gh pr checks -- all passing */
-const CHECKS_PASSING = [
+const CHECKS_PASSING = { ok: true as const, data: [
   { state: "SUCCESS", name: "CI / test", url: "https://github.com/runs/1", completedAt: "2026-03-29T10:50:00Z" },
   { state: "SUCCESS", name: "CI / lint", url: "https://github.com/runs/2", completedAt: "2026-03-29T10:51:00Z" },
-];
+] };
 
 /** gh pr checks -- all skipped (no real CI) */
-const CHECKS_ALL_SKIPPED = [
+const CHECKS_ALL_SKIPPED = { ok: true as const, data: [
   { state: "SKIPPED", name: "CI / deploy", url: "https://github.com/runs/3" },
-];
+] };
 
 /** gh pr checks -- one success, one skipped */
-const CHECKS_WITH_SKIPPED = [
+const CHECKS_WITH_SKIPPED = { ok: true as const, data: [
   { state: "SUCCESS", name: "CI / test", url: "https://github.com/runs/1", completedAt: "2026-03-29T10:50:00Z" },
   { state: "SKIPPED", name: "CI / deploy", url: "https://github.com/runs/3" },
-];
+] };
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -125,13 +125,13 @@ function parseFields(output: string) {
 
 /** Configure spies for an open-PR scenario. */
 function setupOpenPr(
-  view: Record<string, unknown>,
-  checks: { state: string; name: string; url: string; completedAt?: string }[],
+  view: { ok: true; data: Record<string, unknown> },
+  checks: { ok: true; data: { state: string; name: string; url: string; completedAt?: string }[] },
 ) {
   prListSpy.mockImplementation(
     (_root: string, _branch: string, state: string) => {
       if (state === "open") return OPEN_PR;
-      return [];
+      return { ok: true, data: [] };
     },
   );
   prViewSpy.mockReturnValue(view);
@@ -145,7 +145,7 @@ describe("checkPrStatus format contract", () => {
 
   describe("no-pr: no open or merged PRs", () => {
     beforeEach(() => {
-      prListSpy.mockReturnValue([]);
+      prListSpy.mockReturnValue({ ok: true, data: [] });
     });
 
     it("produces exactly 3 tab-separated fields", () => {
@@ -168,9 +168,9 @@ describe("checkPrStatus format contract", () => {
     beforeEach(() => {
       prListSpy.mockImplementation(
         (_root: string, _branch: string, state: string) => {
-          if (state === "open") return [];
+          if (state === "open") return { ok: true, data: [] };
           if (state === "merged") return MERGED_PR;
-          return [];
+          return { ok: true, data: [] };
         },
       );
     });
@@ -188,7 +188,7 @@ describe("checkPrStatus format contract", () => {
 
     it("includes PR title as 6th field for collision detection", () => {
       const parsed = parseFields(checkPrStatus("H-RC-1", "/repo"));
-      expect(parsed.prTitle).toBe(MERGED_PR[0]!.title);
+      expect(parsed.prTitle).toBe(MERGED_PR.data[0]!.title);
     });
 
     it("exact format: ID\\tNUMBER\\tmerged\\t\\t\\tTITLE", () => {
@@ -245,11 +245,11 @@ describe("checkPrStatus format contract", () => {
     });
 
     it("picks latest completedAt across multiple completed checks", () => {
-      setupOpenPr(VIEW_PENDING, [
+      setupOpenPr(VIEW_PENDING, { ok: true, data: [
         { state: "SUCCESS", name: "lint", url: "", completedAt: "2026-03-29T10:00:00Z" },
         { state: "FAILURE", name: "test", url: "", completedAt: "2026-03-29T10:05:00Z" },
         { state: "ERROR", name: "build", url: "", completedAt: "2026-03-29T10:03:00Z" },
-      ]);
+      ] });
 
       const parsed = parseFields(checkPrStatus("T-2b", "/repo"));
       expect(parsed.eventTime).toBe("2026-03-29T10:05:00Z");
@@ -266,9 +266,9 @@ describe("checkPrStatus format contract", () => {
       ];
 
       for (const state of failStates) {
-        setupOpenPr(VIEW_PENDING, [
+        setupOpenPr(VIEW_PENDING, { ok: true, data: [
           { state, name: "CI", url: "", completedAt: "2026-03-29T10:00:00Z" },
-        ]);
+        ] });
         const parsed = parseFields(checkPrStatus(`F-${state}`, "/repo"));
         expect(parsed.status).toBe("failing");
       }
@@ -323,14 +323,14 @@ describe("checkPrStatus format contract", () => {
     it("requires both APPROVED review and MERGEABLE status", () => {
       // APPROVED + UNKNOWN --> ci-passed (not ready)
       setupOpenPr(
-        { reviewDecision: "APPROVED", mergeable: "UNKNOWN", updatedAt: "" },
+        { ok: true, data: { reviewDecision: "APPROVED", mergeable: "UNKNOWN", updatedAt: "" } },
         CHECKS_PASSING,
       );
       expect(parseFields(checkPrStatus("T-5a", "/repo")).status).toBe("ci-passed");
 
       // empty review + MERGEABLE --> ci-passed (not ready)
       setupOpenPr(
-        { reviewDecision: "", mergeable: "MERGEABLE", updatedAt: "" },
+        { ok: true, data: { reviewDecision: "", mergeable: "MERGEABLE", updatedAt: "" } },
         CHECKS_PASSING,
       );
       expect(parseFields(checkPrStatus("T-5b", "/repo")).status).toBe("ci-passed");
@@ -346,7 +346,7 @@ describe("checkPrStatus format contract", () => {
     });
 
     it("empty checks array produces pending (unknown CI)", () => {
-      setupOpenPr(VIEW_PENDING, []);
+      setupOpenPr(VIEW_PENDING, { ok: true, data: [] });
 
       const parsed = parseFields(checkPrStatus("T-7", "/repo"));
       expect(parsed.status).toBe("pending");
@@ -370,7 +370,7 @@ describe("checkPrStatus format contract", () => {
 
     it("defaults mergeable to UNKNOWN when field is empty string", () => {
       setupOpenPr(
-        { reviewDecision: "", mergeable: "", updatedAt: "" },
+        { ok: true, data: { reviewDecision: "", mergeable: "", updatedAt: "" } },
         CHECKS_PENDING,
       );
 
@@ -379,8 +379,58 @@ describe("checkPrStatus format contract", () => {
     });
 
     it("first field is always the ID argument passed in", () => {
-      prListSpy.mockReturnValue([]);
+      prListSpy.mockReturnValue({ ok: true, data: [] });
       expect(parseFields(checkPrStatus("ANY-ID-99", "/repo")).id).toBe("ANY-ID-99");
+    });
+  });
+
+  // ── API error hold-state (H-ER-6) ──────────────────────────────
+
+  describe("API error: hold state instead of misinterpreting", () => {
+    it("returns empty string when prList('open') fails (API error)", () => {
+      prListSpy.mockReturnValue({ ok: false, error: "API timeout" });
+
+      const result = checkPrStatus("T-ERR-1", "/repo");
+      expect(result).toBe("");
+    });
+
+    it("returns empty string when prList('merged') fails after no open PRs", () => {
+      prListSpy.mockImplementation(
+        (_root: string, _branch: string, state: string) => {
+          if (state === "open") return { ok: true, data: [] };
+          return { ok: false, error: "rate limited" };
+        },
+      );
+
+      const result = checkPrStatus("T-ERR-2", "/repo");
+      expect(result).toBe("");
+    });
+
+    it("returns empty string when prView fails for an open PR", () => {
+      prListSpy.mockImplementation(
+        (_root: string, _branch: string, state: string) => {
+          if (state === "open") return OPEN_PR;
+          return { ok: true, data: [] };
+        },
+      );
+      prViewSpy.mockReturnValue({ ok: false, error: "server error" });
+
+      const result = checkPrStatus("T-ERR-3", "/repo");
+      expect(result).toBe("");
+    });
+
+    it("returns empty string when prChecks fails for an open PR", () => {
+      prListSpy.mockImplementation(
+        (_root: string, _branch: string, state: string) => {
+          if (state === "open") return OPEN_PR;
+          return { ok: true, data: [] };
+        },
+      );
+      prViewSpy.mockReturnValue(VIEW_PENDING);
+      prChecksSpy.mockReturnValue({ ok: false, error: "network error" });
+
+      const result = checkPrStatus("T-ERR-4", "/repo");
+      expect(result).toBe("");
     });
   });
 });
