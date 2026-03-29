@@ -30,7 +30,7 @@ One leak: `setState()` (public method) bypasses `transition()`'s flag management
 
 **Multiplexer interface vs cmux implementation: Justified but over-engineered.**
 
-The `Multiplexer` interface (10 methods) has exactly one implementation: `CmuxAdapter`, a 1:1 passthrough to `cmux.ts`. The interface provides testability (mock implementations) and future extensibility (ETHOS.md principle #6). The adapter pattern is standard but the detection chain (`detectMuxType()`, `ensureMuxOrAutoLaunch()`) adds 100+ LOC for a single-variant discriminated union. Simplifying detection (hardcode cmux) would save ~40 LOC without breaking the interface contract. (Review 3, Finding 9)
+The `Multiplexer` interface (10 methods) has exactly one implementation: `CmuxAdapter`, a 1:1 passthrough to `cmux.ts`. The interface provides testability (mock implementations) and future extensibility (ETHOS.md principle #5). The adapter pattern is standard but the detection chain (`detectMuxType()`, `ensureMuxOrAutoLaunch()`) adds 100+ LOC for a single-variant discriminated union. Simplifying detection (hardcode cmux) would save ~40 LOC without breaking the interface contract. (Review 3, Finding 9)
 
 **OrchestratorDeps injection seam: Clean and well-used.**
 
