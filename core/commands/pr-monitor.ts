@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { die } from "../output.ts";
-import { prList, prView, prChecks, getRepoOwner, apiGet, ghInRepo } from "../gh.ts";
+import { prList, prView, prChecks, prListAsync, prViewAsync, prChecksAsync, getRepoOwner, apiGet, ghInRepo } from "../gh.ts";
 import * as gh from "../gh.ts";
 import type { WatchResult, Transition } from "../types.ts";
 import { listCrossRepoEntries } from "../cross-repo.ts";
@@ -226,6 +226,81 @@ export function checkPrStatus(id: string, repoRoot: string): string {
   }
 
   // Fields: ID, PR number, status, mergeable, eventTime (5th field for detection latency)
+  return `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`;
+}
+
+/**
+ * Async variant of checkPrStatus. Uses async gh functions so each
+ * network call yields to the event loop, keeping the TUI responsive.
+ * Returns the same tab-separated string format as the sync version.
+ */
+export async function checkPrStatusAsync(id: string, repoRoot: string): Promise<string> {
+  const branch = `ninthwave/${id}`;
+
+  if (!gh.isAvailable()) return "";
+
+  // Check for open PR
+  const openPrs = await prListAsync(repoRoot, branch, "open");
+  if (openPrs.length === 0) {
+    // Check if merged
+    const mergedPrs = await prListAsync(repoRoot, branch, "merged");
+    if (mergedPrs.length > 0) {
+      const prTitle = mergedPrs[0]!.title ?? "";
+      return `${id}\t${mergedPrs[0]!.number}\tmerged\t\t\t${prTitle}`;
+    }
+    return `${id}\t\tno-pr`;
+  }
+
+  const prNumber = openPrs[0]!.number;
+
+  // Check CI and review status (include updatedAt for detection latency)
+  const prData = await prViewAsync(repoRoot, prNumber, [
+    "reviewDecision",
+    "mergeable",
+    "updatedAt",
+  ]);
+  const reviewDecision = (prData.reviewDecision as string) ?? "";
+  const isMergeable = (prData.mergeable as string) ?? "";
+  const prUpdatedAt = (prData.updatedAt as string) ?? "";
+
+  const checks = await prChecksAsync(repoRoot, prNumber);
+  const nonSkipped = checks.filter((c) => c.state !== "SKIPPED");
+  let ciStatus = "unknown";
+  if (nonSkipped.length > 0) {
+    if (nonSkipped.every((c) => c.state === "SUCCESS")) {
+      ciStatus = "pass";
+    } else if (nonSkipped.some((c) => CI_FAILURE_STATES.has(c.state))) {
+      ciStatus = "fail";
+    } else if (nonSkipped.some((c) => c.state === "PENDING")) {
+      ciStatus = "pending";
+    }
+  }
+
+  let status = "pending";
+  if (ciStatus === "fail") {
+    status = "failing";
+  } else if (ciStatus === "pass") {
+    if (isMergeable === "MERGEABLE" && reviewDecision === "APPROVED") {
+      status = "ready";
+    } else {
+      status = "ci-passed";
+    }
+  } else if (ciStatus === "pending") {
+    status = "pending";
+  }
+
+  // Determine event time
+  let eventTime = prUpdatedAt;
+  if (ciStatus === "pass" || ciStatus === "fail") {
+    const completedTimes = nonSkipped
+      .map((c) => c.completedAt)
+      .filter((t): t is string => !!t)
+      .sort();
+    if (completedTimes.length > 0) {
+      eventTime = completedTimes[completedTimes.length - 1]!;
+    }
+  }
+
   return `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`;
 }
 

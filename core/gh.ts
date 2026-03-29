@@ -1,4 +1,4 @@
-import { run } from "./shell.ts";
+import { run, runAsync } from "./shell.ts";
 import type { RunResult } from "./types.ts";
 import { loadConfig } from "./config.ts";
 
@@ -66,6 +66,94 @@ export function prChecks(
   prNumber: number,
 ): { state: string; name: string; url: string; completedAt?: string }[] {
   const result = ghInRepo(repoRoot, [
+    "pr",
+    "checks",
+    String(prNumber),
+    "--json",
+    "state,name,link,completedAt",
+  ]);
+  if (result.exitCode !== 0 || !result.stdout) return [];
+  try {
+    const raw = JSON.parse(result.stdout) as Array<{
+      state: string;
+      name: string;
+      link: string;
+      completedAt?: string;
+    }>;
+    return raw.map((c) => ({
+      state: c.state,
+      name: c.name,
+      url: c.link,
+      completedAt: c.completedAt || undefined,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ── Async variants ──────────────────────────────────────────────────
+// These use Bun.spawn (via runAsync) to yield to the event loop,
+// keeping the TUI responsive during poll cycles.
+// Sync versions above are kept unchanged for tests and one-shot CLI commands.
+
+/** Async: run a gh command in the context of a specific repo directory. */
+export function ghInRepoAsync(repoRoot: string, args: string[]): Promise<RunResult> {
+  return runAsync("gh", args, { cwd: repoRoot });
+}
+
+/** Async: list PRs for a branch with a given state. */
+export async function prListAsync(
+  repoRoot: string,
+  branch: string,
+  state: string,
+): Promise<Array<{ number: number; title: string }>> {
+  const result = await ghInRepoAsync(repoRoot, [
+    "pr",
+    "list",
+    "--head",
+    branch,
+    "--state",
+    state,
+    "--json",
+    "number,title",
+    "--limit",
+    "100",
+  ]);
+  if (result.exitCode !== 0 || !result.stdout) return [];
+  try {
+    return JSON.parse(result.stdout) as Array<{ number: number; title: string }>;
+  } catch {
+    return [];
+  }
+}
+
+/** Async: view a PR by number, returning requested fields. */
+export async function prViewAsync(
+  repoRoot: string,
+  prNumber: number,
+  fields: string[],
+): Promise<Record<string, unknown>> {
+  const result = await ghInRepoAsync(repoRoot, [
+    "pr",
+    "view",
+    String(prNumber),
+    "--json",
+    fields.join(","),
+  ]);
+  if (result.exitCode !== 0 || !result.stdout) return {};
+  try {
+    return JSON.parse(result.stdout) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+/** Async: get CI check status for a PR. */
+export async function prChecksAsync(
+  repoRoot: string,
+  prNumber: number,
+): Promise<{ state: string; name: string; url: string; completedAt?: string }[]> {
+  const result = await ghInRepoAsync(repoRoot, [
     "pr",
     "checks",
     String(prNumber),

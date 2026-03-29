@@ -24,7 +24,7 @@ import {
 } from "../orchestrator.ts";
 import { parseWorkItems } from "../parser.ts";
 import { resolveRepo, getWorktreeInfo, bootstrapRepo } from "../cross-repo.ts";
-import { checkPrStatus, scanExternalPRs } from "./pr-monitor.ts";
+import { checkPrStatus, checkPrStatusAsync, scanExternalPRs } from "./pr-monitor.ts";
 import { launchSingleItem, launchReviewWorker, launchRepairWorker, launchVerifierWorker, detectAiTool, cleanStaleBranchForReuse } from "./launch.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrComments, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI } from "../gh.ts";
@@ -679,6 +679,180 @@ export function buildSnapshot(
             snap.newComments = comments;
           }
         } catch { /* ignore -- comment polling is best-effort */ }
+      }
+    }
+
+    items.push(snap);
+  }
+
+  return { items, readyIds };
+}
+
+/**
+ * Async variant of buildSnapshot. Uses checkPrStatusAsync so each gh CLI
+ * call yields to the event loop, keeping keyboard events responsive.
+ *
+ * Same snapshot assembly logic as the sync version. Non-gh operations
+ * (heartbeat reads, worker-alive checks) remain synchronous since they
+ * are local filesystem/process operations that complete instantly.
+ */
+export async function buildSnapshotAsync(
+  orch: Orchestrator,
+  projectRoot: string,
+  _worktreeDir: string,
+  mux: Multiplexer = getMux(),
+  getLastCommitTime: (projectRoot: string, branchName: string) => string | null = getWorktreeLastCommitTime,
+  checkPr: (id: string, projectRoot: string) => Promise<string | null> = checkPrStatusAsync,
+  fetchComments?: (repoRoot: string, prNumber: number, since: string) => Array<{ body: string; author: string; createdAt: string }>,
+  checkCommitCI?: (repoRoot: string, sha: string) => "pass" | "fail" | "pending",
+): Promise<PollSnapshot> {
+  const items: ItemSnapshot[] = [];
+  const readyIds: string[] = [];
+  const heartbeatStates = new Set(["launching", "implementing", "ci-failed", "ci-pending", "ci-passed", "review-pending", "merging", "pr-open"]);
+
+  for (const orchItem of orch.getAllItems()) {
+    // Compute readyIds for queued items
+    if (orchItem.state === "queued") {
+      const allDepsMet = orchItem.workItem.dependencies.every((depId) => {
+        const depItem = orch.getItem(depId);
+        return !depItem || depItem.state === "done" || depItem.state === "merged";
+      });
+      if (allDepsMet) {
+        readyIds.push(orchItem.id);
+      }
+      continue;
+    }
+
+    // Skip terminal states
+    if (orchItem.state === "done" || orchItem.state === "stuck") continue;
+
+    // Post-merge verification
+    if ((orchItem.state === "verifying" || orchItem.state === "verify-failed") && orchItem.mergeCommitSha) {
+      const snap: ItemSnapshot = { id: orchItem.id };
+      if (checkCommitCI) {
+        const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
+        try {
+          snap.mergeCommitCIStatus = checkCommitCI(repoRoot, orchItem.mergeCommitSha);
+        } catch {
+          // Non-fatal
+        }
+      }
+      items.push(snap);
+      continue;
+    }
+
+    const snap: ItemSnapshot = { id: orchItem.id };
+
+    // Check PR status via async gh -- yields to event loop per call
+    const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
+    const statusLine = await checkPr(orchItem.id, repoRoot);
+    if (statusLine) {
+      const parts = statusLine.split("\t");
+      const prNumStr = parts[1];
+      const status = parts[2];
+      const mergeableStr = parts[3];
+      const eventTimeStr = parts[4];
+
+      if (prNumStr) {
+        snap.prNumber = parseInt(prNumStr, 10);
+      }
+
+      switch (status) {
+        case "merged": {
+          const mergedPrTitle = parts[5] ?? "";
+          const itemTitle = orchItem.workItem.title;
+          const alreadyTracked = orchItem.prNumber != null && snap.prNumber === orchItem.prNumber;
+          if (alreadyTracked || !mergedPrTitle || prTitleMatchesWorkItem(mergedPrTitle, itemTitle)) {
+            snap.prState = "merged";
+          }
+          break;
+        }
+        case "ready":
+          snap.ciStatus = "pass";
+          snap.prState = "open";
+          snap.reviewDecision = "APPROVED";
+          snap.isMergeable = true;
+          break;
+        case "ci-passed":
+          snap.ciStatus = "pass";
+          snap.prState = "open";
+          break;
+        case "failing":
+          snap.ciStatus = "fail";
+          snap.prState = "open";
+          break;
+        case "pending":
+          snap.ciStatus = "pending";
+          snap.prState = "open";
+          break;
+      }
+
+      if (mergeableStr === "MERGEABLE") {
+        snap.isMergeable = true;
+      } else if (mergeableStr === "CONFLICTING") {
+        snap.isMergeable = false;
+      }
+
+      if (eventTimeStr) {
+        snap.eventTime = eventTimeStr;
+      }
+    }
+
+    // Review worker health
+    if (orchItem.state === "reviewing" && orchItem.reviewWorkspaceRef) {
+      snap.workerAlive = isWorkerAlive(
+        { ...orchItem, workspaceRef: orchItem.reviewWorkspaceRef } as OrchestratorItem,
+        mux,
+      );
+      if (orchItem.reviewVerdictPath) {
+        try {
+          snap.reviewVerdict = readVerdictFile(orchItem.reviewVerdictPath) ?? undefined;
+        } catch { /* best-effort */ }
+      }
+    }
+
+    // Repair worker health
+    if (orchItem.state === "repairing" && orchItem.repairWorkspaceRef) {
+      snap.workerAlive = isWorkerAlive(
+        { ...orchItem, workspaceRef: orchItem.repairWorkspaceRef } as OrchestratorItem,
+        mux,
+      );
+    }
+
+    // Verifier worker health
+    if (orchItem.state === "repairing-main" && orchItem.verifyWorkspaceRef) {
+      snap.workerAlive = isWorkerAlive(
+        { ...orchItem, workspaceRef: orchItem.verifyWorkspaceRef } as OrchestratorItem,
+        mux,
+      );
+    }
+
+    // Worker alive and commit freshness
+    if (orchItem.state === "launching" || orchItem.state === "implementing" || orchItem.state === "ci-failed") {
+      snap.workerAlive = isWorkerAlive(orchItem, mux);
+      const commitTime = getLastCommitTime(repoRoot, `ninthwave/${orchItem.id}`);
+      snap.lastCommitTime = commitTime;
+      orchItem.lastCommitTime = commitTime;
+    }
+
+    // Heartbeat
+    if (heartbeatStates.has(orchItem.state)) {
+      try {
+        snap.lastHeartbeat = readHeartbeat(projectRoot, orchItem.id) ?? null;
+      } catch { /* best-effort */ }
+    }
+
+    // PR comments
+    if (orchItem.prNumber && fetchComments) {
+      const commentRelayStates = new Set(["pr-open", "ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing"]);
+      if (commentRelayStates.has(orchItem.state)) {
+        const since = orchItem.lastCommentCheck || orchItem.lastTransition;
+        try {
+          const comments = fetchComments(repoRoot, orchItem.prNumber, since);
+          if (comments.length > 0) {
+            snap.newComments = comments;
+          }
+        } catch { /* best-effort */ }
       }
     }
 
@@ -1643,7 +1817,7 @@ function handleActionExecution(
 
 /** Dependencies injected into orchestrateLoop for testability. */
 export interface OrchestrateLoopDeps {
-  buildSnapshot: (orch: Orchestrator, projectRoot: string, worktreeDir: string) => PollSnapshot;
+  buildSnapshot: (orch: Orchestrator, projectRoot: string, worktreeDir: string) => PollSnapshot | Promise<PollSnapshot>;
   sleep: (ms: number) => Promise<void>;
   log: (entry: LogEntry) => void;
   actionDeps: OrchestratorDeps;
@@ -2010,7 +2184,7 @@ export async function orchestrateLoop(
     }
 
     // Build snapshot from external state
-    const snapshot = deps.buildSnapshot(orch, ctx.projectRoot, ctx.worktreeDir);
+    const snapshot = await deps.buildSnapshot(orch, ctx.projectRoot, ctx.worktreeDir);
     __lastSnapshot = snapshot;
 
     // Process transitions (pure state machine)
@@ -3497,7 +3671,7 @@ export async function cmdOrchestrate(
   }
 
   const loopDeps: OrchestrateLoopDeps = {
-    buildSnapshot: (o, pr, wd) => buildSnapshot(o, pr, wd, mux, undefined, undefined, fetchTrustedPrComments, ghCheckCommitCI),
+    buildSnapshot: (o, pr, wd) => buildSnapshotAsync(o, pr, wd, mux, undefined, undefined, fetchTrustedPrComments, ghCheckCommitCI),
     sleep: (ms) => interruptibleSleep(ms, abortController.signal),
     log,
     actionDeps,
