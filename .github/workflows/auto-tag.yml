@@ -1,0 +1,38 @@
+name: Auto-tag
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+
+jobs:
+  tag:
+    name: Create version tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create tag and trigger release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(cat VERSION)
+          TAG="v${VERSION}"
+
+          # Bail if tag already exists
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q .; then
+            echo "Tag ${TAG} already exists, skipping"
+            exit 0
+          fi
+
+          # Create and push tag
+          git tag "${TAG}"
+          git push origin "${TAG}"
+
+          # Trigger release workflow on the new tag
+          # (workflow_dispatch bypasses the GITHUB_TOKEN event limitation)
+          gh workflow run release.yml --ref "${TAG}"
+          echo "Created tag ${TAG} and triggered release"
