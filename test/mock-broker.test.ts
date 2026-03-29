@@ -801,19 +801,20 @@ describe("mock-broker", () => {
       ws.close();
     });
 
-    it("treats dependencies not in the broker map as unresolved", async () => {
+    it("treats dependencies not in the broker map as externally satisfied", async () => {
       const { port } = startBroker();
       const code = await createCrew(port);
       const ws = await connectWs(port, code, "d1", "worker-1");
 
-      // todo-A depends on "unknown-item" which is not synced
+      // todo-A depends on "unknown-item" which is not synced -- treated as
+      // externally completed (matches orchestrator semantics: untracked deps = met)
       await sendSync(ws, "d1", ["todo-A"], {
         "todo-A": { dependencies: ["unknown-item"] },
       });
 
-      // Should not be claimable
+      // Should be claimable since unknown deps are treated as satisfied
       const claim = await sendClaim(ws, "d1");
-      expect(claim.todoId).toBeNull();
+      expect(claim.todoId).toBe("todo-A");
 
       ws.close();
     });

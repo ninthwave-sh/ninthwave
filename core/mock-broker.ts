@@ -425,15 +425,16 @@ export class MockBroker {
     if (!daemon) return;
 
     // Find available items: unclaimed, uncompleted, and all dependencies resolved.
-    // A dependency is resolved when its ID exists in the crew's items map with
-    // completedBy !== null. Items not in the map are treated as unresolved.
+    // A dependency is resolved when it either doesn't exist in the crew's items
+    // map (external/previously completed) or exists with completedBy !== null.
+    // This matches the orchestrator's semantics: untracked deps = satisfied.
     const available = Array.from(crew.items.values()).filter(
       (t) =>
         t.claimedBy === null &&
         t.completedBy === null &&
         t.dependencies.every((depId) => {
           const dep = crew.items.get(depId);
-          return dep !== undefined && dep.completedBy !== null;
+          return !dep || dep.completedBy !== null;
         }),
     );
 
@@ -568,7 +569,15 @@ export class MockBroker {
   /** Broadcast crew status update to all connected daemons in the crew. */
   private broadcastCrewUpdate(crew: CrewState): void {
     const todos = Array.from(crew.items.values());
-    const availableCount = todos.filter((t) => t.claimedBy === null && t.completedBy === null).length;
+    const availableCount = todos.filter(
+      (t) =>
+        t.claimedBy === null &&
+        t.completedBy === null &&
+        t.dependencies.every((depId) => {
+          const dep = crew.items.get(depId);
+          return !dep || dep.completedBy !== null;
+        }),
+    ).length;
     const claimedCount = todos.filter((t) => t.claimedBy !== null).length;
     const completedCount = todos.filter((t) => t.completedBy !== null).length;
     const connectedDaemons = Array.from(crew.daemons.values()).filter((d) => d.ws !== null);

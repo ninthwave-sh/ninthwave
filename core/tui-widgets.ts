@@ -94,7 +94,7 @@ export interface SelectionScreenResult {
 export function runCheckboxList(
   io: WidgetIO,
   items: CheckboxItem[],
-  opts: { title?: string; errorMessage?: string; linkAllId?: string } = {},
+  opts: { title?: string; errorMessage?: string; linkAllId?: string; validate?: (selectedIds: string[]) => string | null } = {},
 ): Promise<CheckboxListResult> {
   return new Promise((resolve) => {
     if (items.length === 0) {
@@ -105,6 +105,7 @@ export function runCheckboxList(
     let cursor = 0;
     let scrollOffset = 0;
     let error = opts.errorMessage ?? "";
+    let warningAcked = false;
 
     const render = () => {
       const rows = io.getRows();
@@ -173,6 +174,7 @@ export function runCheckboxList(
 
     const handler = (key: string) => {
       error = ""; // Clear error on any keypress
+      if (key !== "\r") warningAcked = false; // Reset warning ack on non-Enter keys
 
       switch (key) {
         case "\x1B[A": // Up arrow
@@ -220,6 +222,17 @@ export function runCheckboxList(
             error = "Select at least one item";
             render();
             return;
+          }
+          // Validate selection (e.g., dependency warnings)
+          if (opts.validate && !warningAcked) {
+            const selectedIds = regularSelected.map((i) => i.id);
+            const warning = opts.validate(selectedIds);
+            if (warning) {
+              error = warning;
+              warningAcked = true;
+              render();
+              return;
+            }
           }
           io.offKey(handler);
           resolve({
@@ -687,11 +700,31 @@ export async function runSelectionScreen(
   };
   const checkboxItemsWithAll = [allSentinel, ...checkboxItems];
 
+  // Build dependency validator: warn when selected items have deps in the
+  // list that aren't selected (those deps will be treated as already complete).
+  const itemMap = new Map(sorted.map((t) => [t.id, t]));
+  const validateDeps = (selectedIds: string[]): string | null => {
+    const selectedSet = new Set(selectedIds);
+    const missing: string[] = [];
+    for (const id of selectedIds) {
+      const item = itemMap.get(id);
+      if (!item) continue;
+      for (const dep of item.dependencies) {
+        if (itemMap.has(dep) && !selectedSet.has(dep) && !missing.includes(dep)) {
+          missing.push(dep);
+        }
+      }
+    }
+    if (missing.length === 0) return null;
+    return `Deps not selected: ${missing.join(", ")} -- will start without waiting. Enter again to confirm.`;
+  };
+
   // Step 1: Item selection
   io.write(CLEAR_SCREEN + HIDE_CURSOR);
   const itemResult = await runCheckboxList(io, checkboxItemsWithAll, {
     title: `Ninthwave \u00b7 Select work items (${sorted.length} available)`,
     linkAllId: ALL_SENTINEL_ID,
+    validate: validateDeps,
   });
 
   if (itemResult.cancelled) {
