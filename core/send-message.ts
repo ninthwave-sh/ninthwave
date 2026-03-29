@@ -75,7 +75,7 @@ function attemptSend(
 
   // 5. Verify delivery
   sleep(100);
-  return verifyDelivery(workspaceRef, message, runner);
+  return verifyDelivery(workspaceRef, message, runner, true);
 }
 
 /** Fallback: use `cmux send` for non-terminal surfaces (TUIs like Claude Code). */
@@ -109,20 +109,23 @@ function attemptDirectSend(
 
   // Brief wait then verify
   sleep(100);
-  return verifyDelivery(workspaceRef, message, runner);
+  return verifyDelivery(workspaceRef, message, runner, false);
 }
 
 /**
  * Check that the message was submitted (not stuck in the input field).
  *
  * Reads the last few screen lines via cmux and delegates to the shared
- * checkDelivery logic. When the screen can't be read, assumes success
- * (paste-submit is inherently reliable).
+ * checkDelivery logic. When the screen can't be read, returns
+ * `usedPasteBuffer` -- the paste-buffer path is inherently reliable,
+ * but the keystroke fallback (attemptDirectSend) is not, so we can't
+ * assume success for unverifiable keystroke deliveries.
  */
 export function verifyDelivery(
   workspaceRef: string,
   message: string,
   runner: Runner,
+  usedPasteBuffer: boolean = true,
 ): boolean {
   const screen = runner("cmux", [
     "read-screen",
@@ -133,8 +136,9 @@ export function verifyDelivery(
   ]);
 
   if (screen.exitCode !== 0) {
-    // Can't verify -- assume success (paste-submit is inherently reliable)
-    return true;
+    // Can't verify -- only trust paste-buffer delivery (inherently reliable).
+    // Keystroke delivery (attemptDirectSend) can drop or interleave keys.
+    return usedPasteBuffer;
   }
 
   return checkDelivery(screen.stdout, message);

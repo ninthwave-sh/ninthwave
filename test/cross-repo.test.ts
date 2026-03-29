@@ -10,9 +10,11 @@ import { writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
 import { parseWorkItems } from "../core/parser.ts";
 import {
   resolveRepo,
+  bootstrapRepo,
   writeCrossRepoIndex,
   removeCrossRepoIndex,
   getWorktreeInfo,
+  VALID_ALIAS_RE,
 } from "../core/cross-repo.ts";
 
 describe("cross-repo", () => {
@@ -251,6 +253,99 @@ describe("cross-repo", () => {
       // Caller can continue after catching
       const result = resolveRepo("", repo);
       expect(result).toBe(repo);
+    });
+
+    it("rejects alias with path traversal (../foo)", () => {
+      const repo = setupTempRepo();
+      expect(() => resolveRepo("../foo", repo)).toThrow(/Invalid repo alias/);
+    });
+
+    it("rejects alias with semicolons (foo;bar)", () => {
+      const repo = setupTempRepo();
+      expect(() => resolveRepo("foo;bar", repo)).toThrow(/Invalid repo alias/);
+    });
+
+    it("rejects alias with slashes (foo/bar)", () => {
+      const repo = setupTempRepo();
+      expect(() => resolveRepo("foo/bar", repo)).toThrow(/Invalid repo alias/);
+    });
+
+    it("rejects alias starting with a dot (.hidden)", () => {
+      const repo = setupTempRepo();
+      expect(() => resolveRepo(".hidden", repo)).toThrow(/Invalid repo alias/);
+    });
+
+    it("rejects alias starting with a hyphen (-flag)", () => {
+      const repo = setupTempRepo();
+      expect(() => resolveRepo("-flag", repo)).toThrow(/Invalid repo alias/);
+    });
+
+    it("accepts valid alias with dots, hyphens, underscores", () => {
+      // These should NOT throw the validation error (they may throw "not found")
+      const repo = setupTempRepo();
+      expect(() => resolveRepo("valid.repo-name_123", repo)).toThrow(/not found/i);
+    });
+  });
+
+  // Group 5b: VALID_ALIAS_RE coverage
+  describe("VALID_ALIAS_RE", () => {
+    it("accepts simple names", () => {
+      expect(VALID_ALIAS_RE.test("myrepo")).toBe(true);
+    });
+
+    it("accepts names with dots, hyphens, underscores", () => {
+      expect(VALID_ALIAS_RE.test("my.repo-name_v2")).toBe(true);
+    });
+
+    it("accepts single character name", () => {
+      expect(VALID_ALIAS_RE.test("a")).toBe(true);
+    });
+
+    it("rejects empty string", () => {
+      expect(VALID_ALIAS_RE.test("")).toBe(false);
+    });
+
+    it("rejects path traversal", () => {
+      expect(VALID_ALIAS_RE.test("../../../etc")).toBe(false);
+    });
+
+    it("rejects slashes", () => {
+      expect(VALID_ALIAS_RE.test("foo/bar")).toBe(false);
+    });
+
+    it("rejects starting with dot", () => {
+      expect(VALID_ALIAS_RE.test(".hidden")).toBe(false);
+    });
+
+    it("rejects starting with hyphen", () => {
+      expect(VALID_ALIAS_RE.test("-flag")).toBe(false);
+    });
+
+    it("rejects spaces", () => {
+      expect(VALID_ALIAS_RE.test("foo bar")).toBe(false);
+    });
+  });
+
+  // Group 5c: bootstrapRepo alias validation
+  describe("bootstrapRepo alias validation", () => {
+    it("rejects aliases with path traversal characters", () => {
+      const repo = setupTempRepo();
+      const result = bootstrapRepo("../../../etc", repo);
+      expect(result.status).toBe("failed");
+      expect((result as { reason: string }).reason).toContain("Invalid repo alias");
+    });
+
+    it("rejects aliases with semicolons", () => {
+      const repo = setupTempRepo();
+      const result = bootstrapRepo("foo;bar", repo);
+      expect(result.status).toBe("failed");
+    });
+
+    it("allows hub-local aliases through without validation", () => {
+      const repo = setupTempRepo();
+      expect(bootstrapRepo("", repo).status).toBe("exists");
+      expect(bootstrapRepo("self", repo).status).toBe("exists");
+      expect(bootstrapRepo("hub", repo).status).toBe("exists");
     });
   });
 
