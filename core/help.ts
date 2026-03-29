@@ -25,7 +25,6 @@ import {
   cmdPrActivity,
 } from "./commands/pr-monitor.ts";
 import { cmdCiFailures } from "./commands/ci.ts";
-import { cmdVersionBump } from "./commands/version-bump.ts";
 import { cmdInit } from "./commands/init.ts";
 import { cmdWatch } from "./commands/orchestrate.ts";
 import { cmdCrew } from "./commands/crew.ts";
@@ -434,17 +433,6 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     handler: () => cmdVersion(),
     flags: {},
     examples: ["nw version", "nw --version", "nw -v"],
-  },
-  {
-    name: "version-bump",
-    usage: "version-bump",
-    description: "Bump version and update changelog",
-    group: "advanced",
-    needsRoot: true,
-    needsWork: false,
-    handler: (ctx) => cmdVersionBump(ctx.projectRoot),
-    flags: {},
-    examples: ["nw version-bump"],
   },
   {
     name: "heartbeat",

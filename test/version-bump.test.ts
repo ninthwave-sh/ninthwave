@@ -33,7 +33,7 @@ if (typeof globalThis.Bun === "undefined") {
 
 // Import after polyfill
 const { cmdVersionBump } = await import(
-  "../core/commands/version-bump.ts"
+  "../scripts/version-bump.ts"
 );
 
 let tmpDirs: string[] = [];
@@ -72,12 +72,12 @@ function setupVersionRepo(): string {
 
   mkdirSync(join(dir, ".ninthwave/work"), { recursive: true });
   writeFileSync(join(dir, ".ninthwave/work/.gitkeep"), "");
-  writeFileSync(join(dir, "VERSION"), "1.2.3.0\n");
+  writeFileSync(join(dir, "VERSION"), "1.2.3\n");
   writeFileSync(
     join(dir, "CHANGELOG.md"),
     `# Changelog
 
-## [1.2.3.0] - 2026-03-01
+## [1.2.3] - 2026-03-01
 
 ### Added
 - Initial release
@@ -138,7 +138,7 @@ afterAll(() => {
 });
 
 describe("cmdVersionBump", { timeout: 30_000 }, () => {
-  it("< 50 LOC triggers MICRO bump", () => {
+  it("< 50 LOC triggers PATCH bump", () => {
     const repo = setupVersionRepo();
     addLocChanges(repo, 20);
 
@@ -152,14 +152,14 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     }
 
     const output = logs.join("\n");
-    expect(output).toContain("MICRO");
-    expect(output).toContain("1.2.3.1");
+    expect(output).toContain("PATCH");
+    expect(output).toContain("1.2.4");
 
     const version = readFileSync(join(repo, "VERSION"), "utf-8").trim();
-    expect(version).toBe("1.2.3.1");
+    expect(version).toBe("1.2.4");
 
     const changelog = readFileSync(join(repo, "CHANGELOG.md"), "utf-8");
-    expect(changelog).toContain("[1.2.3.1]");
+    expect(changelog).toContain("[1.2.4]");
   });
 
   it("50-200 LOC triggers PATCH bump", () => {
@@ -177,10 +177,10 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
 
     const output = logs.join("\n");
     expect(output).toContain("PATCH");
-    expect(output).toContain("1.2.4.0");
+    expect(output).toContain("1.2.4");
 
     const version = readFileSync(join(repo, "VERSION"), "utf-8").trim();
-    expect(version).toBe("1.2.4.0");
+    expect(version).toBe("1.2.4");
   });
 
   it("exactly 50 LOC triggers PATCH bump (boundary)", () => {
@@ -198,7 +198,7 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
 
     const output = logs.join("\n");
     expect(output).toContain("PATCH");
-    expect(output).toContain("1.2.4.0");
+    expect(output).toContain("1.2.4");
   });
 
   it("no commits since last bump reports nothing to do", () => {
@@ -270,10 +270,10 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     expect(() => cmdVersionBump(repo)).toThrow();
   });
 
-  it("sequential MICRO bumps increment correctly", () => {
+  it("sequential PATCH bumps increment correctly", () => {
     const repo = setupVersionRepo();
 
-    // First bump: 1.2.3.0 -> 1.2.3.1
+    // First bump: 1.2.3 -> 1.2.4
     addLocChanges(repo, 10);
     const origLog = console.log;
     console.log = () => {};
@@ -284,9 +284,9 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     }
 
     const v1 = readFileSync(join(repo, "VERSION"), "utf-8").trim();
-    expect(v1).toBe("1.2.3.1");
+    expect(v1).toBe("1.2.4");
 
-    // Second bump: 1.2.3.1 -> 1.2.3.2
+    // Second bump: 1.2.4 -> 1.2.5
     addLocChanges(repo, 15);
     const logs: string[] = [];
     console.log = (msg: string) => logs.push(String(msg));
@@ -297,9 +297,9 @@ describe("cmdVersionBump", { timeout: 30_000 }, () => {
     }
 
     const output = logs.join("\n");
-    expect(output).toContain("1.2.3.2");
+    expect(output).toContain("1.2.5");
 
     const v2 = readFileSync(join(repo, "VERSION"), "utf-8").trim();
-    expect(v2).toBe("1.2.3.2");
+    expect(v2).toBe("1.2.5");
   });
 });
