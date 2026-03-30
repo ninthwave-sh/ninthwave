@@ -22,7 +22,7 @@ import { info, GREEN, BOLD, DIM, RESET, YELLOW, RED } from "../output.ts";
 import { run } from "../shell.ts";
 import type { WorkspaceConfig, WorkspacePackage } from "../types.ts";
 import {
-  createSkillSymlinks,
+  copySkillFiles,
   type CommandChecker,
   type AuthChecker,
   type CommandPathResolver,
@@ -33,8 +33,8 @@ import {
   interactiveAgentSelection,
   detectProjectTools,
   discoverAgentSources,
-  buildSymlinkPlan,
-  executeSymlinkPlan,
+  buildCopyPlan,
+  executeCopyPlan,
   AGENT_TARGET_DIRS,
 } from "./setup.ts";
 import { AI_TOOL_PROFILES } from "../ai-tools.ts";
@@ -676,17 +676,17 @@ than average. Open a work item for anything that needs attention.
   mkdirSync(frictionDir, { recursive: true });
   writeFileSync(join(frictionDir, ".gitkeep"), "");
 
-  // --- Skill symlinks ---
+  // --- Skill files ---
   const skillsDir = join(projectDir, ".claude/skills");
-  createSkillSymlinks(skillsDir, bundleDir);
+  copySkillFiles(skillsDir, bundleDir);
 
-  // --- Agent files (symlinked to stay in sync with source) ---
+  // --- Agent files (copied into project for portability) ---
   const selection = agentSelection ?? {
     agents: discoverAgentSources(bundleDir),
     toolDirs: [...AGENT_TARGET_DIRS],
   };
-  const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
-  executeSymlinkPlan(plan);
+  const plan = buildCopyPlan(projectDir, bundleDir, selection);
+  executeCopyPlan(plan);
 
   // --- .ninthwave/.gitignore (deny-by-default: only explicitly allowed files are committed) ---
   const nwGitignorePath = join(projectDir, ".ninthwave", ".gitignore");

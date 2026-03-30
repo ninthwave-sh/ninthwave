@@ -42,7 +42,7 @@ import {
   AGENT_TARGET_DIRS,
   AGENT_DESCRIPTIONS,
   discoverAgentSources,
-  buildSymlinkPlan,
+  buildCopyPlan,
   setupGlobal,
 } from "../core/commands/setup.ts";
 import { lookupCommand } from "../core/help.ts";
@@ -648,11 +648,12 @@ describe("initProject", () => {
     // Init should NOT create TODOS.md
     expect(existsSync(join(projectDir, "TODOS.md"))).toBe(false);
 
-    // Skills symlinked
+    // Skills copied (real directories, not symlinks)
     for (const skill of ["work", "decompose", "ninthwave-upgrade"]) {
-      const linkPath = join(projectDir, ".claude/skills", skill);
-      expect(existsSync(linkPath)).toBe(true);
-      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+      const skillPath = join(projectDir, ".claude/skills", skill);
+      expect(existsSync(skillPath)).toBe(true);
+      expect(lstatSync(skillPath).isSymbolicLink()).toBe(false);
+      expect(lstatSync(skillPath).isDirectory()).toBe(true);
     }
 
     // Agents copied
@@ -1548,7 +1549,7 @@ describe("initProject -- agent selection", () => {
     expect(existsSync(join(projectDir, ".claude/skills/work"))).toBe(true);
   });
 
-  it("creates agent files as symlinks, not copies", () => {
+  it("creates agent files as copies, not symlinks", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -1559,17 +1560,14 @@ describe("initProject -- agent selection", () => {
 
     initProject(projectDir, bundleDir, deps);
 
-    // All agent files should be symlinks
+    // All agent files should be regular files (copies), not symlinks
     for (const agent of AGENT_SOURCES) {
       const baseName = agent.replace(/\.md$/, "");
       for (const target of AGENT_TARGET_DIRS) {
         const filename = target.suffix === ".agent.md" ? `ninthwave-${baseName}.agent.md` : agent;
-        const linkPath = join(projectDir, target.dir, filename);
-        expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
-
-        // Verify symlink target is relative
-        const symlinkTarget = readlinkSync(linkPath);
-        expect(symlinkTarget.startsWith("/")).toBe(false);
+        const filePath = join(projectDir, target.dir, filename);
+        expect(lstatSync(filePath).isFile()).toBe(true);
+        expect(lstatSync(filePath).isSymbolicLink()).toBe(false);
       }
     }
   });
@@ -1737,20 +1735,22 @@ describe("initProject -- idempotency", () => {
       steadyGitignore,
     );
 
-    // Symlinks still valid
+    // Skills still present as real directories
     for (const skill of [
       "work",
       "decompose",
       "ninthwave-upgrade",
     ]) {
-      const linkPath = join(projectDir, ".claude/skills", skill);
-      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+      const skillPath = join(projectDir, ".claude/skills", skill);
+      expect(lstatSync(skillPath).isDirectory()).toBe(true);
+      expect(lstatSync(skillPath).isSymbolicLink()).toBe(false);
     }
 
-    // Agent symlinks still valid
+    // Agent files still present as real files
     for (const agent of AGENT_SOURCES) {
-      const linkPath = join(projectDir, ".claude/agents", agent);
-      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
+      const filePath = join(projectDir, ".claude/agents", agent);
+      expect(lstatSync(filePath).isFile()).toBe(true);
+      expect(lstatSync(filePath).isSymbolicLink()).toBe(false);
     }
   });
 
@@ -1836,7 +1836,7 @@ describe("initProject -- preserves existing files", () => {
     );
   });
 
-  it("creates relative skill symlinks in .claude/skills/", () => {
+  it("copies skill directories into .claude/skills/", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -1852,13 +1852,12 @@ describe("initProject -- preserves existing files", () => {
       "decompose",
       "ninthwave-upgrade",
     ]) {
-      const linkPath = join(projectDir, ".claude/skills", skill);
-      expect(existsSync(linkPath)).toBe(true);
-      expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
-
-      // Symlink target must be relative (not starting with /)
-      const target = readlinkSync(linkPath);
-      expect(target.startsWith("/")).toBe(false);
+      const skillPath = join(projectDir, ".claude/skills", skill);
+      expect(existsSync(skillPath)).toBe(true);
+      expect(lstatSync(skillPath).isSymbolicLink()).toBe(false);
+      expect(lstatSync(skillPath).isDirectory()).toBe(true);
+      // SKILL.md should be present inside the copied directory
+      expect(existsSync(join(skillPath, "SKILL.md"))).toBe(true);
     }
   });
 

@@ -17,13 +17,14 @@ import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 import {
   setupGlobal,
   createSkillSymlinks,
+  copySkillFiles,
   checkPrerequisites,
   createNwSymlink,
   isSelfHosting,
   detectProjectTools,
   discoverAgentSources,
-  buildSymlinkPlan,
-  executeSymlinkPlan,
+  buildCopyPlan,
+  executeCopyPlan,
   interactiveAgentSelection,
   AGENT_SOURCES,
   AGENT_TARGET_DIRS,
@@ -367,10 +368,10 @@ describe("discoverAgentSources", () => {
   });
 });
 
-// --- buildSymlinkPlan ---
+// --- buildCopyPlan ---
 
-describe("buildSymlinkPlan", () => {
-  it("plans symlinks for selected agents and tools", () => {
+describe("buildCopyPlan", () => {
+  it("plans copies for selected agents and tools", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -379,18 +380,38 @@ describe("buildSymlinkPlan", () => {
       toolDirs: [AGENT_TARGET_DIRS[0]!], // .claude/agents only
     };
 
-    const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
 
     expect(plan).toHaveLength(1);
     expect(plan[0]!.displayPath).toBe(".claude/agents/implementer.md");
     expect(plan[0]!.status).toBe("create");
   });
 
-  it("detects existing correct symlinks as 'exists'", () => {
+  it("detects existing regular files as 'exists'", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    // Pre-create the correct symlink
+    // Pre-create a regular file (already copied)
+    const targetDir = join(projectDir, ".claude/agents");
+    mkdirSync(targetDir, { recursive: true });
+    writeFileSync(join(targetDir, "implementer.md"), "# Implementer Agent\n");
+
+    const selection: AgentSelection = {
+      agents: ["implementer.md"],
+      toolDirs: [AGENT_TARGET_DIRS[0]!],
+    };
+
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
+
+    expect(plan).toHaveLength(1);
+    expect(plan[0]!.status).toBe("exists");
+  });
+
+  it("detects legacy symlinks as 'replace'", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    // Pre-create a symlink (legacy setup)
     const targetDir = join(projectDir, ".claude/agents");
     mkdirSync(targetDir, { recursive: true });
     const { relative: rel } = require("path");
@@ -403,27 +424,7 @@ describe("buildSymlinkPlan", () => {
       toolDirs: [AGENT_TARGET_DIRS[0]!],
     };
 
-    const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
-
-    expect(plan).toHaveLength(1);
-    expect(plan[0]!.status).toBe("exists");
-  });
-
-  it("detects regular files as 'replace'", () => {
-    const projectDir = setupTempRepo();
-    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
-
-    // Pre-create a regular file where symlink should be
-    const targetDir = join(projectDir, ".claude/agents");
-    mkdirSync(targetDir, { recursive: true });
-    writeFileSync(join(targetDir, "implementer.md"), "# Custom content\n");
-
-    const selection: AgentSelection = {
-      agents: ["implementer.md"],
-      toolDirs: [AGENT_TARGET_DIRS[0]!],
-    };
-
-    const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
 
     expect(plan).toHaveLength(1);
     expect(plan[0]!.status).toBe("replace");
@@ -438,7 +439,7 @@ describe("buildSymlinkPlan", () => {
       toolDirs: [AGENT_TARGET_DIRS[2]!], // .github/agents
     };
 
-    const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
 
     expect(plan).toHaveLength(1);
     expect(plan[0]!.displayPath).toBe(".github/agents/ninthwave-implementer.agent.md");
@@ -453,7 +454,7 @@ describe("buildSymlinkPlan", () => {
       toolDirs: [AGENT_TARGET_DIRS[0]!, AGENT_TARGET_DIRS[2]!], // .claude + .github
     };
 
-    const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
 
     expect(plan).toHaveLength(4);
     const paths = plan.map((p) => p.displayPath);
@@ -464,10 +465,10 @@ describe("buildSymlinkPlan", () => {
   });
 });
 
-// --- executeSymlinkPlan ---
+// --- executeCopyPlan ---
 
-describe("executeSymlinkPlan", () => {
-  it("creates symlinks from a plan", () => {
+describe("executeCopyPlan", () => {
+  it("copies agent files from plan", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -476,17 +477,47 @@ describe("executeSymlinkPlan", () => {
       toolDirs: [AGENT_TARGET_DIRS[0]!],
     };
 
-    const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
-    executeSymlinkPlan(plan);
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
+    executeCopyPlan(plan);
 
-    const linkPath = join(projectDir, ".claude/agents/implementer.md");
-    expect(existsSync(linkPath)).toBe(true);
-    expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
-    const content = readFileSync(linkPath, "utf-8");
+    const destPath = join(projectDir, ".claude/agents/implementer.md");
+    expect(existsSync(destPath)).toBe(true);
+    expect(lstatSync(destPath).isSymbolicLink()).toBe(false);
+    expect(lstatSync(destPath).isFile()).toBe(true);
+    const content = readFileSync(destPath, "utf-8");
     expect(content).toBe("# Implementer Agent\n");
   });
 
-  it("replaces regular files with symlinks", () => {
+  it("replaces legacy symlinks with real files", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    // Pre-create a legacy symlink
+    const targetDir = join(projectDir, ".claude/agents");
+    mkdirSync(targetDir, { recursive: true });
+    const { relative: rel } = require("path");
+    const relTarget = rel(targetDir, join(bundleDir, "agents", "implementer.md"));
+    const { symlinkSync: symlink } = require("fs");
+    symlink(relTarget, join(targetDir, "implementer.md"));
+
+    const selection: AgentSelection = {
+      agents: ["implementer.md"],
+      toolDirs: [AGENT_TARGET_DIRS[0]!],
+    };
+
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
+    expect(plan[0]!.status).toBe("replace");
+
+    executeCopyPlan(plan);
+
+    const destPath = join(projectDir, ".claude/agents/implementer.md");
+    expect(lstatSync(destPath).isSymbolicLink()).toBe(false);
+    expect(lstatSync(destPath).isFile()).toBe(true);
+    const content = readFileSync(destPath, "utf-8");
+    expect(content).toBe("# Implementer Agent\n");
+  });
+
+  it("skips entries with status 'exists'", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -500,43 +531,15 @@ describe("executeSymlinkPlan", () => {
       toolDirs: [AGENT_TARGET_DIRS[0]!],
     };
 
-    const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
-    expect(plan[0]!.status).toBe("replace");
-
-    executeSymlinkPlan(plan);
-
-    const linkPath = join(projectDir, ".claude/agents/implementer.md");
-    expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);
-    const content = readFileSync(linkPath, "utf-8");
-    expect(content).toBe("# Implementer Agent\n");
-  });
-
-  it("skips entries with status 'exists'", () => {
-    const projectDir = setupTempRepo();
-    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
-
-    // Pre-create the correct symlink
-    const targetDir = join(projectDir, ".claude/agents");
-    mkdirSync(targetDir, { recursive: true });
-    const { relative: rel } = require("path");
-    const relTarget = rel(targetDir, join(bundleDir, "agents", "implementer.md"));
-    const { symlinkSync: symlink } = require("fs");
-    symlink(relTarget, join(targetDir, "implementer.md"));
-
-    const selection: AgentSelection = {
-      agents: ["implementer.md"],
-      toolDirs: [AGENT_TARGET_DIRS[0]!],
-    };
-
-    const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
+    const plan = buildCopyPlan(projectDir, bundleDir, selection);
     expect(plan[0]!.status).toBe("exists");
 
     // Should not throw or modify
-    executeSymlinkPlan(plan);
+    executeCopyPlan(plan);
 
-    // Symlink should still be there and correct
-    expect(lstatSync(join(targetDir, "implementer.md")).isSymbolicLink()).toBe(true);
-    expect(readlinkSync(join(targetDir, "implementer.md"))).toBe(relTarget);
+    // File should still have the original custom content (not overwritten)
+    const content = readFileSync(join(targetDir, "implementer.md"), "utf-8");
+    expect(content).toBe("# Custom content\n");
   });
 });
 
@@ -618,21 +621,18 @@ describe("interactiveAgentSelection", () => {
     expect(selection!.toolDirs[0]!.tool).toBe("Claude Code");
   });
 
-  it("skips confirmation when all symlinks already exist", async () => {
+  it("skips confirmation when all agent files already exist", async () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    // Pre-create all correct symlinks for all tools
+    // Pre-create all agent files for all tools (already copied)
     for (const agent of AGENT_SOURCES) {
       const baseName = agent.replace(/\.md$/, "");
       for (const target of AGENT_TARGET_DIRS) {
         const targetDir = join(projectDir, target.dir);
         mkdirSync(targetDir, { recursive: true });
-        const { relative: rel } = require("path");
-        const relTarget = rel(targetDir, join(bundleDir, "agents", agent));
         const filename = target.suffix === ".agent.md" ? `ninthwave-${baseName}.agent.md` : agent;
-        const { symlinkSync: symlink } = require("fs");
-        symlink(relTarget, join(targetDir, filename));
+        writeFileSync(join(targetDir, filename), `# ${agent}\n`);
       }
     }
 

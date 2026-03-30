@@ -10,10 +10,12 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  copyFileSync,
+  cpSync,
+  rmSync,
   symlinkSync,
   unlinkSync,
   lstatSync,
-  readlinkSync,
 } from "fs";
 import { join, relative, dirname, resolve } from "path";
 import { getBundleDir } from "../paths.ts";
@@ -278,31 +280,36 @@ export function discoverAgentSources(bundleDir: string): string[] {
   );
 }
 
-// ── Symlink plan ─────────────────────────────────────────────────────
+// ── Copy plan ────────────────────────────────────────────────────────
 
-/** A single planned symlink operation. */
-export interface SymlinkPlan {
-  /** Relative path from project root (e.g., ".claude/agents/ninthwave-implementer.md") */
+/** A single planned agent file copy operation. */
+export interface CopyPlan {
+  /** Relative path from project root (e.g., ".claude/agents/implementer.md") */
   displayPath: string;
-  /** Absolute path where the symlink will be created */
+  /** Absolute destination path where the file will be written */
   linkPath: string;
-  /** Relative target the symlink will point to */
-  relTarget: string;
-  /** Status: "create", "exists" (already correct), "replace" (regular file exists) */
+  /** Absolute source path in the bundle to copy from */
+  sourcePath: string;
+  /** Status: "create" (new), "exists" (regular file already there), "replace" (symlink to replace) */
   status: "create" | "exists" | "replace";
 }
 
 /**
- * Build a plan of symlink operations for the given agent selection.
+ * Build a plan of copy operations for the given agent selection.
  *
  * Does not create any files -- just computes what would happen.
+ *
+ * Status semantics:
+ *   "create"  -- no file at destination, will copy
+ *   "exists"  -- regular file already present, will skip (preserves customizations)
+ *   "replace" -- symlink at destination (legacy), will unlink and copy
  */
-export function buildSymlinkPlan(
+export function buildCopyPlan(
   projectDir: string,
   bundleDir: string,
   selection: AgentSelection,
-): SymlinkPlan[] {
-  const plan: SymlinkPlan[] = [];
+): CopyPlan[] {
+  const plan: CopyPlan[] = [];
 
   for (const agentFile of selection.agents) {
     const agentSource = join(bundleDir, "agents", agentFile);
@@ -316,27 +323,26 @@ export function buildSymlinkPlan(
           ? `ninthwave-${baseName}.agent.md`
           : agentFile;
       const linkPath = join(targetDir, filename);
-      const relTarget = relative(targetDir, agentSource);
       const displayPath = `${target.dir}/${filename}`;
 
-      let status: SymlinkPlan["status"] = "create";
+      let status: CopyPlan["status"] = "create";
 
-      if (existsSync(linkPath)) {
+      if (existsSync(linkPath) || lstatExists(linkPath)) {
         try {
           const stat = lstatSync(linkPath);
           if (stat.isSymbolicLink()) {
-            const currentTarget = readlinkSync(linkPath);
-            status = currentTarget === relTarget ? "exists" : "create";
-          } else {
-            // Regular file where a symlink should be
+            // Legacy symlink from old setup -- replace with a real file
             status = "replace";
+          } else {
+            // Regular file already present -- skip to preserve customizations
+            status = "exists";
           }
         } catch {
           status = "create";
         }
       }
 
-      plan.push({ displayPath, linkPath, relTarget, status });
+      plan.push({ displayPath, linkPath, sourcePath: agentSource, status });
     }
   }
 
@@ -344,9 +350,9 @@ export function buildSymlinkPlan(
 }
 
 /**
- * Execute a symlink plan -- create the actual symlinks.
+ * Execute a copy plan -- write agent files into the project.
  */
-export function executeSymlinkPlan(plan: SymlinkPlan[]): void {
+export function executeCopyPlan(plan: CopyPlan[]): void {
   for (const entry of plan) {
     if (entry.status === "exists") {
       console.log(`  ${DIM}${entry.displayPath} (already set up)${RESET}`);
@@ -357,19 +363,19 @@ export function executeSymlinkPlan(plan: SymlinkPlan[]): void {
     const parentDir = dirname(entry.linkPath);
     mkdirSync(parentDir, { recursive: true });
 
-    // Remove existing file/symlink if present
-    if (existsSync(entry.linkPath) || lstatExists(entry.linkPath)) {
+    // Remove existing symlink if present (legacy cleanup)
+    if (lstatExists(entry.linkPath)) {
       unlinkSync(entry.linkPath);
     }
 
-    symlinkSync(entry.relTarget, entry.linkPath);
+    copyFileSync(entry.sourcePath, entry.linkPath);
 
     if (entry.status === "replace") {
       console.log(
-        `  ${YELLOW}↻${RESET} ${entry.displayPath} -> ${entry.relTarget} ${DIM}(replaced regular file)${RESET}`,
+        `  ${YELLOW}↻${RESET} ${entry.displayPath} ${DIM}(replaced symlink)${RESET}`,
       );
     } else {
-      console.log(`  ${GREEN}✓${RESET} ${entry.displayPath} -> ${entry.relTarget}`);
+      console.log(`  ${GREEN}✓${RESET} ${entry.displayPath}`);
     }
   }
 }
@@ -410,6 +416,43 @@ export function createSkillSymlinks(
     }
     symlinkSync(linkTarget(skill), linkPath);
     console.log(`  ${skill} -> ${linkTarget(skill)}`);
+  }
+}
+
+/**
+ * Copy skill directories into the project's skills directory.
+ *
+ * Used during `nw init` for project-level skill installation. Creates real
+ * copies inside the repo so the files are portable across machines without
+ * requiring ninthwave to be installed at the same path.
+ *
+ * Unlike createSkillSymlinks (used for global ~/.claude/skills/), this
+ * function never creates symlinks pointing outside the project.
+ */
+export function copySkillFiles(
+  skillsDir: string,
+  bundleDir: string,
+): void {
+  mkdirSync(skillsDir, { recursive: true });
+
+  for (const skill of SKILLS) {
+    const skillSource = join(bundleDir, "skills", skill);
+    if (!existsSync(skillSource)) continue;
+
+    const destPath = join(skillsDir, skill);
+
+    // Remove existing symlink or directory before copying
+    if (lstatExists(destPath)) {
+      const stat = lstatSync(destPath);
+      if (stat.isSymbolicLink()) {
+        unlinkSync(destPath);
+      } else if (stat.isDirectory()) {
+        rmSync(destPath, { recursive: true });
+      }
+    }
+
+    cpSync(skillSource, destPath, { recursive: true });
+    console.log(`  ${GREEN}✓${RESET} ${skill}`);
   }
 }
 
@@ -501,20 +544,20 @@ export async function interactiveAgentSelection(
 
   // Step 3: Show preview
   const selection: AgentSelection = { agents: selectedAgents, toolDirs };
-  const plan = buildSymlinkPlan(projectDir, bundleDir, selection);
+  const plan = buildCopyPlan(projectDir, bundleDir, selection);
 
   const toCreate = plan.filter((p) => p.status === "create");
   const toReplace = plan.filter((p) => p.status === "replace");
   const existing = plan.filter((p) => p.status === "exists");
 
   if (toCreate.length > 0 || toReplace.length > 0) {
-    console.log("Will create:");
+    console.log("Will install:");
     for (const entry of toCreate) {
-      console.log(`  ${GREEN}+${RESET} ${entry.displayPath} -> ${entry.relTarget}`);
+      console.log(`  ${GREEN}+${RESET} ${entry.displayPath}`);
     }
     for (const entry of toReplace) {
       console.log(
-        `  ${YELLOW}↻${RESET} ${entry.displayPath} -> ${entry.relTarget} ${DIM}(replaces regular file)${RESET}`,
+        `  ${YELLOW}↻${RESET} ${entry.displayPath} ${DIM}(replaces symlink)${RESET}`,
       );
     }
   }
