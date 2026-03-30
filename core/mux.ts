@@ -76,7 +76,7 @@ export class CmuxAdapter implements Multiplexer {
 }
 
 /** Supported multiplexer backends. */
-export type MuxType = "cmux";
+export type MuxType = "cmux" | "tmux";
 
 /** Injectable dependencies for multiplexer detection -- enables testing without vi.mock. */
 export interface DetectMuxDeps {
