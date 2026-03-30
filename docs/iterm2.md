@@ -1,6 +1,6 @@
 # Using ninthwave with iTerm2
 
-iTerm2 has built-in tmux integration called **control mode**. When you launch tmux with the `-CC` flag, iTerm2 renders each tmux window as a native tab. Ninthwave workers show up as regular iTerm2 tabs you can click between -- no tmux keybindings required.
+[iTerm2 has built-in tmux integration](https://iterm2.com/documentation-tmux-integration.html) called **control mode**. When you launch tmux with the `-CC` flag, iTerm2 renders each tmux window as a native tab. Ninthwave workers show up as regular iTerm2 tabs you can click between -- no tmux keybindings required.
 
 ## Quick start
 
