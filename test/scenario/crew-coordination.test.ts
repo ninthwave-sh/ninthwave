@@ -320,6 +320,10 @@ describe("scenario: crew coordination", () => {
       fixForward: false,
     });
 
+    // DEP-1 must be tracked in the orchestrator so it's included in the sync
+    // (untracked deps are filtered out -- they're treated as already delivered)
+    const dep = makeWorkItem("DEP-1", [], "medium");
+    orch.addItem(dep);
     const item = makeWorkItem("C-5", ["DEP-1"], "medium");
     orch.addItem(item);
 
@@ -338,6 +342,34 @@ describe("scenario: crew coordination", () => {
     expect(syncedItem!.priority).toBe(2);
     // Author field is present (may be empty string since test items have no real git path)
     expect(syncedItem!).toHaveProperty("author");
+  });
+
+  it("sync filters out untracked dependencies (already delivered)", async () => {
+    const broker = new StubCrewBroker();
+
+    const orch = new Orchestrator({
+      wipLimit: 5,
+      mergeStrategy: "auto",
+      bypassEnabled: false,
+      enableStacking: false,
+      fixForward: false,
+    });
+
+    // C-6 depends on GONE-1 which is NOT in the orchestrator (delivered/removed)
+    const item = makeWorkItem("C-6", ["GONE-1"], "medium");
+    orch.addItem(item);
+
+    const actionDeps = buildActionDeps(fakeGh, fakeMux);
+    const loopDeps = buildLoopDeps(fakeGh, fakeMux, actionDeps);
+    loopDeps.crewBroker = broker;
+
+    await orchestrateLoop(orch, defaultCtx, loopDeps, { maxIterations: 2 });
+
+    expect(broker.syncs.length).toBeGreaterThanOrEqual(1);
+    const syncedItem = broker.syncs[0]!.find((s) => s.id === "C-6");
+    expect(syncedItem).toBeDefined();
+    // Untracked dep GONE-1 should be filtered out of the sync payload
+    expect(syncedItem!.dependencies).toEqual([]);
   });
 
   it("broker reconnect mid-run: items resume after reconnection", async () => {

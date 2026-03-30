@@ -1102,5 +1102,43 @@ describe("mock-broker", () => {
 
       ws.close();
     });
+
+    it("reconciles stale items dropped from sync as completed", async () => {
+      // Reproduces the stuck-queue bug: items from a previous session linger in
+      // the broker's state as uncompleted, blocking downstream dependencies.
+      const { port, broker } = startBroker();
+      const code = await createCrew(port);
+      const ws = await connectWs(port, code, "d1", "worker-1");
+
+      // Session 1: sync items A and B. B depends on A.
+      await sendSync(ws, "d1", ["todo-A", "todo-B"], {
+        "todo-B": { dependencies: ["todo-A"] },
+      });
+
+      // Only A is claimable (B depends on A)
+      const claim1 = await sendClaim(ws, "d1");
+      expect(claim1.todoId).toBe("todo-A");
+
+      // B is still blocked
+      const claim2 = await sendClaim(ws, "d1");
+      expect(claim2.todoId).toBeNull();
+
+      // Session 2: A has been delivered and removed from work dir.
+      // Re-sync with only B (A is gone). The reconcile should mark A as completed.
+      await sendSync(ws, "d1", ["todo-B"], {
+        "todo-B": { dependencies: ["todo-A"] },
+      });
+
+      // A should now be reconcile-completed, unblocking B
+      const crew = broker.getCrew(code);
+      const itemA = crew!.items.get("todo-A");
+      expect(itemA!.completedBy).toBe("d1");
+
+      // B should now be claimable
+      const claim3 = await sendClaim(ws, "d1");
+      expect(claim3.todoId).toBe("todo-B");
+
+      ws.close();
+    });
   });
 });

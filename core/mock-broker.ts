@@ -406,6 +406,8 @@ export class MockBroker {
   }
 
   private handleSync(crew: CrewState, daemonId: string, items: SyncItemPayload[], ws: WebSocket): void {
+    const syncedIds = new Set(items.map((i) => i.id));
+
     for (const item of items) {
       const existing = crew.items.get(item.id);
       if (existing) {
@@ -427,6 +429,22 @@ export class MockBroker {
         this.logEvent(crew.code, daemonId, "sync", item.id, { affinity: "author" });
       }
     }
+
+    // Reconcile stale items: items previously synced by this daemon that are no
+    // longer in the payload have been delivered/removed from the work directory.
+    // Mark them as completed so they don't block downstream dependency checks.
+    for (const [id, entry] of crew.items) {
+      if (
+        entry.creatorDaemonId === daemonId &&
+        !syncedIds.has(id) &&
+        entry.completedBy === null
+      ) {
+        entry.completedBy = daemonId;
+        entry.claimedBy = null;
+        this.logEvent(crew.code, daemonId, "reconcile_complete", id, {});
+      }
+    }
+
     // Respond with sync_ack containing all known todo IDs
     const allTodoIds = Array.from(crew.items.keys());
     this.send(ws, { type: "sync_ack", crewCode: crew.code, todoIds: allTodoIds });
