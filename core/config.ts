@@ -9,6 +9,7 @@ export interface ProjectConfig {
   review_external: boolean;
   schedule_enabled: boolean;
   ai_tool?: string;
+  ai_tools?: string[];
   telemetry?: boolean;
 }
 
@@ -32,10 +33,15 @@ export function loadConfig(projectRoot: string): ProjectConfig {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       return defaults;
     }
+    const ai_tool = typeof parsed.ai_tool === "string" ? parsed.ai_tool : undefined;
+    const ai_tools = Array.isArray(parsed.ai_tools) && parsed.ai_tools.every((t: unknown) => typeof t === "string") && parsed.ai_tools.length > 0
+      ? (parsed.ai_tools as string[])
+      : ai_tool ? [ai_tool] : undefined;
     return {
       review_external: parsed.review_external === true,
       schedule_enabled: parsed.schedule_enabled === true,
-      ai_tool: typeof parsed.ai_tool === "string" ? parsed.ai_tool : undefined,
+      ai_tool,
+      ai_tools,
       telemetry: typeof parsed.telemetry === "boolean" ? parsed.telemetry : undefined,
     };
   } catch {
@@ -75,6 +81,11 @@ export function saveConfig(
       merged[key] = value;
     }
   }
+  // When ai_tools is set, also write ai_tool for backward compat
+  if (updates.ai_tools && updates.ai_tools.length > 0) {
+    merged.ai_tools = updates.ai_tools;
+    merged.ai_tool = updates.ai_tools[0];
+  }
 
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n");
@@ -85,6 +96,7 @@ export function saveConfig(
 /** User config shape. Only ai_tool for now; extend as needed. */
 export interface UserConfig {
   ai_tool?: string;
+  ai_tools?: string[];
 }
 
 /**
@@ -109,6 +121,11 @@ export function loadUserConfig(homeOverride?: string): UserConfig {
     const result: UserConfig = {};
     if (typeof parsed.ai_tool === "string") {
       result.ai_tool = parsed.ai_tool;
+    }
+    if (Array.isArray(parsed.ai_tools) && parsed.ai_tools.every((t: unknown) => typeof t === "string") && parsed.ai_tools.length > 0) {
+      result.ai_tools = parsed.ai_tools as string[];
+    } else if (result.ai_tool) {
+      result.ai_tools = [result.ai_tool];
     }
     return result;
   } catch {

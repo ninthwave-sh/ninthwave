@@ -110,6 +110,8 @@ export interface OrchestratorItem {
   fixForwardFailCount?: number;
   /** Multiplexer workspace reference for the forward-fixer worker session. */
   fixForwardWorkspaceRef?: string;
+  /** AI tool used for this item's implementation worker. Review/rebaser/forward-fixer inherit this. */
+  aiTool?: string;
 }
 
 export interface OrchestratorConfig {
@@ -239,8 +241,25 @@ export interface ExecutionContext {
   worktreeDir: string;
   workDir: string;
   aiTool: string;
+  /** Full pool of AI tools for round-robin assignment. Falls back to [aiTool] when not set. */
+  aiTools?: string[];
+  /** Mutable round-robin counter. Incremented on each launch. */
+  nextToolIndex?: number;
   /** GitHub name-with-owner (e.g. "org/repo") for constructing absolute URLs in PR comments. */
   hubRepoNwo?: string;
+}
+
+/**
+ * Get the next AI tool from the round-robin pool.
+ * When only one tool is configured, always returns that tool.
+ */
+export function getNextTool(ctx: ExecutionContext): string {
+  const tools = ctx.aiTools ?? [ctx.aiTool];
+  if (tools.length <= 1) return tools[0] ?? ctx.aiTool;
+  const idx = ctx.nextToolIndex ?? 0;
+  const tool = tools[idx % tools.length]!;
+  ctx.nextToolIndex = idx + 1;
+  return tool;
 }
 
 /** External dependencies injected into executeAction. */
@@ -308,7 +327,7 @@ export interface OrchestratorDeps {
    * Launch a review worker for a PR. Returns a workspace reference on success.
    * Actual logic lives in H-RVW-3; stub for now.
    */
-  launchReview?: (itemId: string, prNumber: number, repoRoot: string, implementerWorktreePath?: string) => { workspaceRef: string; verdictPath: string } | null;
+  launchReview?: (itemId: string, prNumber: number, repoRoot: string, implementerWorktreePath?: string, aiTool?: string) => { workspaceRef: string; verdictPath: string } | null;
   /**
    * Clean up a review worker session and workspace.
    * Actual logic lives in H-RVW-3; stub for now.
@@ -331,7 +350,7 @@ export interface OrchestratorDeps {
    * a focused prompt to resolve conflicts and push, not re-implement.
    * Returns a workspace reference on success.
    */
-  launchRebaser?: (itemId: string, prNumber: number, repoRoot: string) => { workspaceRef: string } | null;
+  launchRebaser?: (itemId: string, prNumber: number, repoRoot: string, aiTool?: string) => { workspaceRef: string } | null;
   /**
    * Clean up a rebaser worker session and workspace.
    */
@@ -362,7 +381,7 @@ export interface OrchestratorDeps {
    * Creates a worktree from main and launches the forward-fixer agent.
    * Returns a workspace reference and worktree path on success.
    */
-  launchForwardFixer?: (itemId: string, mergeCommitSha: string, repoRoot: string) => { worktreePath: string; workspaceRef: string } | null;
+  launchForwardFixer?: (itemId: string, mergeCommitSha: string, repoRoot: string, aiTool?: string) => { worktreePath: string; workspaceRef: string } | null;
   /**
    * Clean up a forward-fixer worker session and worktree.
    */
@@ -1751,13 +1770,14 @@ export class Orchestrator {
     const forceWorker = item.needsCiFix === true;
     item.needsCiFix = false;
 
+    const selectedTool = getNextTool(ctx);
     try {
       const result = deps.launchSingleItem(
         item.workItem,
         ctx.workDir,
         ctx.worktreeDir,
         ctx.projectRoot,
-        ctx.aiTool,
+        selectedTool,
         action.baseBranch,
         forceWorker,
       );
@@ -1782,6 +1802,7 @@ export class Orchestrator {
 
       item.workspaceRef = result.workspaceRef;
       item.worktreePath = result.worktreePath;
+      item.aiTool = selectedTool;
       return { success: true };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -2319,7 +2340,7 @@ export class Orchestrator {
         ? (getWorktreeInfo(item.id, join(ctx.worktreeDir, ".cross-repo-index"), ctx.worktreeDir)?.repoRoot ?? item.resolvedRepoRoot ?? ctx.projectRoot)
         : (item.resolvedRepoRoot ?? ctx.projectRoot);
       try {
-        const result = deps.launchRebaser(item.id, item.prNumber, repoRoot);
+        const result = deps.launchRebaser(item.id, item.prNumber, repoRoot, item.aiTool ?? ctx.aiTool);
         if (result) {
           item.rebaserWorkspaceRef = result.workspaceRef;
           item.rebaseAttemptCount = attemptCount + 1;
@@ -2412,7 +2433,7 @@ export class Orchestrator {
 
     const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
     try {
-      const result = deps.launchRebaser(item.id, prNum, repoRoot);
+      const result = deps.launchRebaser(item.id, prNum, repoRoot, item.aiTool ?? ctx.aiTool);
       if (result) {
         item.rebaserWorkspaceRef = result.workspaceRef;
       }
@@ -2478,7 +2499,7 @@ export class Orchestrator {
 
     const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
     try {
-      const result = deps.launchReview(item.id, prNum, repoRoot, item.worktreePath);
+      const result = deps.launchReview(item.id, prNum, repoRoot, item.worktreePath, item.aiTool ?? ctx.aiTool);
       if (result) {
         item.reviewWorkspaceRef = result.workspaceRef;
         item.reviewVerdictPath = result.verdictPath;
@@ -2574,7 +2595,7 @@ export class Orchestrator {
 
     const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
     try {
-      const result = deps.launchForwardFixer(item.id, item.mergeCommitSha, repoRoot);
+      const result = deps.launchForwardFixer(item.id, item.mergeCommitSha, repoRoot, item.aiTool ?? ctx.aiTool);
       if (result) {
         item.fixForwardWorkspaceRef = result.workspaceRef;
       }

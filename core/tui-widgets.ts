@@ -82,6 +82,8 @@ export interface SelectionScreenResult {
   cancelled: boolean;
   /** Selected AI tool ID, undefined when the step was skipped. */
   aiTool?: string;
+  /** Selected AI tool IDs (multi-select), undefined when the step was skipped. */
+  aiTools?: string[];
   /** Telemetry opt-in choice, undefined when the step was skipped. */
   telemetryOptIn?: boolean;
 }
@@ -706,6 +708,8 @@ export async function runSelectionScreen(
     installedTools?: AiToolProfile[];
     /** Pre-selected tool ID to mark as default in the picker. */
     savedToolId?: string;
+    /** Pre-selected tool IDs for multi-select (from saved config). */
+    savedToolIds?: string[];
     /** Set to false to show the telemetry step. Defaults to skipping (undefined/true). */
     skipTelemetryStep?: boolean;
   } = {},
@@ -859,25 +863,24 @@ export async function runSelectionScreen(
 
   // Step 6: AI coding tool (conditional -- only when 2+ tools detected)
   let aiTool: string | undefined;
+  let aiTools: string[] | undefined;
   const tools = opts.installedTools ?? [];
 
   if (tools.length >= 2) {
-    const toolOptions: SingleSelectOption<string>[] = tools.map((t) => ({
-      value: t.id,
+    // Multi-select: pre-check saved tools or all if none saved
+    const savedIds = opts.savedToolIds ?? (opts.savedToolId ? [opts.savedToolId] : []);
+    const toolCheckboxItems: CheckboxItem[] = tools.map((t) => ({
+      id: t.id,
       label: t.displayName,
-      description: `Model defined in ${t.targetDir}/ agent files`,
-      isDefault: t.id === opts.savedToolId,
+      detail: `Model defined in ${t.targetDir}/ agent files`,
+      checked: savedIds.length > 0 ? savedIds.includes(t.id) : true,
     }));
-    // If no saved tool matches, mark first as default
-    if (!toolOptions.some((o) => o.isDefault)) {
-      toolOptions[0]!.isDefault = true;
-    }
 
     io.write(CLEAR_SCREEN);
-    const toolResult = await runSingleSelect<string>(
+    const toolResult = await runCheckboxList(
       io,
-      toolOptions,
-      { title: "Ninthwave \u00b7 AI coding tool" },
+      toolCheckboxItems,
+      { title: "Ninthwave \u00b7 AI coding tool(s)", validate: (ids) => ids.length > 0 ? null : "Select at least one tool" },
     );
 
     if (toolResult.cancelled) {
@@ -885,9 +888,11 @@ export async function runSelectionScreen(
       return null;
     }
 
-    aiTool = toolResult.value;
+    aiTools = toolResult.selectedIds;
+    aiTool = aiTools[0];
   } else if (tools.length === 1) {
     aiTool = tools[0]!.id; // auto-select single tool
+    aiTools = [aiTool];
   }
 
   // Step 7: Telemetry opt-in (conditional -- only when not already configured)
@@ -940,8 +945,8 @@ export async function runSelectionScreen(
     : `Joining crew ${crewAction.code}`;
 
   // AI tool label (only shown when the tool step was visible)
-  const toolLabel = (tools.length >= 2 && aiTool)
-    ? (tools.find((t) => t.id === aiTool)?.displayName ?? aiTool)
+  const toolLabel = (tools.length >= 2 && aiTools && aiTools.length > 0)
+    ? aiTools.map((id) => tools.find((t) => t.id === id)?.displayName ?? id).join(", ") + (aiTools.length > 1 ? " (round-robin)" : "")
     : undefined;
 
   // Telemetry label (only shown when the telemetry step was visible)
@@ -981,6 +986,7 @@ export async function runSelectionScreen(
     crewAction,
     cancelled: false,
     aiTool,
+    aiTools,
     telemetryOptIn,
   };
 }

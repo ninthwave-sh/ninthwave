@@ -32,6 +32,8 @@ export interface InteractiveResult {
   crewAction: CrewAction | null;
   /** Selected AI tool ID, undefined when the step was skipped. */
   aiTool?: string;
+  /** Selected AI tool IDs (multi-select), undefined when the step was skipped. */
+  aiTools?: string[];
   /** Telemetry opt-in choice, undefined when the step was skipped. */
   telemetryOptIn?: boolean;
 }
@@ -51,6 +53,8 @@ export interface InteractiveDeps {
   installedTools?: AiToolProfile[];
   /** Pre-selected tool ID from project config (last-used). */
   savedToolId?: string;
+  /** Pre-selected tool IDs from project config (multi-select). */
+  savedToolIds?: string[];
   /** When true, skip the AI tool step (tool already determined by --tool or user config). */
   skipToolStep?: boolean;
   /** Set to false to show the telemetry step. Defaults to skipping (undefined/true). */
@@ -437,7 +441,10 @@ export async function confirmSummary(
   } else {
     console.log(`  ${BOLD}Crew:${RESET}            solo`);
   }
-  if (result.aiTool) {
+  if (result.aiTools && result.aiTools.length > 0) {
+    const toolLabel = result.aiTools.join(", ") + (result.aiTools.length > 1 ? " (round-robin)" : "");
+    console.log(`  ${BOLD}AI tool:${RESET}         ${toolLabel}`);
+  } else if (result.aiTool) {
     console.log(`  ${BOLD}AI tool:${RESET}         ${result.aiTool}`);
   }
   if (result.telemetryOptIn !== undefined) {
@@ -480,6 +487,7 @@ export async function runTuiSelectionFlow(
       showCrewStep: deps.showCrewStep,
       installedTools: deps.skipToolStep ? undefined : deps.installedTools,
       savedToolId: deps.savedToolId,
+      savedToolIds: deps.savedToolIds,
       skipTelemetryStep: deps.skipTelemetryStep,
     });
     if (!result || result.cancelled) return null;
@@ -492,6 +500,7 @@ export async function runTuiSelectionFlow(
       reviewMode: result.reviewMode,
       crewAction: result.crewAction,
       aiTool: result.aiTool,
+      aiTools: result.aiTools,
       telemetryOptIn: result.telemetryOptIn,
     };
   } finally {
@@ -558,38 +567,61 @@ async function runReadlineFlow(
     crewAction = await promptCrewMode(prompt);
   }
 
-  // Step 6: AI tool (conditional)
+  // Step 6: AI tool (conditional, multi-select)
   let aiTool: string | undefined;
+  let aiTools: string[] | undefined;
   const tools = deps.skipToolStep ? [] : (deps.installedTools ?? []);
   if (tools.length >= 2) {
-    console.log();
-    console.log(`${BOLD}AI coding tool:${RESET}`);
-    for (let i = 0; i < tools.length; i++) {
-      const t = tools[i]!;
-      const defaultTag = t.id === deps.savedToolId ? ` ${GREEN}(current)${RESET}` : "";
-      console.log(`  ${BOLD}${i + 1}${RESET}. ${t.displayName}${defaultTag}`);
-      console.log(`     ${DIM}Model defined in ${t.targetDir}/ agent files${RESET}`);
+    const savedIds = deps.savedToolIds ?? (deps.savedToolId ? [deps.savedToolId] : []);
+    const selected = new Set<number>();
+    // Pre-check saved tools or first if none saved
+    if (savedIds.length > 0) {
+      for (const sid of savedIds) {
+        const idx = tools.findIndex((t) => t.id === sid);
+        if (idx >= 0) selected.add(idx);
+      }
     }
-    const defaultIdx = deps.savedToolId
-      ? tools.findIndex((t) => t.id === deps.savedToolId)
-      : 0;
-    const effectiveDefault = defaultIdx >= 0 ? defaultIdx : 0;
+    if (selected.size === 0) selected.add(0);
+
+    const renderToolList = () => {
+      console.log();
+      console.log(`${BOLD}AI coding tool(s):${RESET} ${DIM}toggle with number, Enter to confirm${RESET}`);
+      for (let i = 0; i < tools.length; i++) {
+        const t = tools[i]!;
+        const check = selected.has(i) ? `[x]` : `[ ]`;
+        console.log(`  ${BOLD}${i + 1}${RESET}. ${check} ${t.displayName}`);
+        console.log(`     ${DIM}Model defined in ${t.targetDir}/ agent files${RESET}`);
+      }
+    };
+
+    renderToolList();
 
     while (true) {
-      const answer = await prompt(`Choose [1-${tools.length}] (Enter for ${effectiveDefault + 1}): `);
+      const answer = await prompt(`Toggle [1-${tools.length}] or Enter to confirm: `);
       if (answer === "") {
-        aiTool = tools[effectiveDefault]!.id;
+        if (selected.size === 0) {
+          console.log(`  ${YELLOW}Select at least one tool.${RESET}`);
+          continue;
+        }
         break;
       }
       const idx = parseInt(answer, 10) - 1;
       if (idx >= 0 && idx < tools.length) {
-        aiTool = tools[idx]!.id;
-        break;
+        if (selected.has(idx)) {
+          selected.delete(idx);
+        } else {
+          selected.add(idx);
+        }
+        renderToolList();
+      } else {
+        console.log(`  ${YELLOW}Enter 1-${tools.length}.${RESET}`);
       }
-      console.log(`  ${YELLOW}Enter 1-${tools.length}.${RESET}`);
     }
+    aiTools = [...selected].sort().map((i) => tools[i]!.id);
+    aiTool = aiTools[0];
   } else if (tools.length === 1) {
     aiTool = tools[0]!.id;
+    aiTools = [aiTool];
   }
 
   // Step 7: Telemetry (conditional)
@@ -611,6 +643,7 @@ async function runReadlineFlow(
     reviewMode,
     crewAction,
     aiTool,
+    aiTools,
     telemetryOptIn,
   };
 

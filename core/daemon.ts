@@ -69,6 +69,8 @@ export interface DaemonStateItem {
   partition?: number;
   /** Absolute path to the repo where the PR lives (for cross-repo items). */
   resolvedRepoRoot?: string;
+  /** AI tool used for this item's implementation worker. */
+  aiTool?: string;
 }
 
 export interface DaemonState {
@@ -593,6 +595,7 @@ export function serializeOrchestratorState(
       ...(item.workspaceRef ? { workspaceRef: item.workspaceRef } : {}),
       ...(item.partition != null ? { partition: item.partition } : {}),
       ...(item.resolvedRepoRoot ? { resolvedRepoRoot: item.resolvedRepoRoot } : {}),
+      ...(item.aiTool ? { aiTool: item.aiTool } : {}),
     })),
   };
 }

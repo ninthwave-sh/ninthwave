@@ -6277,7 +6277,7 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(launchReview).toHaveBeenCalledWith("R-13-1", 42, defaultCtx.projectRoot, undefined);
+      expect(launchReview).toHaveBeenCalledWith("R-13-1", 42, defaultCtx.projectRoot, undefined, defaultCtx.aiTool);
       expect(orch.getItem("R-13-1")!.reviewWorkspaceRef).toBe("review-workspace:1");
       expect(orch.getItem("R-13-1")!.reviewVerdictPath).toBe("/tmp/nw-verdict-R-13-1.json");
     });
@@ -6297,7 +6297,7 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(launchReview).toHaveBeenCalledWith("R-13-1b", 42, defaultCtx.projectRoot, "/tmp/test/ninthwave-R-13-1b");
+      expect(launchReview).toHaveBeenCalledWith("R-13-1b", 42, defaultCtx.projectRoot, "/tmp/test/ninthwave-R-13-1b", defaultCtx.aiTool);
     });
 
     it("executeAction: launch-review succeeds as no-op when dep not wired", () => {

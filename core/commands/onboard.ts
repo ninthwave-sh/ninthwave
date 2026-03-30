@@ -445,6 +445,7 @@ export async function cmdNoArgs(
     defaultReviewMode,
     installedTools,
     savedToolId: projectConfig.ai_tool,
+    savedToolIds: projectConfig.ai_tools,
     skipTelemetryStep,
   });
   if (!result) return; // User cancelled
@@ -478,8 +479,10 @@ export async function cmdNoArgs(
     }
   }
 
-  // AI tool → --tool flag
-  if (result.aiTool) {
+  // AI tool(s) → --tool flag (comma-separated for multi-select)
+  if (result.aiTools && result.aiTools.length > 0) {
+    watchArgs.push("--tool", result.aiTools.join(","));
+  } else if (result.aiTool) {
     watchArgs.push("--tool", result.aiTool);
   }
 

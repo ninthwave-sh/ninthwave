@@ -1,10 +1,10 @@
-// Tests for selectAiTool -- explicit, user-driven AI tool selection.
+// Tests for selectAiTool/selectAiTools -- explicit, user-driven AI tool selection.
 
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { join } from "path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
-import { selectAiTool, detectInstalledAITools } from "../core/tool-select.ts";
+import { selectAiTool, selectAiTools, detectInstalledAITools } from "../core/tool-select.ts";
 import type { SelectAiToolDeps } from "../core/tool-select.ts";
 
 afterEach(() => {
@@ -29,7 +29,7 @@ describe("selectAiTool", () => {
       stubDeps({ saveConfig: save }),
     );
     expect(result).toBe("opencode");
-    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "opencode" });
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tools: ["opencode"] });
   });
 
   it("accepts unknown tool override with warning", async () => {
@@ -39,7 +39,7 @@ describe("selectAiTool", () => {
       stubDeps({ saveConfig: save }),
     );
     expect(result).toBe("my-custom-ai");
-    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "my-custom-ai" });
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tools: ["my-custom-ai"] });
   });
 
   it("auto-selects single installed tool", async () => {
@@ -52,7 +52,7 @@ describe("selectAiTool", () => {
       }),
     );
     expect(result).toBe("opencode");
-    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "opencode" });
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tools: ["opencode"] });
   });
 
   it("uses saved preference when non-interactive with multiple tools", async () => {
@@ -88,35 +88,40 @@ describe("selectAiTool", () => {
     expect(result).toBe("claude");
   });
 
-  it("prompts interactively with multiple tools and empty input selects default", async () => {
+  it("prompts interactively with multiple tools and empty input confirms defaults", async () => {
     const save = vi.fn();
     const result = await selectAiTool(
       { projectRoot: "/fake", isInteractive: true },
       stubDeps({
         commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
-        loadConfig: () => ({ ai_tool: "opencode" }),
-        prompt: async () => "", // press Enter
+        loadConfig: () => ({ ai_tools: ["opencode"] }),
+        prompt: async () => "", // press Enter to confirm
         saveConfig: save,
       }),
     );
-    // opencode is the saved preference, so default is opencode (index 1)
+    // opencode is pre-checked from saved tools
     expect(result).toBe("opencode");
-    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "opencode" });
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tools: ["opencode"] });
   });
 
-  it("prompts interactively and numeric input selects that tool", async () => {
+  it("prompts interactively and numeric input toggles selection", async () => {
     const save = vi.fn();
+    let callCount = 0;
     const result = await selectAiTool(
       { projectRoot: "/fake", isInteractive: true },
       stubDeps({
         commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
-        loadConfig: () => ({ ai_tool: "opencode" }),
-        prompt: async () => "1", // select claude (index 0)
+        loadConfig: () => ({ ai_tools: ["opencode"] }),
+        prompt: async () => {
+          callCount++;
+          if (callCount === 1) return "1"; // toggle claude on
+          return ""; // confirm
+        },
         saveConfig: save,
       }),
     );
+    // claude (1) toggled on + opencode pre-checked = [claude, opencode], returns first
     expect(result).toBe("claude");
-    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "claude" });
   });
 
   it("pre-selects first tool when no saved preference", async () => {
@@ -133,18 +138,31 @@ describe("selectAiTool", () => {
     expect(result).toBe("claude"); // first in profile order
   });
 
-  it("uses user config ai_tool when no --tool override", async () => {
+  it("uses user config ai_tools when no --tool override", async () => {
     const save = vi.fn();
     const result = await selectAiTool(
       { projectRoot: "/fake", isInteractive: true },
       stubDeps({
-        loadUserConfig: () => ({ ai_tool: "opencode" }),
+        loadUserConfig: () => ({ ai_tools: ["opencode"] }),
         commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
         saveConfig: save,
       }),
     );
     expect(result).toBe("opencode");
-    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "opencode" });
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tools: ["opencode"] });
+  });
+
+  it("uses user config ai_tool (legacy) when no ai_tools", async () => {
+    const save = vi.fn();
+    const result = await selectAiTool(
+      { projectRoot: "/fake", isInteractive: true },
+      stubDeps({
+        loadUserConfig: () => ({ ai_tool: "opencode", ai_tools: ["opencode"] }),
+        commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
+        saveConfig: save,
+      }),
+    );
+    expect(result).toBe("opencode");
   });
 
   it("--tool override takes precedence over user config", async () => {
@@ -157,7 +175,7 @@ describe("selectAiTool", () => {
       }),
     );
     expect(result).toBe("claude");
-    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "claude" });
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tools: ["claude"] });
   });
 
   it("user config takes precedence over installed tool detection", async () => {
@@ -165,7 +183,7 @@ describe("selectAiTool", () => {
     const result = await selectAiTool(
       { projectRoot: "/fake", isInteractive: false },
       stubDeps({
-        loadUserConfig: () => ({ ai_tool: "copilot" }),
+        loadUserConfig: () => ({ ai_tools: ["copilot"] }),
         commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
         saveConfig: save,
       }),
@@ -179,26 +197,140 @@ describe("selectAiTool", () => {
     const result = await selectAiTool(
       { projectRoot: "/fake", isInteractive: true },
       stubDeps({
-        loadUserConfig: () => ({ ai_tool: "my-custom-ai" }),
+        loadUserConfig: () => ({ ai_tools: ["my-custom-ai"] }),
         saveConfig: save,
       }),
     );
     expect(result).toBe("my-custom-ai");
-    expect(save).toHaveBeenCalledWith("/fake", { ai_tool: "my-custom-ai" });
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tools: ["my-custom-ai"] });
   });
 
-  it("skips user config when ai_tool is not set", async () => {
+  it("skips user config when ai_tools is not set", async () => {
     const save = vi.fn();
     const result = await selectAiTool(
       { projectRoot: "/fake", isInteractive: true },
       stubDeps({
-        loadUserConfig: () => ({}), // no ai_tool set
+        loadUserConfig: () => ({}), // no ai_tools set
         commandExists: (cmd) => cmd === "claude",
         saveConfig: save,
       }),
     );
     // Falls through to installed tool detection
     expect(result).toBe("claude");
+  });
+});
+
+describe("selectAiTools", () => {
+  it("splits comma-separated --tool override into array", async () => {
+    const save = vi.fn();
+    const result = await selectAiTools(
+      { toolOverride: "claude,opencode", projectRoot: "/fake", isInteractive: true },
+      stubDeps({ saveConfig: save }),
+    );
+    expect(result).toEqual(["claude", "opencode"]);
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tools: ["claude", "opencode"] });
+  });
+
+  it("handles single --tool override as single-element array", async () => {
+    const result = await selectAiTools(
+      { toolOverride: "claude", projectRoot: "/fake", isInteractive: true },
+      stubDeps(),
+    );
+    expect(result).toEqual(["claude"]);
+  });
+
+  it("returns multi-tool from user config ai_tools", async () => {
+    const save = vi.fn();
+    const result = await selectAiTools(
+      { projectRoot: "/fake", isInteractive: false },
+      stubDeps({
+        loadUserConfig: () => ({ ai_tools: ["claude", "opencode"] }),
+        saveConfig: save,
+      }),
+    );
+    expect(result).toEqual(["claude", "opencode"]);
+  });
+
+  it("returns saved multi-tool preference when non-interactive", async () => {
+    const result = await selectAiTools(
+      { projectRoot: "/fake", isInteractive: false },
+      stubDeps({
+        commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
+        loadConfig: () => ({ ai_tools: ["opencode", "claude"] }),
+      }),
+    );
+    expect(result).toEqual(["opencode", "claude"]);
+  });
+
+  it("falls back to single saved ai_tool when ai_tools absent (non-interactive)", async () => {
+    const result = await selectAiTools(
+      { projectRoot: "/fake", isInteractive: false },
+      stubDeps({
+        commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
+        loadConfig: () => ({ ai_tool: "opencode" }),
+      }),
+    );
+    expect(result).toEqual(["opencode"]);
+  });
+
+  it("interactive multi-select: toggle and confirm", async () => {
+    const save = vi.fn();
+    let callCount = 0;
+    const result = await selectAiTools(
+      { projectRoot: "/fake", isInteractive: true },
+      stubDeps({
+        commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
+        loadConfig: () => ({}),
+        prompt: async () => {
+          callCount++;
+          // First tool (claude) is pre-checked by default
+          if (callCount === 1) return "2"; // toggle opencode on
+          return ""; // confirm
+        },
+        saveConfig: save,
+      }),
+    );
+    expect(result).toEqual(["claude", "opencode"]);
+    expect(save).toHaveBeenCalledWith("/fake", { ai_tools: ["claude", "opencode"] });
+  });
+
+  it("interactive: can deselect default and select another", async () => {
+    const save = vi.fn();
+    let callCount = 0;
+    const result = await selectAiTools(
+      { projectRoot: "/fake", isInteractive: true },
+      stubDeps({
+        commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
+        loadConfig: () => ({}),
+        prompt: async () => {
+          callCount++;
+          if (callCount === 1) return "1"; // toggle claude off (was pre-checked)
+          if (callCount === 2) return "2"; // toggle opencode on
+          return ""; // confirm
+        },
+        saveConfig: save,
+      }),
+    );
+    expect(result).toEqual(["opencode"]);
+  });
+
+  it("interactive: rejects empty selection", async () => {
+    let callCount = 0;
+    const result = await selectAiTools(
+      { projectRoot: "/fake", isInteractive: true },
+      stubDeps({
+        commandExists: (cmd) => cmd === "claude" || cmd === "opencode",
+        loadConfig: () => ({}),
+        prompt: async () => {
+          callCount++;
+          if (callCount === 1) return "1"; // toggle off claude (was pre-checked)
+          if (callCount === 2) return ""; // try to confirm with 0 selected -- rejected
+          if (callCount === 3) return "2"; // toggle opencode on
+          return ""; // confirm
+        },
+      }),
+    );
+    expect(result).toEqual(["opencode"]);
   });
 });
 

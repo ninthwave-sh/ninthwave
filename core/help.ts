@@ -114,7 +114,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   },
   {
     name: "watch",
-    usage: "watch [--items ID1 ID2 ...] [--tool NAME] [--daemon] [--no-watch]",
+    usage: "watch [--items ID1 ID2 ...] [--tool NAME[,NAME]] [--daemon] [--no-watch]",
     description: "Run the full pipeline (TUI, daemon, or JSON modes)",
     group: "workflow",
     needsRoot: true,
@@ -122,7 +122,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     handler: async (ctx) => { await cmdWatch(ctx.args, ctx.workDir, ctx.worktreeDir, ctx.projectRoot); },
     flags: {
       "--items": "Work item IDs to process",
-      "--tool": "AI tool to use (claude, opencode, copilot)",
+      "--tool": "AI tool(s), comma-separated for round-robin (claude, opencode, copilot)",
       "--daemon": "Run in daemon mode (background)",
       "--no-watch": "Disable TUI watch mode",
       "--watch": "Enable TUI watch mode",

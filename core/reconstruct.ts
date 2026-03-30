@@ -30,7 +30,7 @@ export function reconstructState(
   daemonState?: DaemonState | null,
 ): void {
   // Build a lookup map from saved daemon state for restoring persisted counters and review fields
-  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean; reviewRound?: number; lastCommentCheck?: string; rebaseRequested?: boolean; ciFailureNotified?: boolean; ciFailureNotifiedAt?: string | null; rebaserWorkspaceRef?: string; mergeCommitSha?: string; fixForwardFailCount?: number; fixForwardWorkspaceRef?: string }>();
+  const savedItems = new Map<string, { ciFailCount: number; retryCount: number; reviewWorkspaceRef?: string; reviewCompleted?: boolean; reviewRound?: number; lastCommentCheck?: string; rebaseRequested?: boolean; ciFailureNotified?: boolean; ciFailureNotifiedAt?: string | null; rebaserWorkspaceRef?: string; mergeCommitSha?: string; fixForwardFailCount?: number; fixForwardWorkspaceRef?: string; aiTool?: string }>();
   if (daemonState?.items) {
     for (const si of daemonState.items) {
       // Backward compat: map old field names to new names
@@ -52,6 +52,7 @@ export function reconstructState(
         mergeCommitSha: si.mergeCommitSha,
         fixForwardFailCount,
         fixForwardWorkspaceRef,
+        aiTool: si.aiTool,
       });
     }
   }
@@ -79,6 +80,7 @@ export function reconstructState(
       if (saved.mergeCommitSha) item.mergeCommitSha = saved.mergeCommitSha;
       if (saved.fixForwardFailCount) item.fixForwardFailCount = saved.fixForwardFailCount;
       if (saved.fixForwardWorkspaceRef) item.fixForwardWorkspaceRef = saved.fixForwardWorkspaceRef;
+      if (saved.aiTool) item.aiTool = saved.aiTool;
     }
 
     // Restore post-merge fix-forward states from daemon state (these items have no worktree)

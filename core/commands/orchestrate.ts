@@ -26,7 +26,7 @@ import { resolveRepo, bootstrapRepo } from "../cross-repo.ts";
 import { scanExternalPRs } from "./pr-monitor.ts";
 import { launchSingleItem, launchReviewWorker, launchRebaserWorker, launchForwardFixerWorker } from "./launch.ts";
 import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
-import { selectAiTool, detectInstalledAITools } from "../tool-select.ts";
+import { selectAiTools, detectInstalledAITools } from "../tool-select.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, ensureDomainLabels } from "../gh.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush, daemonRebase } from "../git.ts";
@@ -992,7 +992,7 @@ function handleActionExecution(
             : orchItem.fixForwardWorkspaceRef ? "verifier"
             : "implementer";
           deps.crewBroker.report("session_ended", action.itemId, {
-            model: ctx.aiTool ?? "unknown",
+            model: orchItem.aiTool ?? ctx.aiTool ?? "unknown",
             role,
             durationMs: orchItem.startedAt ? Date.now() - new Date(orchItem.startedAt).getTime() : undefined,
             inputTokens: cost.inputTokens,
@@ -1903,6 +1903,7 @@ export async function cmdOrchestrate(
       defaultReviewMode,
       installedTools,
       savedToolId: preConfig.ai_tool,
+      savedToolIds: preConfig.ai_tools,
       skipToolStep,
       skipTelemetryStep,
     });
@@ -1923,8 +1924,10 @@ export async function cmdOrchestrate(
         crewCode = result.crewAction.code;
       }
     }
-    // Capture AI tool choice from TUI -- flows to selectAiTool via toolOverride
-    if (result.aiTool) {
+    // Capture AI tool choice from TUI -- flows to selectAiTools via toolOverride
+    if (result.aiTools && result.aiTools.length > 0) {
+      toolOverride = result.aiTools.join(",");
+    } else if (result.aiTool) {
       toolOverride = result.aiTool;
     }
     // Capture telemetry choice from TUI -- persist to config
@@ -2073,9 +2076,10 @@ export async function cmdOrchestrate(
   const savedDaemonState = readStateFile(projectRoot);
   reconstructState(orch, projectRoot, worktreeDir, mux, undefined, savedDaemonState);
 
-  // Select AI tool (interactive prompt when multiple tools installed)
+  // Select AI tool(s) (interactive prompt when multiple tools installed)
   const isInteractive = !isDaemonChild && !daemonMode && process.stdin.isTTY === true;
-  const aiTool = await selectAiTool({ toolOverride, projectRoot, isInteractive });
+  const aiTools = await selectAiTools({ toolOverride, projectRoot, isInteractive });
+  const aiTool = aiTools[0]!;
 
   // Compute hub repo NWO once at startup for absolute agent-link URLs in PR comments
   let hubRepoNwo = "";
@@ -2086,7 +2090,7 @@ export async function cmdOrchestrate(
     warn(`Could not determine hub repo NWO: ${msg}`);
   }
 
-  const ctx: ExecutionContext = { projectRoot, worktreeDir, workDir, aiTool, hubRepoNwo };
+  const ctx: ExecutionContext = { projectRoot, worktreeDir, workDir, aiTool, aiTools, nextToolIndex: 0, hubRepoNwo };
   const actionDeps: OrchestratorDeps = {
     launchSingleItem: (item, workDir, worktreeDir, projectRoot, aiTool, baseBranch, forceWorkerLaunch) =>
       launchSingleItem(item, workDir, worktreeDir, projectRoot, aiTool, mux, { baseBranch, forceWorkerLaunch, hubRepoNwo }),
@@ -2113,9 +2117,9 @@ export async function cmdOrchestrate(
     daemonRebase,
     warn: (message) =>
       log({ ts: new Date().toISOString(), level: "warn", event: "orchestrator_warning", message }),
-    launchReview: (itemId, prNumber, repoRoot, implementerWorktreePath) => {
+    launchReview: (itemId, prNumber, repoRoot, implementerWorktreePath, itemAiTool) => {
       const autoFix = orch.config.reviewAutoFix;
-      const result = launchReviewWorker(prNumber, itemId, autoFix, repoRoot, aiTool, mux, { implementerWorktreePath, hubRepoNwo });
+      const result = launchReviewWorker(prNumber, itemId, autoFix, repoRoot, itemAiTool ?? aiTool, mux, { implementerWorktreePath, hubRepoNwo });
       if (!result) return null;
       return { workspaceRef: result.workspaceRef, verdictPath: result.verdictPath };
     },
@@ -2129,8 +2133,8 @@ export async function cmdOrchestrate(
       } catch { /* best-effort -- review worktree may not exist for off mode */ }
       return true;
     },
-    launchRebaser: (itemId, prNumber, repoRoot) => {
-      const result = launchRebaserWorker(prNumber, itemId, repoRoot, aiTool, mux, { hubRepoNwo });
+    launchRebaser: (itemId, prNumber, repoRoot, itemAiTool) => {
+      const result = launchRebaserWorker(prNumber, itemId, repoRoot, itemAiTool ?? aiTool, mux, { hubRepoNwo });
       if (!result) return null;
       return { workspaceRef: result.workspaceRef };
     },
@@ -2145,8 +2149,8 @@ export async function cmdOrchestrate(
     },
     getMergeCommitSha: (repoRoot, prNumber) => ghGetMergeCommitSha(repoRoot, prNumber),
     checkCommitCI: (repoRoot, sha) => ghCheckCommitCI(repoRoot, sha),
-    launchForwardFixer: (itemId, mergeCommitSha, repoRoot) => {
-      const result = launchForwardFixerWorker(itemId, mergeCommitSha, repoRoot, aiTool, mux, { hubRepoNwo });
+    launchForwardFixer: (itemId, mergeCommitSha, repoRoot, itemAiTool) => {
+      const result = launchForwardFixerWorker(itemId, mergeCommitSha, repoRoot, itemAiTool ?? aiTool, mux, { hubRepoNwo });
       if (!result) return null;
       return { worktreePath: result.worktreePath, workspaceRef: result.workspaceRef };
     },
