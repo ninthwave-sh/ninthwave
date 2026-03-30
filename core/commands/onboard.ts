@@ -28,12 +28,19 @@ import { isDaemonRunning } from "../daemon.ts";
 import { parseWorkItems } from "../parser.ts";
 import { runInteractiveFlow } from "../interactive.ts";
 import type { InteractiveResult, InteractiveDeps } from "../interactive.ts";
-import { loadConfig } from "../config.ts";
+import { loadConfig, saveConfig } from "../config.ts";
 import { printHelp } from "../help.ts";
 import { AI_TOOL_PROFILES } from "../ai-tools.ts";
 import type { AiToolProfile } from "../ai-tools.ts";
-import { selectAiTool } from "../tool-select.ts";
 import { detectInstalledAITools } from "../tool-select.ts";
+import {
+  runCheckboxList,
+  createProcessIO,
+  CLEAR_SCREEN,
+  HIDE_CURSOR,
+  SHOW_CURSOR,
+} from "../tui-widgets.ts";
+import type { WidgetIO, CheckboxItem } from "../tui-widgets.ts";
 
 // ── Multiplexer descriptors ─────────────────────────────────────────
 
@@ -70,6 +77,7 @@ export interface OnboardDeps {
   runShell?: ShellRunner;
   sleep?: SleepFn;
   getBundleDir?: () => string;
+  widgetIO?: WidgetIO;
 }
 
 // ── No-args dependency injection ───────────────────────────────────
@@ -275,9 +283,7 @@ export async function onboard(
     console.log();
     console.log("  ninthwave works with AI coding assistants. Install one:");
     for (const t of AI_TOOL_PROFILES) {
-      console.log(
-        `    ${BOLD}${t.installCmd}${RESET} ${DIM}(${t.description})${RESET}`,
-      );
+      console.log(`    ${BOLD}${t.installCmd}${RESET}`);
     }
     console.log();
     console.log(`  ${DIM}Claude Code is recommended.${RESET}`);
@@ -285,15 +291,45 @@ export async function onboard(
     console.log(`Install an AI tool and re-run ${BOLD}ninthwave${RESET}.`);
     return;
   }
-  const chosenToolId = await selectAiTool(
-    { projectRoot: projectDir, isInteractive: true },
-    { commandExists, prompt },
-  );
-  const chosenTool = AI_TOOL_PROFILES.find(p => p.id === chosenToolId) ?? {
-    displayName: chosenToolId,
-    command: chosenToolId,
-    description: "Custom AI tool",
-  } as AiToolProfile;
+
+  let chosenTool: AiToolProfile;
+  if (installedTools.length === 1) {
+    chosenTool = installedTools[0]!;
+    console.log(`  ${GREEN}✓${RESET} Found ${BOLD}${chosenTool.displayName}${RESET}`);
+    saveConfig(projectDir, { ai_tools: [chosenTool.id] });
+  } else {
+    const stdin = process.stdin;
+    const needsRawMode = !deps.widgetIO && stdin.isTTY && !!stdin.setRawMode;
+    if (needsRawMode) {
+      stdin.setRawMode!(true);
+      stdin.resume();
+      stdin.setEncoding("utf8");
+    }
+    const io = deps.widgetIO ?? createProcessIO();
+    const toolItems: CheckboxItem[] = installedTools.map((t, i) => ({
+      id: t.id,
+      label: t.displayName,
+      checked: i === 0,
+    }));
+    io.write(CLEAR_SCREEN + HIDE_CURSOR);
+    let toolResult;
+    try {
+      toolResult = await runCheckboxList(io, toolItems, {
+        title: "Ninthwave \u00b7 AI coding tool",
+        validate: (ids) => ids.length > 0 ? null : "Select at least one tool",
+      });
+    } finally {
+      if (needsRawMode) {
+        stdin.setRawMode!(false);
+        stdin.pause();
+      }
+      io.write(SHOW_CURSOR);
+    }
+    if (toolResult.cancelled) return;
+    const selectedIds = toolResult.selectedIds;
+    chosenTool = installedTools.find((t) => t.id === selectedIds[0]) ?? installedTools[0]!;
+    saveConfig(projectDir, { ai_tools: selectedIds });
+  }
   console.log();
 
   // ── Step 4: Run setup ───────────────────────────────────────────
