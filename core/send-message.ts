@@ -95,8 +95,11 @@ function attemptDirectSend(
   ]);
   if (result.exitCode !== 0) return false;
 
-  // Brief wait for text to arrive
-  sleep(50);
+  // Wait for keystrokes to be processed by the TUI input handler.
+  // cmux send returns after queuing keystrokes, but delivery to the target
+  // surface is asynchronous. 500ms provides generous headroom for Copilot
+  // and other TUIs to process the full message before we send Return.
+  sleep(500);
 
   // Submit with send-key Return (same pattern as the paste-buffer path)
   const key = runner("cmux", [
