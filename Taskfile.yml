@@ -9,3 +9,8 @@ tasks:
     desc: Run all tests
     cmds:
       - bun test
+
+  bump:
+    desc: Bump version and generate CHANGELOG entry
+    cmds:
+      - bun run scripts/version-bump.ts
