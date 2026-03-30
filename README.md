@@ -26,7 +26,9 @@ Work items are markdown files in `.ninthwave/work/`. Use `/decompose` to generat
 
 Run `nw` or `/work` and the orchestrator handles the rest.
 
-Each item gets its own git worktree and a full native instance of [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), [OpenCode](https://opencode.ai), or [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli). The orchestrator monitors CI, coordinates between implementer and review agents, external feedback, and merges approved PRs. Dependent items stack as chained PRs - reviewers get clean diffs.
+Each item gets its own git worktree and a full native instance of [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview), [OpenCode](https://opencode.ai), or [Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli), you can jump into and steer.
+
+The orchestrator monitors CI, coordinates between implementer and review agents, external feedback, and merges approved PRs. Dependent items stack as chained PRs - reviewers get clean diffs.
 
 Join a crew to increase capacity. Tasks brokered by [ninthwave.sh](https://ninthwave.sh) with author-affinity preference, and WIP overflow to crew members.
 
