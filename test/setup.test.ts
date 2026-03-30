@@ -53,7 +53,7 @@ function createFakeBundle(dir: string): string {
   for (const skill of [
     "work",
     "decompose",
-    "ninthwave-upgrade",
+
   ]) {
     const skillDir = join(bundleDir, "skills", skill);
     mkdirSync(skillDir, { recursive: true });
@@ -714,7 +714,7 @@ describe("setupGlobal", () => {
     for (const skill of [
       "work",
       "decompose",
-      "ninthwave-upgrade",
+  
     ]) {
       const linkPath = join(skillsDir, skill);
       expect(existsSync(linkPath)).toBe(true);
@@ -758,7 +758,7 @@ describe("setupGlobal", () => {
     for (const skill of [
       "work",
       "decompose",
-      "ninthwave-upgrade",
+  
     ]) {
       const linkPath = join(skillsDir, skill);
       expect(lstatSync(linkPath).isSymbolicLink()).toBe(true);

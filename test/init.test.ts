@@ -66,7 +66,7 @@ function createFakeBundle(dir: string): string {
   for (const skill of [
     "work",
     "decompose",
-    "ninthwave-upgrade",
+
   ]) {
     const skillDir = join(bundleDir, "skills", skill);
     mkdirSync(skillDir, { recursive: true });
@@ -649,7 +649,7 @@ describe("initProject", () => {
     expect(existsSync(join(projectDir, "TODOS.md"))).toBe(false);
 
     // Skills copied (real directories, not symlinks)
-    for (const skill of ["work", "decompose", "ninthwave-upgrade"]) {
+    for (const skill of ["work", "decompose"]) {
       const skillPath = join(projectDir, ".claude/skills", skill);
       expect(existsSync(skillPath)).toBe(true);
       expect(lstatSync(skillPath).isSymbolicLink()).toBe(false);
@@ -797,7 +797,7 @@ describe("initProject -- .ninthwave/.gitignore", () => {
     const projectDir = setupTempRepo();
 
     // Set up bundle structure inside projectDir to simulate self-hosting
-    for (const skill of ["work", "decompose", "ninthwave-upgrade"]) {
+    for (const skill of ["work", "decompose"]) {
       const skillDir = join(projectDir, "skills", skill);
       mkdirSync(skillDir, { recursive: true });
       writeFileSync(join(skillDir, "SKILL.md"), `# ${skill}\n`);
@@ -1651,7 +1651,7 @@ describe("initProject -- global mode", () => {
     for (const skill of [
       "work",
       "decompose",
-      "ninthwave-upgrade",
+  
     ]) {
       const linkPath = join(skillsDir, skill);
       expect(existsSync(linkPath)).toBe(true);
@@ -1739,7 +1739,7 @@ describe("initProject -- idempotency", () => {
     for (const skill of [
       "work",
       "decompose",
-      "ninthwave-upgrade",
+  
     ]) {
       const skillPath = join(projectDir, ".claude/skills", skill);
       expect(lstatSync(skillPath).isDirectory()).toBe(true);
@@ -1850,7 +1850,7 @@ describe("initProject -- preserves existing files", () => {
     for (const skill of [
       "work",
       "decompose",
-      "ninthwave-upgrade",
+  
     ]) {
       const skillPath = join(projectDir, ".claude/skills", skill);
       expect(existsSync(skillPath)).toBe(true);

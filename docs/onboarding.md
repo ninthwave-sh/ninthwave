@@ -230,7 +230,6 @@ Every file and directory created during onboarding:
 |---|---|---|---|---|---|
 | `.claude/skills/work` | Symlink | Always | Yes (recreated) | **No** (gitignored) | `/work` skill |
 | `.claude/skills/decompose` | Symlink | Always | Yes (recreated) | **No** (gitignored) | `/decompose` skill |
-| `.claude/skills/ninthwave-upgrade` | Symlink | Always | Yes (recreated) | **No** (gitignored) | `/ninthwave-upgrade` skill |
 | `.claude/agents/implementer.md` | Symlink | If Claude Code selected | Yes (recreated) | **No** (gitignored) | Implementation agent prompt |
 | `.claude/agents/reviewer.md` | Symlink | If Claude Code selected | Yes (recreated) | **No** (gitignored) | PR review agent prompt |
 | `.claude/agents/forward-fixer.md` | Symlink | If Claude Code selected | Yes (recreated) | **No** (gitignored) | CI fix-forward agent prompt |
@@ -268,7 +267,6 @@ Slug formula: project root path with `/` replaced by `-` (e.g., `/Users/rob/code
 |---|---|---|
 | `~/.claude/skills/work` | Symlink | Global `/work` skill |
 | `~/.claude/skills/decompose` | Symlink | Global `/decompose` skill |
-| `~/.claude/skills/ninthwave-upgrade` | Symlink | Global `/ninthwave-upgrade` skill |
 
 No project-level files are created in global mode.
 
@@ -299,7 +297,6 @@ project-root/
 │   └── skills/                          # ← symlinks, gitignored
 │       ├── work             → ../../ninthwave/skills/work
 │       ├── decompose        → ../../ninthwave/skills/decompose
-│       └── ninthwave-upgrade → ../../ninthwave/skills/ninthwave-upgrade
 │
 ├── .opencode/                           # gitignored subdirs (if detected)
 │   └── agents/                          # ← symlinks, gitignored

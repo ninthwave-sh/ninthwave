@@ -46,7 +46,7 @@ nw init
 This auto-detects your project structure (CI system, AI tools, monorepo layout) and creates:
 
 - `.ninthwave/` directory with configuration
-- Skill symlinks for `/work`, `/decompose`, and `/ninthwave-upgrade`
+- Skill symlinks for `/work` and `/decompose`
 - Agent files (implementer, reviewer, forward-fixer) copied to your AI tool directories
 
 No manual configuration is needed for the common case.
