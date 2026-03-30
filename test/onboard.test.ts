@@ -33,13 +33,12 @@ afterEach(() => {
 
 describe("detectInstalledMuxes", () => {
   it("returns empty when no muxes are installed", () => {
-    const result = detectInstalledMuxes(() => false);
+    const result = detectInstalledMuxes(() => false, () => null);
     expect(result).toEqual([]);
   });
 
   it("returns cmux when cmux is installed", () => {
-    const commandExists: CommandChecker = (cmd) => cmd === "cmux";
-    const result = detectInstalledMuxes(commandExists);
+    const result = detectInstalledMuxes(() => false, () => "cmux");
 
     expect(result).toHaveLength(1);
     expect(result[0]!.type).toBe("cmux");
@@ -264,6 +263,7 @@ describe("onboard", () => {
     try {
       await onboard(projectDir, {
         commandExists: () => false,
+        cmuxResolver: () => null,
         prompt: async () => "",
         runShell: () => ({ stdout: "", stderr: "", exitCode: 0 }),
         sleep: () => {},
@@ -288,7 +288,8 @@ describe("onboard", () => {
 
     try {
       await onboard(projectDir, {
-        commandExists: (cmd) => cmd === "cmux",
+        commandExists: () => false,
+        cmuxResolver: () => "cmux",
         prompt: async () => "", // accept default (Y)
         runShell: () => ({ stdout: "", stderr: "", exitCode: 0 }),
         sleep: () => {},
@@ -314,7 +315,8 @@ describe("onboard", () => {
 
     try {
       await onboard(projectDir, {
-        commandExists: (cmd) => cmd === "cmux" || cmd === "claude",
+        commandExists: (cmd) => cmd === "claude",
+        cmuxResolver: () => "cmux",
         prompt: async () => "", // accept defaults
         runShell: (cmd, args) => {
           shellCalls.push({ cmd, args });
@@ -359,7 +361,8 @@ describe("onboard", () => {
 
     try {
       await onboard(projectDir, {
-        commandExists: (cmd) => cmd === "cmux" || cmd === "claude",
+        commandExists: (cmd) => cmd === "claude",
+        cmuxResolver: () => "cmux",
         prompt: async () => "n",
         runShell: () => ({ stdout: "", stderr: "", exitCode: 0 }),
         sleep: () => {},
@@ -384,7 +387,8 @@ describe("onboard", () => {
 
     try {
       await onboard(projectDir, {
-        commandExists: (cmd) => cmd === "cmux" || cmd === "claude",
+        commandExists: (cmd) => cmd === "claude",
+        cmuxResolver: () => "cmux",
         prompt: async () => "", // accept mux default
         runShell: () => ({ stdout: "", stderr: "", exitCode: 0 }),
         sleep: () => {},
@@ -409,7 +413,8 @@ describe("onboard", () => {
 
     try {
       await onboard(projectDir, {
-        commandExists: (cmd) => cmd === "cmux" || cmd === "claude",
+        commandExists: (cmd) => cmd === "claude",
+        cmuxResolver: () => "cmux",
         prompt: async () => "",
         runShell: () => ({ stdout: "", stderr: "error", exitCode: 1 }),
         sleep: () => {},

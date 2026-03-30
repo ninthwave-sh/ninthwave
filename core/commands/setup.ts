@@ -21,6 +21,7 @@ import { join, relative, dirname, resolve } from "path";
 import { getBundleDir } from "../paths.ts";
 import { info, die, warn, RED, YELLOW, GREEN, RESET, BOLD, DIM } from "../output.ts";
 import { run } from "../shell.ts";
+import { resolveCmuxBinary } from "../cmux-resolve.ts";
 import {
   checkboxPrompt as defaultCheckboxPrompt,
   confirmPrompt as defaultConfirmPrompt,
@@ -93,9 +94,12 @@ export interface PrerequisiteResult {
   missing: string[];
   /** warnings (e.g. gh not authenticated) */
   warnings: string[];
-  /** detected multiplexer: "cmux" or null if not found */
-  detectedMux: "cmux" | null;
+  /** detected multiplexer: "cmux", "tmux", or null if neither found */
+  detectedMux: "cmux" | "tmux" | null;
 }
+
+/** Injectable cmux binary resolver (defaults to resolveCmuxBinary). */
+export type CmuxResolver = () => string | null;
 
 /**
  * Check for required prerequisites and print actionable messages.
@@ -106,6 +110,7 @@ export interface PrerequisiteResult {
 export function checkPrerequisites(
   commandExists: CommandChecker = defaultCommandExists,
   ghAuthCheck: AuthChecker = defaultGhAuthCheck,
+  cmuxResolver: CmuxResolver = resolveCmuxBinary,
 ): PrerequisiteResult {
   const missing: string[] = [];
   const warnings: string[] = [];
@@ -123,15 +128,24 @@ export function checkPrerequisites(
     }
   }
 
-  // Detect multiplexer
-  let detectedMux: "cmux" | null = null;
-  if (commandExists("cmux")) {
+  // Detect multiplexer (cmux or tmux required; either is sufficient)
+  let detectedMux: "cmux" | "tmux" | null = null;
+  const hasCmux = cmuxResolver() !== null;
+  const hasTmux = commandExists("tmux");
+
+  if (hasCmux) {
     detectedMux = "cmux";
-    console.log(`  ${GREEN}✓${RESET} cmux ${DIM}(multiplexer -- visual sidebar)${RESET}`);
-  } else {
-    console.log(`  ${RED}✗${RESET} cmux ${DIM}(terminal multiplexer for parallel sessions)${RESET}`);
-    console.log(`    Install: ${BOLD}brew install --cask manaflow-ai/cmux/cmux${RESET}`);
-    missing.push("cmux");
+    console.log(`  ${GREEN}✓${RESET} cmux ${DIM}(multiplexer -- visual macOS sidebar)${RESET}`);
+  }
+  if (hasTmux) {
+    if (detectedMux === null) detectedMux = "tmux";
+    console.log(`  ${GREEN}✓${RESET} tmux ${DIM}(multiplexer -- battle-hardened terminal sessions)${RESET}`);
+  }
+  if (!hasCmux && !hasTmux) {
+    console.log(`  ${RED}✗${RESET} multiplexer ${DIM}(cmux or tmux required)${RESET}`);
+    console.log(`    Install cmux: ${BOLD}brew install --cask manaflow-ai/cmux/cmux${RESET}`);
+    console.log(`    Install tmux: ${BOLD}brew install tmux${RESET}`);
+    missing.push("mux");
   }
 
   // If gh is present, check authentication
@@ -498,22 +512,29 @@ export async function interactiveAgentSelection(
   const checkbox = deps?.checkboxPrompt ?? defaultCheckboxPrompt;
   const confirm = deps?.confirmPrompt ?? defaultConfirmPrompt;
 
-  // Step 1: Detect AI tools
+  // Step 1: Detect AI tools and ask which to install into
   const detectedTools = detectProjectTools(projectDir);
-  // Fall back to all tools if none detected (fresh project)
-  const toolDirs =
-    detectedTools.length > 0 ? detectedTools : [...AGENT_TARGET_DIRS];
+  const allToolDirs = [...AGENT_TARGET_DIRS];
 
-  const toolNames = toolDirs.map((t) => t.tool);
-  if (detectedTools.length > 0) {
-    console.log(
-      `Detected AI tools: ${BOLD}${toolNames.join(", ")}${RESET}`,
-    );
-  } else {
-    console.log(
-      `${DIM}No AI tool directories detected -- will install to all tool directories.${RESET}`,
-    );
+  const toolDirChoices: CheckboxChoice[] = allToolDirs.map((t) => ({
+    value: t.tool,
+    label: t.tool,
+    description: t.dir,
+    // Pre-check detected tools; if none detected, check all (fall back to all)
+    checked: detectedTools.length === 0 || detectedTools.some((d) => d.tool === t.tool),
+  }));
+
+  const selectedToolNames = await checkbox(
+    "Which AI tools should agents be installed for?",
+    toolDirChoices,
+  );
+
+  if (selectedToolNames.length === 0) {
+    console.log(`${DIM}No AI tools selected -- skipping agent setup.${RESET}`);
+    return { agents: [], toolDirs: [] };
   }
+
+  const toolDirs = allToolDirs.filter((t) => selectedToolNames.includes(t.tool));
   console.log();
 
   // Step 2: Agent selection checkbox

@@ -20,6 +20,7 @@ import {
   RESET,
 } from "../output.ts";
 import { run } from "../shell.ts";
+import { resolveCmuxBinary } from "../cmux-resolve.ts";
 import type { RunResult, WorkItem } from "../types.ts";
 import type { ProjectConfig } from "../config.ts";
 import { initProject } from "./init.ts";
@@ -79,6 +80,7 @@ export type SleepFn = (ms: number) => void;
 
 export interface OnboardDeps {
   commandExists?: CommandChecker;
+  cmuxResolver?: () => string | null;
   prompt?: PromptFn;
   runShell?: ShellRunner;
   sleep?: SleepFn;
@@ -127,8 +129,12 @@ const defaultSleep: SleepFn = (ms: number): void => {
  */
 export function detectInstalledMuxes(
   commandExists: CommandChecker = defaultCommandExists,
+  cmuxResolver: () => string | null = resolveCmuxBinary,
 ): MuxOption[] {
-  return MUX_OPTIONS.filter((m) => commandExists(m.type));
+  return MUX_OPTIONS.filter((m) => {
+    if (m.type === "cmux") return cmuxResolver() !== null;
+    return commandExists(m.type);
+  });
 }
 
 // detectInstalledAITools re-exported from tool-select.ts for backward compatibility.
@@ -236,7 +242,7 @@ export async function onboard(
 
   // ── Step 2: Detect multiplexer ──────────────────────────────────
   console.log(`${DIM}Detecting multiplexer...${RESET}`);
-  const installedMuxes = detectInstalledMuxes(commandExists);
+  const installedMuxes = detectInstalledMuxes(commandExists, deps.cmuxResolver ?? resolveCmuxBinary);
   let chosenMux: MuxOption;
 
   if (installedMuxes.length === 0) {

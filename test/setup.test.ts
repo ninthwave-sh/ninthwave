@@ -34,6 +34,7 @@ import type {
   CommandChecker,
   AuthChecker,
   CommandPathResolver,
+  CmuxResolver,
   AgentSelection,
 } from "../core/commands/setup.ts";
 import type { CheckboxPromptFn, ConfirmPromptFn } from "../core/prompt.ts";
@@ -100,13 +101,14 @@ afterEach(() => {
 
 describe("checkPrerequisites", () => {
   it("returns allPresent=true when cmux and gh are available", () => {
-    const commandExists: CommandChecker = () => true;
+    const commandExists: CommandChecker = (cmd) => cmd === "gh";
     const ghAuthCheck: AuthChecker = () => ({
       authenticated: true,
       stderr: "",
     });
+    const cmuxResolver: CmuxResolver = () => "cmux";
 
-    const result = checkPrerequisites(commandExists, ghAuthCheck);
+    const result = checkPrerequisites(commandExists, ghAuthCheck, cmuxResolver);
 
     expect(result.allPresent).toBe(true);
     expect(result.missing).toEqual([]);
@@ -114,7 +116,7 @@ describe("checkPrerequisites", () => {
     expect(result.detectedMux).toBe("cmux");
   });
 
-  it("reports missing multiplexer when cmux is not available", () => {
+  it("reports missing multiplexer when neither cmux nor tmux is available", () => {
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
@@ -124,13 +126,14 @@ describe("checkPrerequisites", () => {
       authenticated: true,
       stderr: "",
     });
+    const cmuxResolver: CmuxResolver = () => null;
 
-    const result = checkPrerequisites(commandExists, ghAuthCheck);
+    const result = checkPrerequisites(commandExists, ghAuthCheck, cmuxResolver);
 
     console.log = origLog;
 
     expect(result.allPresent).toBe(false);
-    expect(result.missing).toContain("cmux");
+    expect(result.missing).toContain("mux");
     expect(result.detectedMux).toBeNull();
 
     // Should suggest cmux install
@@ -143,13 +146,14 @@ describe("checkPrerequisites", () => {
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
 
-    const commandExists: CommandChecker = (cmd) => cmd !== "gh";
+    const commandExists: CommandChecker = (cmd) => cmd === "tmux";
     const ghAuthCheck: AuthChecker = () => ({
       authenticated: true,
       stderr: "",
     });
+    const cmuxResolver: CmuxResolver = () => null;
 
-    const result = checkPrerequisites(commandExists, ghAuthCheck);
+    const result = checkPrerequisites(commandExists, ghAuthCheck, cmuxResolver);
 
     console.log = origLog;
 
@@ -168,11 +172,12 @@ describe("checkPrerequisites", () => {
       authenticated: false,
       stderr: "",
     });
+    const cmuxResolver: CmuxResolver = () => null;
 
-    const result = checkPrerequisites(commandExists, ghAuthCheck);
+    const result = checkPrerequisites(commandExists, ghAuthCheck, cmuxResolver);
 
     expect(result.allPresent).toBe(false);
-    expect(result.missing).toContain("cmux");
+    expect(result.missing).toContain("mux");
     expect(result.missing).toContain("gh");
     expect(result.detectedMux).toBeNull();
   });
@@ -182,13 +187,14 @@ describe("checkPrerequisites", () => {
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
 
-    const commandExists: CommandChecker = () => true;
+    const commandExists: CommandChecker = (cmd) => cmd === "gh";
     const ghAuthCheck: AuthChecker = () => ({
       authenticated: false,
       stderr: "not logged in",
     });
+    const cmuxResolver: CmuxResolver = () => "cmux";
 
-    const result = checkPrerequisites(commandExists, ghAuthCheck);
+    const result = checkPrerequisites(commandExists, ghAuthCheck, cmuxResolver);
 
     console.log = origLog;
 
@@ -209,28 +215,42 @@ describe("checkPrerequisites", () => {
 describe("checkPrerequisites -- gh auth warning", () => {
   it("does not check gh auth when gh is missing", () => {
     let authCheckCalled = false;
-    // cmux available so multiplexer check passes, but gh missing
-    const commandExists: CommandChecker = (cmd) => cmd === "cmux";
+    // cmux available (via resolver) so multiplexer check passes, but gh missing
+    const commandExists: CommandChecker = () => false;
+    const cmuxResolver: CmuxResolver = () => "cmux";
     const ghAuthCheck: AuthChecker = () => {
       authCheckCalled = true;
       return { authenticated: false, stderr: "" };
     };
 
-    checkPrerequisites(commandExists, ghAuthCheck);
+    checkPrerequisites(commandExists, ghAuthCheck, cmuxResolver);
 
     expect(authCheckCalled).toBe(false);
   });
 
-  it("returns cmux when available", () => {
-    const commandExists: CommandChecker = () => true;
+  it("returns cmux when available via resolver", () => {
+    const commandExists: CommandChecker = (cmd) => cmd === "gh";
     const ghAuthCheck: AuthChecker = () => ({
       authenticated: true,
       stderr: "",
     });
+    const cmuxResolver: CmuxResolver = () => "cmux";
 
-    const result = checkPrerequisites(commandExists, ghAuthCheck);
+    const result = checkPrerequisites(commandExists, ghAuthCheck, cmuxResolver);
 
     expect(result.detectedMux).toBe("cmux");
+  });
+
+  it("returns tmux when only tmux is available", () => {
+    const commandExists: CommandChecker = (cmd) => cmd === "gh" || cmd === "tmux";
+    const ghAuthCheck: AuthChecker = () => ({ authenticated: true, stderr: "" });
+    const cmuxResolver: CmuxResolver = () => null;
+
+    const result = checkPrerequisites(commandExists, ghAuthCheck, cmuxResolver);
+
+    expect(result.detectedMux).toBe("tmux");
+    expect(result.missing).not.toContain("mux");
+    expect(result.allPresent).toBe(true);
   });
 });
 
@@ -587,8 +607,15 @@ describe("interactiveAgentSelection", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    // Only select implementer
-    const stubCheckbox: CheckboxPromptFn = async () => ["implementer.md"];
+    // First call: tool dir selection (accept all pre-checked); second call: only implementer
+    let callCount = 0;
+    const stubCheckbox: CheckboxPromptFn = async (_msg, choices) => {
+      callCount++;
+      if (callCount === 1) {
+        return choices.filter((c) => c.checked).map((c) => c.value);
+      }
+      return ["implementer.md"];
+    };
     const stubConfirm: ConfirmPromptFn = async () => true;
 
     const selection = await interactiveAgentSelection(projectDir, bundleDir, {
