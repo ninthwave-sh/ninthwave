@@ -1523,10 +1523,14 @@ export async function orchestrateLoop(
       try {
         const activeItems = orch.getAllItems()
           .filter((i) => i.state !== "done" && i.state !== "stuck");
-        // Build enriched sync items with priority, dependencies, and author
+        // Build enriched sync items with priority, dependencies, and author.
+        // Filter dependencies to only include items tracked in the orchestrator.
+        // Untracked deps (removed from work dir = already delivered) are omitted
+        // so the hub doesn't block claims on stale items from previous syncs.
+        const trackedIds = new Set(orch.getAllItems().map((i) => i.id));
         const syncItems: SyncItem[] = activeItems.map((item) => ({
           id: item.id,
-          dependencies: item.workItem.dependencies ?? [],
+          dependencies: (item.workItem.dependencies ?? []).filter((depId) => trackedIds.has(depId)),
           priority: PRIORITY_NUM[item.workItem.priority] ?? 2,
           author: item.workItem.filePath
             ? authorCache.resolve(item.workItem.filePath, ctx.projectRoot)
