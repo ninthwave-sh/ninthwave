@@ -51,7 +51,6 @@ if (command === "--help" || command === "-h") {
 
 // No args: detect project state and route to the appropriate flow
 if (!command) {
-  // Detect project root first so we can skip the mux check for uninitialized repos.
   const gitResult = run("git", [
     "rev-parse",
     "--path-format=absolute",
@@ -61,14 +60,6 @@ if (!command) {
     gitResult.exitCode === 0
       ? gitResult.stdout.replace(/\/.git$/, "")
       : null;
-
-  // Only enforce a mux session for already-initialized repos.
-  // First-run onboarding doesn't need a multiplexer.
-  const isInitialized =
-    projectRoot !== null && existsSync(join(projectRoot, ".ninthwave"));
-  if (process.stdin.isTTY && isInitialized) {
-    await ensureMuxInteractiveOrDie(process.argv.slice(2));
-  }
 
   await cmdNoArgs(projectRoot);
   process.exit(0);
@@ -123,8 +114,9 @@ if (allAreIds) {
   // Parse --wip-limit flag from args
   let wipLimit: number | undefined;
   const wipIdx = args.indexOf("--wip-limit");
-  if (wipIdx !== -1 && args[wipIdx + 1]) {
-    wipLimit = parseInt(args[wipIdx + 1], 10);
+  const wipArg = wipIdx !== -1 ? args[wipIdx + 1] : undefined;
+  if (wipArg) {
+    wipLimit = parseInt(wipArg, 10);
     if (isNaN(wipLimit) || wipLimit < 1) wipLimit = undefined;
   }
 
