@@ -190,16 +190,13 @@ export interface CrewBroker {
   /** Get the latest crew status from crew_update messages. Null until first update received. */
   getCrewStatus(): CrewStatus | null;
 
-  /** Send a telemetry report event. Fire-and-forget, no-op if telemetry disabled. */
+  /** Send a report event for an active shared session. */
   report(
     event: string,
     todoPath: string,
     metadata: Record<string, unknown>,
     opts?: { model?: string; tokenUsage?: TokenUsage },
   ): void;
-
-  /** Enable or disable telemetry reporting. */
-  setTelemetry(enabled: boolean): void;
 }
 
 // ── DaemonId persistence ────────────────────────────────────────────
@@ -360,7 +357,6 @@ export class WebSocketCrewBroker implements CrewBroker {
   } | null = null;
   private disconnectedIntentionally = false;
   private crewStatus: CrewStatus | null = null;
-  private telemetryEnabled: boolean;
   private sessionId: string | null = null;
   private currentModel: string | undefined;
   private sendTokenUsage = false;
@@ -372,7 +368,6 @@ export class WebSocketCrewBroker implements CrewBroker {
     repoUrl: string,
     deps: CrewBrokerDeps,
     name?: string,
-    telemetryEnabled?: boolean,
   ) {
     this.daemonId = getOrCreateDaemonId(projectRoot);
     this.operatorId = resolveOperatorId(projectRoot);
@@ -380,7 +375,6 @@ export class WebSocketCrewBroker implements CrewBroker {
     this.url = `${url}/api/crews/${crewCode}/ws`;
     this.repoUrl = repoUrl;
     this.deps = deps;
-    this.telemetryEnabled = telemetryEnabled ?? false;
   }
 
   /** Expose daemonId for testing. */
@@ -509,8 +503,6 @@ export class WebSocketCrewBroker implements CrewBroker {
     metadata: Record<string, unknown>,
     opts?: { model?: string; tokenUsage?: TokenUsage },
   ): void {
-    if (!this.telemetryEnabled) return;
-
     const model = opts?.model ?? this.extractModelFromMetadata(metadata) ?? this.currentModel;
     if (model) {
       this.currentModel = model;
@@ -541,7 +533,7 @@ export class WebSocketCrewBroker implements CrewBroker {
     this.stopReconnectTimer();
     this.stopHeartbeatTimer();
     this.rejectAllPendingClaims();
-    if (this.ws && this.connected && this.telemetryEnabled) {
+    if (this.ws && this.connected) {
       this.report("session_end", "", {}, { model: this.currentModel });
     }
     if (this.ws) {
@@ -557,10 +549,6 @@ export class WebSocketCrewBroker implements CrewBroker {
 
   getCrewStatus(): CrewStatus | null {
     return this.crewStatus;
-  }
-
-  setTelemetry(enabled: boolean): void {
-    this.telemetryEnabled = enabled;
   }
 
   // ── Internal helpers ────────────────────────────────────────────

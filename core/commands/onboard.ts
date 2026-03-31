@@ -380,7 +380,7 @@ export async function cmdNoArgs(
   }
 
   // State 5: Work items exist, no daemon → TUI selection → cmdWatch
-  // Load project config to determine review default + tool/telemetry state
+  // Load project config to determine review default + saved tool state
   const doLoadConfig = deps.loadConfig ?? loadConfig;
   const projectConfig = doLoadConfig(projectRoot);
   const defaultReviewMode = projectConfig.review_external ? "all" as const : "mine" as const;

@@ -2491,21 +2491,6 @@ export async function cmdOrchestrate(
     : (reviewExternal || projectConfig.review_external);
   const scheduleEnabled = projectConfig.schedule_enabled;
 
-  // Resolve telemetry: connected mode implies consent; env var and config override
-  let telemetryEnabled = false;
-  if (process.env.NW_TELEMETRY === "1") {
-    telemetryEnabled = true;
-  } else if (projectConfig.telemetry !== undefined) {
-    telemetryEnabled = projectConfig.telemetry;
-  } else if (crewBroker) {
-    // Sharing via ninthwave.sh -- telemetry is implied by collaboration choice
-    telemetryEnabled = true;
-    saveConfig(projectRoot, { telemetry: true });
-  }
-  if (telemetryEnabled && crewBroker) {
-    crewBroker.setTelemetry(true);
-  }
-
   // State persistence: serialize state each poll cycle so the status pane can display all items.
   // Written in both daemon and interactive mode -- the status pane reads this file to show
   // the full queue including queued items that don't have worktrees yet.

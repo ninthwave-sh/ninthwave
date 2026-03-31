@@ -3744,7 +3744,6 @@ describe("orchestrateLoop crew mode", () => {
         getCrewStatus: vi.fn(() => null),
         scheduleClaim: vi.fn(async () => false),
         report: vi.fn(),
-        setTelemetry: vi.fn(),
       },
       completedIds,
       syncedIds,

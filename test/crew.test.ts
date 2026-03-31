@@ -66,7 +66,7 @@ function startTestServer(opts?: {
     fetch(req, server) {
       const url = new URL(req.url);
       if (url.pathname.includes("/api/crews/") && url.pathname.endsWith("/ws")) {
-        const upgraded = server.upgrade(req, { data: { daemonId: url.searchParams.get("daemonId") } });
+        const upgraded = server.upgrade(req);
         if (upgraded) return undefined;
         return new Response("Upgrade failed", { status: 400 });
       }
@@ -114,7 +114,7 @@ function startTestServer(opts?: {
 
   return {
     server,
-    port: server.port,
+    port: server.port ?? 0,
     clients,
     broadcast: (msg) => {
       const data = JSON.stringify(msg);
@@ -674,7 +674,7 @@ describe("report method", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("report sends message when telemetry enabled", async () => {
+  it("report sends message for an active shared session", async () => {
     let receivedReport: any = null;
     const { server, port } = startTestServer({
       onMessage: (_ws, msg) => {
@@ -690,7 +690,6 @@ describe("report method", () => {
         tempDir, `ws://localhost:${port}`, "ABCD-EFGH-IJKL-MNOP", "https://github.com/test/repo",
         { log, heartbeatIntervalMs: 60_000 },
         "test-daemon",
-        true, // telemetryEnabled
       );
 
       const connectP = broker.connect();
@@ -735,7 +734,6 @@ describe("report method", () => {
         tempDir, `ws://localhost:${port}`, "ABCD-EFGH-IJKL-MNOP", "https://github.com/test/repo",
         { log, heartbeatIntervalMs: 60_000 },
         "test-daemon",
-        true,
       );
 
       const connectP = broker.connect();
@@ -782,7 +780,6 @@ describe("report method", () => {
         tempDir, `ws://localhost:${port}`, "ABCD-EFGH-IJKL-MNOP", "https://github.com/test/repo",
         { log, heartbeatIntervalMs: 60_000 },
         "test-daemon",
-        true,
       );
 
       const connectP = broker.connect();
@@ -809,79 +806,6 @@ describe("report method", () => {
     }
   });
 
-  it("report is no-op when telemetry disabled", async () => {
-    let receivedReport: any = null;
-    const { server, port } = startTestServer({
-      onMessage: (_ws, msg) => {
-        if (msg.type === "report") {
-          receivedReport = msg;
-        }
-      },
-    });
-
-    try {
-      const { log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(
-        tempDir, `ws://localhost:${port}`, "ABCD-EFGH-IJKL-MNOP", "https://github.com/test/repo",
-        { log, heartbeatIntervalMs: 60_000 },
-        "test-daemon",
-        false, // telemetryEnabled = false
-      );
-
-      const connectP = broker.connect();
-      await new Promise((r) => setTimeout(r, 50));
-      broker.sync([]);
-      await connectP;
-
-      broker.report("pr_opened", "test-item", { prNumber: 42 });
-      await new Promise((r) => setTimeout(r, 50));
-
-      expect(receivedReport).toBeNull();
-      broker.disconnect();
-    } finally {
-      server.stop(true);
-    }
-  });
-
-  it("setTelemetry enables reporting after construction", async () => {
-    let receivedReport: any = null;
-    const { server, port } = startTestServer({
-      onMessage: (_ws, msg) => {
-        if (msg.type === "report") {
-          receivedReport = msg;
-        }
-      },
-    });
-
-    try {
-      const { log } = createLogCollector();
-      const broker = new WebSocketCrewBroker(
-        tempDir, `ws://localhost:${port}`, "ABCD-EFGH-IJKL-MNOP", "https://github.com/test/repo",
-        { log, heartbeatIntervalMs: 60_000 },
-        "test-daemon",
-        // telemetryEnabled omitted (default false)
-      );
-
-      const connectP = broker.connect();
-      await new Promise((r) => setTimeout(r, 50));
-      broker.sync([]);
-      await connectP;
-
-      broker.report("pr_opened", "test-item", { prNumber: 42 });
-      await new Promise((r) => setTimeout(r, 50));
-      expect(receivedReport).toBeNull();
-
-      broker.setTelemetry(true);
-      broker.report("pr_merged", "test-item", { prNumber: 42 });
-      await new Promise((r) => setTimeout(r, 50));
-      expect(receivedReport).not.toBeNull();
-      expect(receivedReport.event).toBe("pr_merged");
-      broker.disconnect();
-    } finally {
-      server.stop(true);
-    }
-  });
-
   it("sends session_end before disconnecting", async () => {
     const receivedEvents: string[] = [];
     let sessionEndReport: any = null;
@@ -902,7 +826,6 @@ describe("report method", () => {
         tempDir, `ws://localhost:${port}`, "ABCD-EFGH-IJKL-MNOP", "https://github.com/test/repo",
         { log, heartbeatIntervalMs: 60_000 },
         "test-daemon",
-        true,
       );
 
       const connectP = broker.connect();

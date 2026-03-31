@@ -97,7 +97,7 @@ describe("loadConfig", () => {
     expect(config.review_external).toBe(true);
     expect(config.schedule_enabled).toBe(false);
     // Only known keys in the result
-    expect(Object.keys(config)).toEqual(["review_external", "schedule_enabled", "ai_tools", "telemetry"]);
+    expect(Object.keys(config)).toEqual(["review_external", "schedule_enabled", "ai_tools"]);
   });
 
   it("treats non-boolean review_external as false", () => {

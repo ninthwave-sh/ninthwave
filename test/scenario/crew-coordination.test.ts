@@ -111,10 +111,6 @@ class StubCrewBroker implements CrewBroker {
     // no-op
   }
 
-  setTelemetry(_enabled: boolean): void {
-    // no-op
-  }
-
   // ── Test helpers ──────────────────────────────────────────────────
 
   /** Simulate broker disconnection. */
