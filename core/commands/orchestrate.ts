@@ -29,6 +29,7 @@ import { launchSingleItem, launchReviewWorker, launchRebaserWorker, launchForwar
 import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import { selectAiTools, detectInstalledAITools } from "../tool-select.ts";
 import { cleanSingleWorktree } from "./clean.ts";
+import { writeInbox } from "./inbox.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, ensureDomainLabels } from "../gh.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush, daemonRebase } from "../git.ts";
 import { run } from "../shell.ts";
@@ -2347,6 +2348,7 @@ export async function cmdOrchestrate(
     upsertOrchestratorComment: (repoRoot, prNumber, itemId, eventLine) =>
       upsertOrchestratorComment(repoRoot, prNumber, itemId, eventLine),
     sendMessage: (ref, msg) => mux.sendMessage(ref, msg),
+    writeInbox: (itemId, msg) => writeInbox(projectRoot, itemId, msg),
     closeWorkspace: (ref) => mux.closeWorkspace(ref),
     readScreen: (ref, lines) => mux.readScreen(ref, lines),
     fetchOrigin,

@@ -2014,6 +2014,7 @@ describe("executeLaunch stale branch cleanup", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -2120,6 +2121,7 @@ describe("executeLaunch stacked dep race guard", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -2264,6 +2266,7 @@ describe("executeMerge conflict-aware rebase", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -2348,6 +2351,7 @@ describe("executeMerge conflict-aware rebase", () => {
         sentMessages.push(msg);
         return true;
       },
+      writeInbox: () => {},
     });
 
     const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
@@ -2380,6 +2384,7 @@ describe("executeMerge conflict-aware rebase", () => {
         sentMessages.push(msg);
         return true;
       },
+      writeInbox: () => {},
     });
 
     const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
@@ -2439,6 +2444,7 @@ describe("executeMerge admin override", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -3072,6 +3078,7 @@ describe("executeClean heartbeat cleanup", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -3105,6 +3112,7 @@ describe("syncWorkerDisplay", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => "",
       closeWorkspace: () => true,
@@ -3330,6 +3338,7 @@ describe("rebaser worker state transitions", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -3479,6 +3488,7 @@ describe("rebaser worker state transitions", () => {
       daemonRebase: () => false,
       // launchRebaser intentionally omitted
       sendMessage: (_ref, msg) => { messages.push(msg); return true; },
+      writeInbox: () => {},
     });
 
     const result = orch.executeAction({ type: "daemon-rebase", itemId: "H-1-1" }, ctx, deps);
@@ -3499,6 +3509,7 @@ describe("rebase circuit breaker and worker message priority", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -3552,6 +3563,7 @@ describe("rebase circuit breaker and worker message priority", () => {
       daemonRebase: () => false,
       launchRebaser: () => { launchRebaserCalled.value = true; return { workspaceRef: "rebaser:1" }; },
       sendMessage: (ref, msg) => { messagesSent.push({ ref, msg }); return true; },
+      writeInbox: () => {},
     });
 
     const result = orch.executeAction({ type: "daemon-rebase", itemId: "H-1-1" }, ctx, deps);
@@ -3574,6 +3586,7 @@ describe("rebase circuit breaker and worker message priority", () => {
     const deps = makeMinimalDeps({
       daemonRebase: () => false,
       sendMessage: () => false, // worker message fails
+      writeInbox: () => {},
       launchRebaser: () => ({ workspaceRef: "rebaser:1" }),
     });
 
@@ -3714,6 +3727,7 @@ describe("daemon-worker worktree race prevention (H-WR-1)", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},

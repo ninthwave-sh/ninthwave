@@ -64,6 +64,7 @@ function mockActionDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps
     prMerge: vi.fn(() => true),
     prComment: vi.fn(() => true),
     sendMessage: vi.fn(() => true),
+    writeInbox: vi.fn(),
     closeWorkspace: vi.fn(() => true),
     fetchOrigin: vi.fn(),
     ffMerge: vi.fn(),

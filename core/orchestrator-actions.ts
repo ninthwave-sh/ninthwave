@@ -6,6 +6,7 @@ import { join } from "path";
 import { existsSync, unlinkSync } from "fs";
 import { getWorktreeInfo, listCrossRepoEntries } from "./cross-repo.ts";
 import { heartbeatFilePath, writeHeartbeat } from "./daemon.ts";
+import { cleanInbox } from "./commands/inbox.ts";
 import { NINTHWAVE_FOOTER, ORCHESTRATOR_LINK } from "./gh.ts";
 import {
   type OrchestratorHandle,
@@ -210,9 +211,11 @@ export function executeMerge(
       }
       // Daemon rebase unavailable or failed -- send worker a rebase message
       if (item.workspaceRef) {
+        const rebaseMsg = `[ORCHESTRATOR] Rebase Required: merge failed due to conflicts with main. Please rebase onto latest main and push.`;
+        deps.writeInbox(item.id, rebaseMsg);
         deps.sendMessage(
           item.workspaceRef,
-          `[ORCHESTRATOR] Rebase Required: merge failed due to conflicts with main. Please rebase onto latest main and push.`,
+          rebaseMsg,
         );
       }
       orch.transition(item, "ci-pending");
@@ -303,9 +306,11 @@ export function executeMerge(
     if (!deps.rebaseOnto || !deps.forcePush) {
       // rebaseOnto or forcePush not available -- send worker manual rebase instructions
       if (other.workspaceRef) {
+        const restackMsg = `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto main ${depBranch} ${otherBranch} && git push --force-with-lease`;
+        deps.writeInbox(other.id, restackMsg);
         deps.sendMessage(
           other.workspaceRef,
-          `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto main ${depBranch} ${otherBranch} && git push --force-with-lease`,
+          restackMsg,
         );
       }
       continue;
@@ -320,18 +325,22 @@ export function executeMerge(
       } else {
         // Conflict -- send worker manual rebase instructions
         if (other.workspaceRef) {
+          const conflictMsg = `[ORCHESTRATOR] Restack Conflict: dependency ${item.id} was squash-merged but rebase --onto had conflicts. Run manually: git rebase --onto main ${depBranch} ${otherBranch}`;
+          deps.writeInbox(other.id, conflictMsg);
           deps.sendMessage(
             other.workspaceRef,
-            `[ORCHESTRATOR] Restack Conflict: dependency ${item.id} was squash-merged but rebase --onto had conflicts. Run manually: git rebase --onto main ${depBranch} ${otherBranch}`,
+            conflictMsg,
           );
         }
       }
     } catch {
       // Unexpected error -- fall back to worker message
       if (other.workspaceRef) {
+        const restackMsg2 = `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto main ${depBranch} ${otherBranch} && git push --force-with-lease`;
+        deps.writeInbox(other.id, restackMsg2);
         deps.sendMessage(
           other.workspaceRef,
-          `[ORCHESTRATOR] Restack Required: dependency ${item.id} was squash-merged. Run: git rebase --onto main ${depBranch} ${otherBranch} && git push --force-with-lease`,
+          restackMsg2,
         );
       }
     }
@@ -345,9 +354,11 @@ export function executeMerge(
     if (!WIP_STATES.has(other.state)) continue;
     if (restackedIds.has(other.id)) continue;
     if (other.workspaceRef) {
+      const rebaseMsg2 = `Dependency ${item.id} merged. Please rebase onto latest main.`;
+      deps.writeInbox(other.id, rebaseMsg2);
       deps.sendMessage(
         other.workspaceRef,
-        `Dependency ${item.id} merged. Please rebase onto latest main.`,
+        rebaseMsg2,
       );
     }
   }
@@ -389,9 +400,11 @@ export function executeMerge(
       if (!mergeable) {
         // Actually conflicting -- send worker rebase message as fallback
         if (other.workspaceRef) {
+          const siblingMsg = `Sibling PR #${other.prNumber} has merge conflicts after ${item.id} was merged. Please rebase onto latest main.`;
+          deps.writeInbox(other.id, siblingMsg);
           deps.sendMessage(
             other.workspaceRef,
-            `Sibling PR #${other.prNumber} has merge conflicts after ${item.id} was merged. Please rebase onto latest main.`,
+            siblingMsg,
           );
         } else {
           deps.warn?.(
@@ -439,10 +452,8 @@ export function executeNotifyCiFailure(
     return { success: true };
   }
 
+  deps.writeInbox(item.id, message);
   const sent = deps.sendMessage(item.workspaceRef, message);
-  if (!sent) {
-    return { success: false, error: `Failed to send CI failure message to ${item.id}` };
-  }
 
   if (item.prNumber) {
     const repoRoot = item.resolvedRepoRoot ?? ctx.projectRoot;
@@ -464,13 +475,9 @@ export function executeNotifyReview(
 ): ActionResult {
   const message = action.message || "Review feedback received -- please address.";
 
-  if (!item.workspaceRef) {
-    return { success: false, error: `No workspace reference for ${item.id} -- cannot notify worker of review feedback` };
-  }
-
-  const sent = deps.sendMessage(item.workspaceRef, message);
-  if (!sent) {
-    return { success: false, error: `Failed to send review feedback to ${item.id}` };
+  deps.writeInbox(item.id, message);
+  if (item.workspaceRef) {
+    deps.sendMessage(item.workspaceRef, message);
   }
 
   return { success: true };
@@ -510,6 +517,11 @@ export function executeClean(
       unlinkSync(hbPath);
     }
   } catch { /* best-effort -- heartbeat cleanup failure doesn't block clean */ }
+
+  // Clean up inbox file (best-effort)
+  try {
+    cleanInbox(ctx.projectRoot, item.id);
+  } catch { /* best-effort */ }
 
   // Partial cleanup (one of two succeeds) is still OK.
   // Fail only when every attempted operation failed.
@@ -563,13 +575,9 @@ export function executeSendMessage(
 ): ActionResult {
   const message = action.message || "Are you still making progress?";
 
-  if (!item.workspaceRef) {
-    return { success: false, error: `No workspace reference for ${item.id} -- cannot send message` };
-  }
-
-  const sent = deps.sendMessage(item.workspaceRef, message);
-  if (!sent) {
-    return { success: false, error: `Failed to send message to ${item.id}` };
+  deps.writeInbox(item.id, message);
+  if (item.workspaceRef) {
+    deps.sendMessage(item.workspaceRef, message);
   }
 
   return { success: true };
@@ -609,13 +617,9 @@ export function executeRebase(
 ): ActionResult {
   const message = action.message || "Please rebase onto latest main.";
 
-  if (!item.workspaceRef) {
-    return { success: false, error: `No workspace reference for ${item.id}` };
-  }
-
-  const sent = deps.sendMessage(item.workspaceRef, message);
-  if (!sent) {
-    return { success: false, error: `Failed to send rebase message to ${item.id}` };
+  deps.writeInbox(item.id, message);
+  if (item.workspaceRef) {
+    deps.sendMessage(item.workspaceRef, message);
   }
 
   return { success: true };
@@ -655,12 +659,14 @@ export function executeDaemonRebase(
   // Daemon rebase failed -- prefer sending message to live worker over launching rebaser.
   // The original worker knows the code best and can resolve conflicts properly.
   const message = action.message || "Please rebase onto latest main.";
+  deps.writeInbox(item.id, message);
   if (item.workspaceRef) {
     const sent = deps.sendMessage(item.workspaceRef, message);
     if (sent) {
       return { success: true };
     }
     // sendMessage failed -- worker may be unresponsive, fall through to rebaser
+    // (inbox message was still written as fallback)
   }
 
   // Circuit breaker: stop launching rebasers after maxRebaseAttempts

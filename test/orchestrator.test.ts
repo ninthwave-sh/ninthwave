@@ -68,6 +68,7 @@ function mockDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
     prMerge: vi.fn(() => true),
     prComment: vi.fn(() => true),
     sendMessage: vi.fn(() => true),
+    writeInbox: vi.fn(),
     closeWorkspace: vi.fn(() => true),
     fetchOrigin: vi.fn(),
     ffMerge: vi.fn(),
@@ -1481,7 +1482,7 @@ describe("Orchestrator", () => {
       );
     });
 
-    it("notify-review: fails without workspace ref", () => {
+    it("notify-review: succeeds via inbox even without workspace ref", () => {
       const deps = mockDeps();
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -1493,9 +1494,9 @@ describe("Orchestrator", () => {
         deps,
       );
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("No workspace reference");
+      expect(result.success).toBe(true);
       expect(deps.sendMessage).not.toHaveBeenCalled();
+      expect(deps.writeInbox).toHaveBeenCalled();
     });
 
     // ── clean ─────────────────────────────────────────────────
@@ -1679,7 +1680,7 @@ describe("Orchestrator", () => {
       expect(deps.sendMessage).toHaveBeenCalledWith("workspace:1", "Please rebase onto latest main.");
     });
 
-    it("rebase: fails when no workspace ref", () => {
+    it("rebase: succeeds via inbox even without workspace ref", () => {
       const deps = mockDeps();
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -1687,11 +1688,12 @@ describe("Orchestrator", () => {
 
       const result = orch.executeAction({ type: "rebase", itemId: "H-1-1" }, defaultCtx, deps);
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("No workspace reference");
+      expect(result.success).toBe(true);
+      expect(deps.writeInbox).toHaveBeenCalled();
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("rebase: fails when sendMessage returns false", () => {
+    it("rebase: succeeds even when sendMessage returns false (inbox is primary)", () => {
       const deps = mockDeps({ sendMessage: vi.fn(() => false) });
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -1700,8 +1702,8 @@ describe("Orchestrator", () => {
 
       const result = orch.executeAction({ type: "rebase", itemId: "H-1-1" }, defaultCtx, deps);
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("Failed to send rebase message");
+      expect(result.success).toBe(true);
+      expect(deps.writeInbox).toHaveBeenCalled();
     });
 
     // ── daemon-rebase ──────────────────────────────────────────

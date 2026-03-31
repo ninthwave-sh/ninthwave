@@ -63,6 +63,7 @@ function mockDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
     prMerge: () => true,
     prComment: () => true,
     sendMessage: () => true,
+    writeInbox: () => {},
     closeWorkspace: () => true,
     fetchOrigin: () => {},
     ffMerge: () => {},

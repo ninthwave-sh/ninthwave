@@ -23,6 +23,7 @@ function createMockMux(): Multiplexer & Record<string, Mock> {
     launchWorkspace: vi.fn(() => "workspace:1"),
     splitPane: vi.fn(() => "pane:1"),
     sendMessage: vi.fn(() => true),
+    writeInbox: vi.fn(),
     readScreen: vi.fn(() => ""),
     listWorkspaces: vi.fn(() => ""),
     closeWorkspace: vi.fn(() => true),

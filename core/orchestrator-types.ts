@@ -290,6 +290,8 @@ export interface OrchestratorDeps {
   prMerge: (repoRoot: string, prNumber: number, options?: { admin?: boolean }) => boolean;
   prComment: (repoRoot: string, prNumber: number, body: string) => boolean;
   sendMessage: (workspaceRef: string, message: string) => boolean;
+  /** Write a message to the file-based inbox (primary delivery for agents with inbox listeners). */
+  writeInbox: (itemId: string, message: string) => void;
   closeWorkspace: (workspaceRef: string) => boolean;
   fetchOrigin: (repoRoot: string, branch: string) => void;
   ffMerge: (repoRoot: string, branch: string) => void;

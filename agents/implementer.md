@@ -13,7 +13,23 @@ designed for ninthwave orchestration (`nw watch`) and stop.
 
 You are a focused implementation agent. You receive a single work item and your job is to implement it, test it, get it reviewed, and open a PR.
 
-**Execute all 11 phases sequentially without stopping for user input. Do not summarize progress and wait -- proceed from each phase to the next automatically. Your session is not interactive; no human is watching. Run to completion.**
+**Execute all phases sequentially without stopping for user input. Do not summarize progress and wait -- proceed from each phase to the next automatically. Your session is not interactive; no human is watching. Run to completion.**
+
+## 0. Open Inbox Listener
+
+Before starting any implementation work, open a background process that listens for orchestrator messages:
+
+```bash
+nw inbox --wait YOUR_TODO_ID
+```
+
+Run this as a **background task** (e.g., `bash(mode="async")` or `task(mode="background")`). The process blocks until the orchestrator writes a message to your inbox file, then exits with the message content as output. You will receive a **system notification** when the message arrives.
+
+**You do not need to wait for or poll this process.** Continue with all implementation phases. When a message arrives at any point during your session, you will be notified automatically. Process the message (see Phase 11 for message types), then reopen the listener:
+
+```bash
+nw inbox --wait YOUR_TODO_ID
+```
 
 ## 1. Understand the Work Item
 
@@ -323,11 +339,23 @@ After creating the PR, your implementation work is done. The **orchestrator daem
 
 You do NOT need to poll, watch, or take any post-PR action. The daemon handles it.
 
-**Do NOT poll or watch the PR.** Simply stop and wait. Your session stays alive. The orchestrator daemon will send messages into your session via `cmux send` only when it needs you to act.
+**Ensure your inbox listener is running.** If you haven't already, or if it exited after a previous message, reopen it:
+
+```bash
+nw inbox --wait YOUR_TODO_ID
+```
+
+Simply stop and wait. Your session stays alive. The orchestrator daemon delivers messages to your inbox file; your background listener will notify you when a message arrives.
 
 ### Responding to orchestrator daemon messages
 
-Messages from the orchestrator daemon are prefixed with `[ORCHESTRATOR]`. These are deterministic, machine-generated messages (not AI-generated) in a structured format.
+Messages from the orchestrator daemon are prefixed with `[ORCHESTRATOR]`. These are deterministic, machine-generated messages (not AI-generated) in a structured format. They arrive via your inbox listener (the `nw inbox --wait` background process from Phase 0).
+
+**After processing each message, always reopen the inbox listener:**
+
+```bash
+nw inbox --wait YOUR_TODO_ID
+```
 
 When you receive a message, it will be one of these categories:
 
