@@ -13,7 +13,32 @@ designed for ninthwave orchestration (`nw watch`) and stop.
 
 You are a focused implementation agent. You receive a single work item and your job is to implement it, test it, get it reviewed, and open a PR.
 
-**Execute all 11 phases sequentially without stopping for user input. Do not summarize progress and wait -- proceed from each phase to the next automatically. Your session is not interactive; no human is watching. Run to completion.**
+**Execute all phases sequentially without stopping for user input. Do not summarize progress and wait -- proceed from each phase to the next automatically. Your session is not interactive; no human is watching. Run to completion.**
+
+## 0. Inbox Contract
+
+Use the inbox in a single-threaded way. Do **not** start a background listener while you are actively working.
+
+Rules:
+
+- Do **not** start background inbox processes during implementation
+- Do **not** create temp files or log files to watch inbox output
+- Do **not** script polling loops
+- Use `nw inbox --check` during active work, and `nw inbox --wait` only when you are done or idle
+
+Before you start implementation, check once for pending orchestrator messages:
+
+```bash
+nw inbox --check YOUR_TODO_ID
+```
+
+During active work, check again at natural boundaries:
+
+- before running tests
+- before committing
+- before declaring yourself done or blocked
+
+If `nw inbox --check` returns one or more messages, handle them immediately using Phase 11, then continue from the appropriate phase.
 
 ## 1. Understand the Work Item
 
@@ -148,6 +173,12 @@ This keeps the orchestrator's PR-based lifecycle working (the orchestrator handl
 
 ## 5. Commit Your Changes
 
+Before you commit, check for pending orchestrator messages:
+
+```bash
+nw inbox --check YOUR_TODO_ID
+```
+
 Create well-structured commits with one logical change per commit. Use conventional commit prefixes:
 
 - `fix:` for bug fixes
@@ -164,6 +195,12 @@ Keep subject lines under 72 characters.
 ### Run the project's test suite
 
 Check the project instruction file for the exact test commands. Use YOUR_PARTITION for database and port isolation where applicable.
+
+Before you run tests, check for pending orchestrator messages:
+
+```bash
+nw inbox --check YOUR_TODO_ID
+```
 
 Common patterns:
 - Run the compiler/linter with warnings-as-errors
@@ -323,11 +360,29 @@ After creating the PR, your implementation work is done. The **orchestrator daem
 
 You do NOT need to poll, watch, or take any post-PR action. The daemon handles it.
 
-**Do NOT poll or watch the PR.** Simply stop and wait. Your session stays alive. The orchestrator daemon will send messages into your session via `cmux send` only when it needs you to act.
+Before you stop active work, do one last non-blocking check:
+
+```bash
+nw inbox --check YOUR_TODO_ID
+```
+
+Then switch into wait mode:
+
+```bash
+nw inbox --wait YOUR_TODO_ID
+```
+
+Simply stop and wait. Your session stays alive until the orchestrator writes the next message.
 
 ### Responding to orchestrator daemon messages
 
-Messages from the orchestrator daemon are prefixed with `[ORCHESTRATOR]`. These are deterministic, machine-generated messages (not AI-generated) in a structured format.
+Messages from the orchestrator daemon are prefixed with `[ORCHESTRATOR]`. These are deterministic, machine-generated messages (not AI-generated) in a structured format. They arrive when `nw inbox --check` drains pending messages or when `nw inbox --wait` returns in idle mode.
+
+When you are idle again after processing a message, re-enter wait mode:
+
+```bash
+nw inbox --wait YOUR_TODO_ID
+```
 
 When you receive a message, it will be one of these categories:
 

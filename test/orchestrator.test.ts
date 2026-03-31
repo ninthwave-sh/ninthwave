@@ -68,6 +68,7 @@ function mockDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
     prMerge: vi.fn(() => true),
     prComment: vi.fn(() => true),
     sendMessage: vi.fn(() => true),
+    writeInbox: vi.fn(),
     closeWorkspace: vi.fn(() => true),
     fetchOrigin: vi.fn(),
     ffMerge: vi.fn(),
@@ -1096,6 +1097,7 @@ describe("Orchestrator", () => {
       orch.getItem("H-1-1")!.prNumber = 42;
       orch.hydrateState("H-1-2", "implementing");
       orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
+      orch.getItem("H-1-2")!.worktreePath = "/tmp/test/ninthwave-H-1-2";
 
       orch.executeAction(
         { type: "merge", itemId: "H-1-1", prNumber: 42 },
@@ -1103,10 +1105,12 @@ describe("Orchestrator", () => {
         deps,
       );
 
-      expect(deps.sendMessage).toHaveBeenCalledWith(
-        "workspace:2",
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-2",
+        "H-1-2",
         expect.stringContaining("Dependency H-1-1 merged"),
       );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
     it("merge: does not send rebase to non-dependent items", () => {
@@ -1217,6 +1221,7 @@ describe("Orchestrator", () => {
       orch.hydrateState("H-1-2", "ci-pending");
       orch.getItem("H-1-2")!.prNumber = 43;
       orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
+      orch.getItem("H-1-2")!.worktreePath = "/tmp/test/ninthwave-H-1-2";
       orch.hydrateState("H-1-3", "implementing");
       orch.getItem("H-1-3")!.prNumber = 44;
       orch.getItem("H-1-3")!.workspaceRef = "workspace:3";
@@ -1229,7 +1234,7 @@ describe("Orchestrator", () => {
 
       // Should daemon-rebase both in-flight sibling PRs
       expect(daemonRebase).toHaveBeenCalledWith(
-        `${defaultCtx.worktreeDir}/ninthwave-H-1-2`,
+        "/tmp/test/ninthwave-H-1-2",
         "ninthwave/H-1-2",
       );
       expect(daemonRebase).toHaveBeenCalledWith(
@@ -1252,6 +1257,7 @@ describe("Orchestrator", () => {
       orch.hydrateState("H-1-2", "ci-pending");
       orch.getItem("H-1-2")!.prNumber = 43;
       orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
+      orch.getItem("H-1-2")!.worktreePath = "/tmp/test/ninthwave-H-1-2";
 
       orch.executeAction(
         { type: "merge", itemId: "H-1-1", prNumber: 42 },
@@ -1278,6 +1284,7 @@ describe("Orchestrator", () => {
       orch.hydrateState("H-1-2", "ci-pending");
       orch.getItem("H-1-2")!.prNumber = 43;
       orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
+      orch.getItem("H-1-2")!.worktreePath = "/tmp/test/ninthwave-H-1-2";
 
       orch.executeAction(
         { type: "merge", itemId: "H-1-1", prNumber: 42 },
@@ -1288,10 +1295,12 @@ describe("Orchestrator", () => {
       // Daemon rebase failed, PR is conflicting -- fall back to worker message
       expect(daemonRebase).toHaveBeenCalledTimes(1);
       expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 43);
-      expect(deps.sendMessage).toHaveBeenCalledWith(
-        "workspace:2",
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-2",
+        "H-1-2",
         expect.stringContaining("merge conflicts"),
       );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
     it("merge: skips non-conflicting PR after daemon-rebase failure", () => {
@@ -1388,6 +1397,7 @@ describe("Orchestrator", () => {
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.getItem("H-1-1")!.prNumber = 42;
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
       const result = orch.executeAction(
         { type: "notify-ci-failure", itemId: "H-1-1", message: "CI failed on job build" },
@@ -1396,7 +1406,12 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(deps.sendMessage).toHaveBeenCalledWith("workspace:1", "CI failed on job build");
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
+        "CI failed on job build",
+      );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
       expect(deps.prComment).toHaveBeenCalledWith(
         defaultCtx.projectRoot,
         42,
@@ -1411,6 +1426,7 @@ describe("Orchestrator", () => {
       orch.hydrateState("H-1-1", "ci-failed");
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
       orch.executeAction(
         { type: "notify-ci-failure", itemId: "H-1-1" },
@@ -1418,10 +1434,12 @@ describe("Orchestrator", () => {
         deps,
       );
 
-      expect(deps.sendMessage).toHaveBeenCalledWith(
-        "workspace:1",
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
         "CI failed -- please investigate and fix.",
       );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
     it("notify-ci-failure: transitions to ready with needsCiFix when no workspace ref (H-WR-1)", () => {
@@ -1455,6 +1473,7 @@ describe("Orchestrator", () => {
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.hydrateState("H-1-1", "review-pending");
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
       const result = orch.executeAction(
         { type: "notify-review", itemId: "H-1-1", message: "Please address review comments." },
@@ -1463,7 +1482,12 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(deps.sendMessage).toHaveBeenCalledWith("workspace:1", "Please address review comments.");
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
+        "Please address review comments.",
+      );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
     it("notify-review: uses default message when none provided", () => {
@@ -1472,16 +1496,19 @@ describe("Orchestrator", () => {
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.hydrateState("H-1-1", "review-pending");
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
       orch.executeAction({ type: "notify-review", itemId: "H-1-1" }, defaultCtx, deps);
 
-      expect(deps.sendMessage).toHaveBeenCalledWith(
-        "workspace:1",
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
         "Review feedback received -- please address.",
       );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("notify-review: fails without workspace ref", () => {
+    it("notify-review: succeeds via inbox even without workspace ref", () => {
       const deps = mockDeps();
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -1493,9 +1520,9 @@ describe("Orchestrator", () => {
         deps,
       );
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("No workspace reference");
+      expect(result.success).toBe(true);
       expect(deps.sendMessage).not.toHaveBeenCalled();
+      expect(deps.writeInbox).toHaveBeenCalled();
     });
 
     // ── clean ─────────────────────────────────────────────────
@@ -1656,6 +1683,7 @@ describe("Orchestrator", () => {
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.hydrateState("H-1-1", "implementing");
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
       const result = orch.executeAction(
         { type: "rebase", itemId: "H-1-1", message: "Rebase onto main now." },
@@ -1664,7 +1692,12 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(deps.sendMessage).toHaveBeenCalledWith("workspace:1", "Rebase onto main now.");
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
+        "Rebase onto main now.",
+      );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
     it("rebase: uses default message when none provided", () => {
@@ -1673,13 +1706,19 @@ describe("Orchestrator", () => {
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.hydrateState("H-1-1", "implementing");
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
       orch.executeAction({ type: "rebase", itemId: "H-1-1" }, defaultCtx, deps);
 
-      expect(deps.sendMessage).toHaveBeenCalledWith("workspace:1", "Please rebase onto latest main.");
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
+        "Please rebase onto latest main.",
+      );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("rebase: fails when no workspace ref", () => {
+    it("rebase: succeeds via inbox even without workspace ref", () => {
       const deps = mockDeps();
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -1687,21 +1726,24 @@ describe("Orchestrator", () => {
 
       const result = orch.executeAction({ type: "rebase", itemId: "H-1-1" }, defaultCtx, deps);
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("No workspace reference");
+      expect(result.success).toBe(true);
+      expect(deps.writeInbox).toHaveBeenCalled();
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
-    it("rebase: fails when sendMessage returns false", () => {
-      const deps = mockDeps({ sendMessage: vi.fn(() => false) });
+    it("rebase: succeeds without using live terminal send", () => {
+      const deps = mockDeps();
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.hydrateState("H-1-1", "implementing");
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
       const result = orch.executeAction({ type: "rebase", itemId: "H-1-1" }, defaultCtx, deps);
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("Failed to send rebase message");
+      expect(result.success).toBe(true);
+      expect(deps.writeInbox).toHaveBeenCalled();
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
     // ── daemon-rebase ──────────────────────────────────────────
@@ -1740,6 +1782,7 @@ describe("Orchestrator", () => {
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.getItem("H-1-1")!.prNumber = 42;
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
       const result = orch.executeAction(
         { type: "daemon-rebase", itemId: "H-1-1", message: "Rebase needed." },
@@ -1748,7 +1791,12 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(deps.sendMessage).toHaveBeenCalledWith("workspace:1", "Rebase needed.");
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
+        "Rebase needed.",
+      );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
     it("daemon-rebase: falls back to worker message when daemonRebase throws", () => {
@@ -1759,6 +1807,7 @@ describe("Orchestrator", () => {
       orch.hydrateState("H-1-1", "ci-failed");
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+      orch.getItem("H-1-1")!.worktreePath = "/tmp/test/ninthwave-H-1-1";
 
       const result = orch.executeAction(
         { type: "daemon-rebase", itemId: "H-1-1", message: "Rebase needed." },
@@ -1767,7 +1816,12 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      expect(deps.sendMessage).toHaveBeenCalledWith("workspace:1", "Rebase needed.");
+      expect(deps.writeInbox).toHaveBeenCalledWith(
+        "/tmp/test/ninthwave-H-1-1",
+        "H-1-1",
+        "Rebase needed.",
+      );
+      expect(deps.sendMessage).not.toHaveBeenCalled();
     });
 
     it("daemon-rebase: fails with warning when no daemonRebase dep and no worker", () => {
@@ -5043,6 +5097,7 @@ describe("Orchestrator", () => {
         orch.getItem("A-1-2")!.prNumber = 43;
         orch.getItem("A-1-2")!.workspaceRef = "workspace:2";
         orch.getItem("A-1-2")!.baseBranch = "ninthwave/A-1-1";
+        orch.getItem("A-1-2")!.worktreePath = "/tmp/test/ninthwave-A-1-2";
 
         orch.executeAction(
           { type: "merge", itemId: "A-1-1", prNumber: 42 },
@@ -5052,14 +5107,14 @@ describe("Orchestrator", () => {
 
         // rebaseOnto called with correct args
         expect(rebaseOnto).toHaveBeenCalledWith(
-          `${defaultCtx.worktreeDir}/ninthwave-A-1-2`,
+          "/tmp/test/ninthwave-A-1-2",
           "main",
           "ninthwave/A-1-1",
           "ninthwave/A-1-2",
         );
         // Force-pushed after successful rebase
         expect(forcePush).toHaveBeenCalledWith(
-          `${defaultCtx.worktreeDir}/ninthwave-A-1-2`,
+          "/tmp/test/ninthwave-A-1-2",
         );
         // baseBranch cleared -- no longer stacked
         expect(orch.getItem("A-1-2")!.baseBranch).toBeUndefined();
@@ -5079,6 +5134,7 @@ describe("Orchestrator", () => {
         orch.getItem("A-1-2")!.prNumber = 43;
         orch.getItem("A-1-2")!.workspaceRef = "workspace:2";
         orch.getItem("A-1-2")!.baseBranch = "ninthwave/A-1-1";
+        orch.getItem("A-1-2")!.worktreePath = "/tmp/test/ninthwave-A-1-2";
 
         orch.executeAction(
           { type: "merge", itemId: "A-1-1", prNumber: 42 },
@@ -5091,14 +5147,17 @@ describe("Orchestrator", () => {
         // Force-push should NOT have been called
         expect(forcePush).not.toHaveBeenCalled();
         // Worker gets conflict message with manual rebase instructions
-        expect(deps.sendMessage).toHaveBeenCalledWith(
-          "workspace:2",
+        expect(deps.writeInbox).toHaveBeenCalledWith(
+          "/tmp/test/ninthwave-A-1-2",
+          "A-1-2",
           expect.stringContaining("Restack Conflict"),
         );
-        expect(deps.sendMessage).toHaveBeenCalledWith(
-          "workspace:2",
+        expect(deps.writeInbox).toHaveBeenCalledWith(
+          "/tmp/test/ninthwave-A-1-2",
+          "A-1-2",
           expect.stringContaining("git rebase --onto main"),
         );
+        expect(deps.sendMessage).not.toHaveBeenCalled();
       });
 
       it("executeMerge non-stacked dep gets existing rebase behavior unchanged", () => {
@@ -5116,6 +5175,7 @@ describe("Orchestrator", () => {
         orch.hydrateState("A-1-2", "ci-pending");
         orch.getItem("A-1-2")!.prNumber = 43;
         orch.getItem("A-1-2")!.workspaceRef = "workspace:2";
+        orch.getItem("A-1-2")!.worktreePath = "/tmp/test/ninthwave-A-1-2";
         // No baseBranch -- not stacked
 
         orch.executeAction(
@@ -5128,13 +5188,15 @@ describe("Orchestrator", () => {
         expect(rebaseOnto).not.toHaveBeenCalled();
         expect(forcePush).not.toHaveBeenCalled();
         // Non-stacked dep gets generic rebase message
-        expect(deps.sendMessage).toHaveBeenCalledWith(
-          "workspace:2",
+        expect(deps.writeInbox).toHaveBeenCalledWith(
+          "/tmp/test/ninthwave-A-1-2",
+          "A-1-2",
           expect.stringContaining("Dependency A-1-1 merged"),
         );
+        expect(deps.sendMessage).not.toHaveBeenCalled();
         // And gets daemon-rebase treatment as a sibling
         expect(daemonRebase).toHaveBeenCalledWith(
-          `${defaultCtx.worktreeDir}/ninthwave-A-1-2`,
+          "/tmp/test/ninthwave-A-1-2",
           "ninthwave/A-1-2",
         );
       });
@@ -5153,6 +5215,7 @@ describe("Orchestrator", () => {
         orch.getItem("A-1-2")!.prNumber = 43;
         orch.getItem("A-1-2")!.workspaceRef = "workspace:2";
         orch.getItem("A-1-2")!.baseBranch = "ninthwave/A-1-1";
+        orch.getItem("A-1-2")!.worktreePath = "/tmp/test/ninthwave-A-1-2";
 
         orch.executeAction(
           { type: "merge", itemId: "A-1-1", prNumber: 42 },
@@ -5180,6 +5243,7 @@ describe("Orchestrator", () => {
         orch.getItem("A-1-2")!.prNumber = 43;
         orch.getItem("A-1-2")!.workspaceRef = "workspace:2";
         orch.getItem("A-1-2")!.baseBranch = "ninthwave/A-1-1";
+        orch.getItem("A-1-2")!.worktreePath = "/tmp/test/ninthwave-A-1-2";
 
         orch.executeAction(
           { type: "merge", itemId: "A-1-1", prNumber: 42 },
@@ -5204,6 +5268,7 @@ describe("Orchestrator", () => {
         orch.getItem("A-1-2")!.prNumber = 43;
         orch.getItem("A-1-2")!.workspaceRef = "workspace:2";
         orch.getItem("A-1-2")!.baseBranch = "ninthwave/A-1-1";
+        orch.getItem("A-1-2")!.worktreePath = "/tmp/test/ninthwave-A-1-2";
 
         orch.executeAction(
           { type: "merge", itemId: "A-1-1", prNumber: 42 },
@@ -5212,14 +5277,17 @@ describe("Orchestrator", () => {
         );
 
         // Worker gets manual rebase instructions since rebaseOnto not available
-        expect(deps.sendMessage).toHaveBeenCalledWith(
-          "workspace:2",
+        expect(deps.writeInbox).toHaveBeenCalledWith(
+          "/tmp/test/ninthwave-A-1-2",
+          "A-1-2",
           expect.stringContaining("Restack Required"),
         );
-        expect(deps.sendMessage).toHaveBeenCalledWith(
-          "workspace:2",
+        expect(deps.writeInbox).toHaveBeenCalledWith(
+          "/tmp/test/ninthwave-A-1-2",
+          "A-1-2",
           expect.stringContaining("git rebase --onto main"),
         );
+        expect(deps.sendMessage).not.toHaveBeenCalled();
       });
     });
 
@@ -6669,7 +6737,7 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      const body = prComment.mock.calls[0]![2] as string;
+      const body = (prComment.mock.calls[0] as any)?.[2] ?? "";
       expect(body).toContain("**[Reviewer](https://github.com/test-owner/test-repo/blob/main/agents/reviewer.md)**");
       expect(body).toContain("*Powered by [Ninthwave](https://ninthwave.sh)*");
       expect(body).toContain("Verdict: Approved");
@@ -6702,7 +6770,7 @@ describe("Orchestrator", () => {
       );
 
       expect(result.success).toBe(true);
-      const body = prComment.mock.calls[0]![2] as string;
+      const body = (prComment.mock.calls[0] as any)?.[2] ?? "";
       expect(body).toContain("**[Reviewer](https://github.com/test-owner/test-repo/blob/main/agents/reviewer.md)**");
       expect(body).toContain("*Powered by [Ninthwave](https://ninthwave.sh)*");
       expect(body).toContain("Verdict: Changes Requested");

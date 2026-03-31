@@ -2014,6 +2014,7 @@ describe("executeLaunch stale branch cleanup", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -2120,6 +2121,7 @@ describe("executeLaunch stacked dep race guard", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -2264,6 +2266,7 @@ describe("executeMerge conflict-aware rebase", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -2339,15 +2342,12 @@ describe("executeMerge conflict-aware rebase", () => {
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
 
-    const sentMessages: string[] = [];
+    const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
       prMerge: () => false,
       checkPrMergeable: () => false, // CONFLICTING
       daemonRebase: () => false, // rebase fails
-      sendMessage: (_ref, msg) => {
-        sentMessages.push(msg);
-        return true;
-      },
+      writeInbox: (_projectRoot, _itemId, msg) => { inboxMessages.push(msg); },
     });
 
     const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
@@ -2357,8 +2357,7 @@ describe("executeMerge conflict-aware rebase", () => {
     expect(item.state).toBe("ci-pending");
     // mergeFailCount should NOT be incremented
     expect(item.mergeFailCount ?? 0).toBe(0);
-    // Worker should have received a rebase message
-    expect(sentMessages.some((m) => m.includes("Rebase Required"))).toBe(true);
+    expect(inboxMessages.some((m) => m.includes("Rebase Required"))).toBe(true);
   });
 
   it("falls back to worker rebase when daemonRebase throws on conflicting PR", () => {
@@ -2371,22 +2370,19 @@ describe("executeMerge conflict-aware rebase", () => {
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
 
-    const sentMessages: string[] = [];
+    const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
       prMerge: () => false,
       checkPrMergeable: () => false,
       daemonRebase: () => { throw new Error("rebase exploded"); },
-      sendMessage: (_ref, msg) => {
-        sentMessages.push(msg);
-        return true;
-      },
+      writeInbox: (_projectRoot, _itemId, msg) => { inboxMessages.push(msg); },
     });
 
     const result = orch.executeAction({ type: "merge", itemId: "H-1-1", prNumber: 42 }, ctx, deps);
 
     expect(item.state).toBe("ci-pending");
     expect(item.mergeFailCount ?? 0).toBe(0);
-    expect(sentMessages.some((m) => m.includes("Rebase Required"))).toBe(true);
+    expect(inboxMessages.some((m) => m.includes("Rebase Required"))).toBe(true);
   });
 
   it("resets rebaseRequested when conflict detected", () => {
@@ -2439,6 +2435,7 @@ describe("executeMerge admin override", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -3072,6 +3069,7 @@ describe("executeClean heartbeat cleanup", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -3105,6 +3103,7 @@ describe("syncWorkerDisplay", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => "",
       closeWorkspace: () => true,
@@ -3330,6 +3329,7 @@ describe("rebaser worker state transitions", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -3474,18 +3474,18 @@ describe("rebaser worker state transitions", () => {
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
 
-    const messages: string[] = [];
+    const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
       daemonRebase: () => false,
       // launchRebaser intentionally omitted
-      sendMessage: (_ref, msg) => { messages.push(msg); return true; },
+      writeInbox: (_projectRoot, _itemId, msg) => { inboxMessages.push(msg); },
     });
 
     const result = orch.executeAction({ type: "daemon-rebase", itemId: "H-1-1" }, ctx, deps);
 
     expect(result.success).toBe(true);
-    expect(item.state).toBe("ci-pending"); // still ci-pending, message sent to worker
-    expect(messages.length).toBeGreaterThan(0);
+    expect(item.state).toBe("ci-pending");
+    expect(inboxMessages.length).toBeGreaterThan(0);
   });
 });
 
@@ -3499,6 +3499,7 @@ describe("rebase circuit breaker and worker message priority", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},
@@ -3537,7 +3538,7 @@ describe("rebase circuit breaker and worker message priority", () => {
     expect(launchRebaserCalled.value).toBe(false); // rebaser NOT launched
   });
 
-  it("prefers worker message over rebaser when workspaceRef exists and sendMessage succeeds", () => {
+  it("prefers inbox delivery over rebaser when workspaceRef exists", () => {
     const orch = new Orchestrator({ wipLimit: 1 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -3547,22 +3548,21 @@ describe("rebase circuit breaker and worker message priority", () => {
     item.workspaceRef = "workspace:1";
 
     const launchRebaserCalled = { value: false };
-    const messagesSent: Array<{ ref: string; msg: string }> = [];
+    const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
       daemonRebase: () => false,
       launchRebaser: () => { launchRebaserCalled.value = true; return { workspaceRef: "rebaser:1" }; },
-      sendMessage: (ref, msg) => { messagesSent.push({ ref, msg }); return true; },
+      writeInbox: (_projectRoot, _itemId, msg) => { inboxMessages.push(msg); },
     });
 
     const result = orch.executeAction({ type: "daemon-rebase", itemId: "H-1-1" }, ctx, deps);
 
     expect(result.success).toBe(true);
     expect(launchRebaserCalled.value).toBe(false); // rebaser NOT launched
-    expect(messagesSent.length).toBe(1);
-    expect(messagesSent[0].ref).toBe("workspace:1");
+    expect(inboxMessages).toHaveLength(1);
   });
 
-  it("falls back to rebaser when worker message fails (sendMessage returns false)", () => {
+  it("does not launch rebaser when inbox delivery succeeds for a live worker", () => {
     const orch = new Orchestrator({ wipLimit: 1 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -3573,16 +3573,16 @@ describe("rebase circuit breaker and worker message priority", () => {
 
     const deps = makeMinimalDeps({
       daemonRebase: () => false,
-      sendMessage: () => false, // worker message fails
+      writeInbox: () => {},
       launchRebaser: () => ({ workspaceRef: "rebaser:1" }),
     });
 
     const result = orch.executeAction({ type: "daemon-rebase", itemId: "H-1-1" }, ctx, deps);
 
     expect(result.success).toBe(true);
-    expect(item.state).toBe("rebasing");
-    expect(item.rebaserWorkspaceRef).toBe("rebaser:1");
-    expect(item.rebaseAttemptCount).toBe(1);
+    expect(item.state).toBe("ci-pending");
+    expect(item.rebaserWorkspaceRef).toBeUndefined();
+    expect(item.rebaseAttemptCount).toBeUndefined();
   });
 
   it("rebaseAttemptCount resets when conflicts resolve (isMergeable !== false)", () => {
@@ -3714,6 +3714,7 @@ describe("daemon-worker worktree race prevention (H-WR-1)", () => {
       prMerge: () => true,
       prComment: () => true,
       sendMessage: () => true,
+      writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
       ffMerge: () => {},

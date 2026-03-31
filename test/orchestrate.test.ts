@@ -84,6 +84,7 @@ function mockActionDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps
     prMerge: vi.fn(() => true),
     prComment: vi.fn(() => true),
     sendMessage: vi.fn(() => true),
+    writeInbox: vi.fn(),
     closeWorkspace: vi.fn(() => true),
     fetchOrigin: vi.fn(),
     ffMerge: vi.fn(),
@@ -1027,6 +1028,7 @@ describe("reconstructState", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () =>
         "  workspace:29  ✳ H-DF-1: Workers remove their own work item",
@@ -1062,6 +1064,7 @@ describe("reconstructState", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () =>
         "nw-dev:nw:H-TM-3",
@@ -1096,6 +1099,7 @@ describe("reconstructState", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => "  workspace:1  main",
       closeWorkspace: () => true,
@@ -1459,6 +1463,7 @@ describe("buildSnapshot cross-repo", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => "",
       closeWorkspace: () => true,
@@ -1488,6 +1493,7 @@ describe("buildSnapshot cross-repo", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => "",
       closeWorkspace: () => true,
@@ -1644,6 +1650,7 @@ describe("buildSnapshot lastCommitTime", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => workspaces,
       closeWorkspace: () => true,
@@ -1747,6 +1754,7 @@ describe("buildSnapshot isMergeable", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => workspaces,
       closeWorkspace: () => true,
@@ -1837,6 +1845,7 @@ describe("buildSnapshot ready status mapping", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => workspaces,
       closeWorkspace: () => true,
@@ -1877,6 +1886,7 @@ describe("buildSnapshot merge detection", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => workspaces,
       closeWorkspace: () => true,
@@ -2829,13 +2839,14 @@ describe("orchestrateLoop post-merge conflict detection", () => {
     // checkPrMergeable: T-1-2 (PR #11) has conflicts, T-1-3 (PR #12) is fine
     const checkPrMergeable = vi.fn((_: string, prNum: number) => prNum !== 11);
     const sendMessage = vi.fn(() => true);
+    const writeInbox = vi.fn();
     const warn = vi.fn();
 
     const deps: OrchestrateLoopDeps = {
       buildSnapshot,
       sleep: () => Promise.resolve(),
       log: () => {},
-      actionDeps: mockActionDeps({ checkPrMergeable, sendMessage, warn }),
+      actionDeps: mockActionDeps({ checkPrMergeable, sendMessage, writeInbox, warn }),
     };
 
     await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 200 });
@@ -2844,11 +2855,13 @@ describe("orchestrateLoop post-merge conflict detection", () => {
     expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 11);
     expect(checkPrMergeable).toHaveBeenCalledWith(defaultCtx.projectRoot, 12);
 
-    // Rebase message should be sent to T-1-2 (conflicting)
-    expect(sendMessage).toHaveBeenCalledWith(
-      "workspace:2",
+    // Rebase message should be queued to T-1-2 (conflicting)
+    expect(writeInbox).toHaveBeenCalledWith(
+      `${defaultCtx.worktreeDir}/ninthwave-T-1-2`,
+      "T-1-2",
       expect.stringContaining("merge conflicts"),
     );
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("does not check sibling PRs when checkPrMergeable is not provided", async () => {
@@ -2918,6 +2931,7 @@ describe("isWorkerAlive", () => {
       launchWorkspace: () => null,
       splitPane: () => null,
       sendMessage: () => true,
+      writeInbox: () => {},
       readScreen: () => "",
       listWorkspaces: () => workspaces,
       closeWorkspace: () => true,

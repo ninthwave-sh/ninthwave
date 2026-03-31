@@ -620,6 +620,7 @@ function mockMux(overrides: Partial<Multiplexer> = {}): Multiplexer {
     launchWorkspace: () => null,
     splitPane: () => null,
     sendMessage: () => false,
+    writeInbox: () => {},
     readScreen: () => "",
     listWorkspaces: () => "",
     closeWorkspace: () => true,

@@ -34,6 +34,7 @@ import { cmdStop } from "./commands/stop.ts";
 import { cmdRetry } from "./commands/retry.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
 import { cmdHeartbeat } from "./commands/heartbeat.ts";
+import { cmdInbox } from "./commands/inbox.ts";
 import { cmdLogs } from "./commands/logs.ts";
 import { cmdSchedule } from "./commands/schedule.ts";
 
@@ -430,6 +431,28 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     examples: [
       'nw heartbeat --progress 0.5 --label "Writing tests"',
       'nw heartbeat --progress 1.0 --label "Done"',
+    ],
+  },
+  {
+    name: "inbox",
+    usage: "inbox --wait <id> | --check <id> | --write <id> -m <text>",
+    description: "File-based message inbox for orchestrator↔agent communication",
+    group: "advanced",
+    needsRoot: true,
+    needsWork: false,
+    handler: (ctx) => {
+      cmdInbox(ctx.args, ctx.projectRoot);
+    },
+    flags: {
+      "--wait": "Block until a message arrives (best when a worker is idle or done)",
+      "--check": "Non-blocking check that drains all pending messages during active work",
+      "--write": "Write a message to the inbox",
+      "-m, --message": "Message text (used with --write)",
+    },
+    examples: [
+      "nw inbox --wait H-FOO-1",
+      "nw inbox --check H-FOO-1",
+      'nw inbox --write H-FOO-1 -m "Fix CI"',
     ],
   },
   {

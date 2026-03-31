@@ -58,6 +58,7 @@ export function buildActionDeps(
     prMerge: vi.fn((repoRoot, prNumber, options) => fakeGh.prMerge(repoRoot, prNumber, options)),
     prComment: vi.fn((repoRoot, prNumber, body) => fakeGh.prComment(repoRoot, prNumber, body)),
     sendMessage: vi.fn((ref, msg) => fakeMux.sendMessage(ref, msg)),
+    writeInbox: vi.fn(),
     closeWorkspace: vi.fn((ref) => fakeMux.closeWorkspace(ref)),
     fetchOrigin: vi.fn(),
     ffMerge: vi.fn(),

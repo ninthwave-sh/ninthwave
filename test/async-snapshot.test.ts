@@ -127,6 +127,7 @@ const fakeMux: Multiplexer = {
   launchWorkspace: () => null,
   splitPane: () => null,
   sendMessage: () => true,
+  writeInbox: () => {},
   readScreen: () => "",
   listWorkspaces: () => "",
   closeWorkspace: () => true,

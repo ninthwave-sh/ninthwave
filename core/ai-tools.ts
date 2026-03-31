@@ -181,6 +181,12 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
     suffix: ".agent.md",
     projectIndicators: [".github/copilot-instructions.md", ".github/agents"],
     processNames: ["copilot"],
+    promptIndicators: [
+      "❯",                  // Copilot CLI prompt character
+      "Enter a prompt",     // Copilot CLI initial prompt state
+      "What can I help",    // Copilot CLI greeting
+      "How can I help",     // Copilot CLI greeting variant
+    ],
     buildLaunchCmd(opts, deps): LaunchCmdResult {
       // Inline command pattern: write prompt to a plain-text data file, then
       // construct a shell command that reads it, cleans up, and execs the tool.

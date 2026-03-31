@@ -10,6 +10,7 @@ import { type LaunchGitDeps, launchSingleItem, launchAiSession, launchReviewWork
 import { cmdStart, cmdRunItems, WORK_ITEM_ID_CLI_PATTERN } from "../core/commands/run-items.ts";
 import { cleanStaleBranchForReuse } from "../core/branch-cleanup.ts";
 import { parseWorkItems } from "../core/parser.ts";
+import { checkInbox, writeInbox } from "../core/commands/inbox.ts";
 
 /** Create a mock Multiplexer for dependency injection (avoids vi.mock leaking). */
 function createMockMux(): Multiplexer & Record<string, Mock> {
@@ -20,6 +21,7 @@ function createMockMux(): Multiplexer & Record<string, Mock> {
     launchWorkspace: vi.fn(() => "workspace:1"),
     splitPane: vi.fn(() => "pane:1"),
     sendMessage: vi.fn(() => true),
+    writeInbox: vi.fn(),
     readScreen: vi.fn(() => "line1\nline2\nline3\nline4\n"),
     listWorkspaces: vi.fn(() => ""),
     closeWorkspace: vi.fn(() => true),
@@ -257,6 +259,28 @@ describe("launchSingleItem", () => {
 
     expect(mockMux.launchWorkspace).toHaveBeenCalled();
     expect(result).toContain("Creating worktree for M-CI-1");
+  });
+
+  it("clears stale inbox messages before launching a worker", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+    const worktreePath = join(worktreeDir, "ninthwave-M-CI-1");
+
+    writeInbox(worktreePath, item.id, "stale message from prior run");
+    expect(checkInbox(worktreePath, item.id)).toBe("stale message from prior run");
+    writeInbox(worktreePath, item.id, "stale message from prior run");
+
+    await captureOutput(() => {
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
+      expect(res).not.toBeNull();
+    });
+
+    expect(checkInbox(worktreePath, item.id)).toBeNull();
   });
 
   it("returns null and cleans up when mux launch fails", async () => {
