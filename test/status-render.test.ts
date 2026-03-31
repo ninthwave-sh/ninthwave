@@ -2445,7 +2445,7 @@ describe("small terminal fallback", () => {
 // ── Connection mode TUI tests ───────────────────────────────────────
 
 describe("connection mode TUI rendering", () => {
-  it("formatConnectionInline shows 'Connected' for solo session", () => {
+  it("formatConnectionInline shows 'Sharing' for solo session", () => {
     const output = formatConnectionInline({
       crewCode: "K2F9-AB3X-7YPL-QM4N",
       daemonCount: 1,
@@ -2454,7 +2454,7 @@ describe("connection mode TUI rendering", () => {
       completedCount: 2,
       connected: true,
     });
-    expect(output).toBe("Connected");
+    expect(output).toBe("Sharing");
   });
 
   it("formatConnectionInline shows daemon count for multi-daemon crew", () => {
@@ -2507,7 +2507,7 @@ describe("connection mode TUI rendering", () => {
     });
     const text = stripAnsi(output);
     expect(text).toContain("Ninthwave");
-    expect(text).toContain("Connected");
+    expect(text).toContain("Sharing");
   });
 
   it("formatStatusTable includes inline connection status on title line", () => {
@@ -2525,7 +2525,7 @@ describe("connection mode TUI rendering", () => {
       },
     });
     const text = stripAnsi(output);
-    expect(text).toContain("Connected");
+    expect(text).toContain("Sharing");
     // No DAEMON column in new design
     expect(text).not.toContain("DAEMON");
   });

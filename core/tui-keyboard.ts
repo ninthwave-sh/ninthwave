@@ -134,7 +134,7 @@ export interface TuiState {
   onExtendTimeout?: (itemId: string) => boolean;
   /** Get total number of items for clamping selectedIndex. */
   getItemCount?: () => number;
-  /** Session code (if connected to ninthwave.sh). Shown in help overlay. */
+  /** Session code (if sharing via ninthwave.sh). Shown in help overlay. */
   sessionCode?: string;
   /** Tmux session name (when running outside tmux). Shown in help overlay. */
   tmuxSessionName?: string;

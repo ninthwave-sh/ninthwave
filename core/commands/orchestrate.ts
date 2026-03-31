@@ -967,9 +967,9 @@ export function formatArmingBanner(remainingMs: number): string[] {
   const remainingSec = Math.max(0, Math.ceil(remainingMs / 1000));
   const lines: string[] = [];
   lines.push("");
-  lines.push(`  \x1B[1mStarting local in ${remainingSec}s\x1B[0m`);
+  lines.push(`  \x1B[1mLocal by default in ${remainingSec}s\x1B[0m`);
   lines.push("");
-  lines.push("  \x1B[2m[J]\x1B[0m Join   \x1B[2m[S]\x1B[0m Share   \x1B[2m[P]\x1B[0m Pause   \x1B[2m[Enter]\x1B[0m Start now");
+  lines.push("  \x1B[2m[J]\x1B[0m Join session   \x1B[2m[S]\x1B[0m Share session   \x1B[2m[P]\x1B[0m Pause   \x1B[2m[Enter]\x1B[0m Start now");
   lines.push("");
   return lines;
 }
@@ -2418,7 +2418,7 @@ export async function cmdOrchestrate(
   // Explicit --crew or --connect is required to enter collaboration mode.
 
   if (connectMode && !crewCode) {
-    info("Connecting to ninthwave.sh...");
+    info("Sharing session via ninthwave.sh...");
     const brokerBaseUrl = crewUrl ?? "https://ninthwave.sh";
     const httpUrl = brokerBaseUrl.replace(/^wss?:\/\//, "https://");
     const res = await fetch(`${httpUrl}/api/crews`, {
@@ -2434,7 +2434,7 @@ export async function cmdOrchestrate(
     crewCode = body.code;
     if (!crewUrl) crewUrl = "wss://ninthwave.sh";
     info(`Session created: ${crewCode}`);
-    info(`  Invite: nw watch --crew ${crewCode}`);
+    info(`  Join: nw watch --crew ${crewCode}`);
   }
 
   let resolvedCrewName: string | undefined;
@@ -2443,14 +2443,14 @@ export async function cmdOrchestrate(
       crewUrl = "wss://ninthwave.sh";
     }
     resolvedCrewName = crewName ?? (await import("os")).hostname();
-    info(`Connecting to ninthwave.sh (${crewCode})...`);
+    info(`Joining session via ninthwave.sh (${crewCode})...`);
     const broker = new WebSocketCrewBroker(projectRoot, crewUrl, crewCode, crewRepoUrl, {
       log: (level, msg) => log({ ts: new Date().toISOString(), level, event: "crew_client", message: msg }),
     }, resolvedCrewName);
 
     try {
       await broker.connect();
-      info(`Connected to ninthwave.sh as "${resolvedCrewName}"`);
+      info(`Session active on ninthwave.sh as "${resolvedCrewName}"`);
     } catch (err) {
       die(`Failed to connect to crew server: ${(err as Error).message}`);
     }
@@ -2498,7 +2498,7 @@ export async function cmdOrchestrate(
   } else if (projectConfig.telemetry !== undefined) {
     telemetryEnabled = projectConfig.telemetry;
   } else if (crewBroker) {
-    // Connected to ninthwave.sh -- telemetry is implied by connection choice
+    // Sharing via ninthwave.sh -- telemetry is implied by collaboration choice
     telemetryEnabled = true;
     saveConfig(projectRoot, { telemetry: true });
   }
@@ -2945,7 +2945,7 @@ export async function cmdOrchestrate(
     lines.push("");
     const dashboardUrl = `ninthwave.sh/stats/${crewCode}`;
     lines.push(centerLine(`\x1B[2m${dashboardUrl}\x1B[0m`, dashboardUrl.length));
-    const inviteCmd = `Invite: nw watch --crew ${crewCode}`;
+    const inviteCmd = `Join: nw watch --crew ${crewCode}`;
     lines.push(centerLine(`\x1B[2m${inviteCmd}\x1B[0m`, inviteCmd.length));
     lines.push("");
     lines.push(centerLine("\x1B[2mPress ? for help\x1B[0m", 16));

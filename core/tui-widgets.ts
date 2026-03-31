@@ -777,7 +777,7 @@ export async function runSelectionScreen(
     `${BOLD}Merge strategy:${RESET}  ${mergeStrategy}`,
     `${BOLD}WIP limit:${RESET}       ${wipLimit}`,
     `${BOLD}AI reviews:${RESET}      Off`,
-    `${BOLD}Connection:${RESET}      Local`,
+    `${BOLD}Collaboration:${RESET}   Local by default`,
     ...(toolLabel ? [`${BOLD}AI tool:${RESET}         ${toolLabel}`] : []),
   ];
 

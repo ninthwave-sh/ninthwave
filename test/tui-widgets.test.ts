@@ -1291,7 +1291,7 @@ describe("runSelectionScreen -- confirmation display", () => {
     expect(getOutput()).toContain("Off");
   });
 
-  it("confirmation shows connection: Local", async () => {
+  it("confirmation shows collaboration: Local by default", async () => {
     const { io, sendKeyBatches, getOutput } = createMockIO();
     const items = [makeWorkItem("A-1", "Task")];
 
@@ -1300,7 +1300,7 @@ describe("runSelectionScreen -- confirmation display", () => {
 
     const result = await resultPromise;
     expect(result).not.toBeNull();
-    expect(getOutput()).toContain("Local");
+    expect(getOutput()).toContain("Local by default");
   });
 
   it("confirmation title is 'Ninthwave · Start orchestration?'", async () => {

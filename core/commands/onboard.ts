@@ -183,7 +183,7 @@ export async function onboard(
   // ── Step 1: Welcome ─────────────────────────────────────────────
   console.log();
   console.log(
-    `${BOLD}Welcome to ninthwave${RESET} -- from spec to merged PRs, automatically.`,
+    `${BOLD}Welcome to ninthwave${RESET} -- local-first parallel AI coding orchestration.`,
   );
   console.log();
 

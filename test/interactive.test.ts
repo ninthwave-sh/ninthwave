@@ -302,7 +302,7 @@ describe("confirmSummary", () => {
     }
     const output = logs.join("\n");
     expect(output).toContain("all");
-    expect(output).toContain("joining K2F9-AB3X-7YPL-QM4N");
+    expect(output).toContain("Join session (K2F9-AB3X-7YPL-QM4N)");
   });
 
   it("displays Local when connectionAction is null", async () => {
@@ -315,7 +315,7 @@ describe("confirmSummary", () => {
       console.log = origLog;
     }
     const output = logs.join("\n");
-    expect(output).toContain("Local");
+    expect(output).toContain("Local by default");
   });
 });
 
@@ -536,6 +536,11 @@ describe("promptConnectionMode", () => {
 
   it("returns connect on input 1", async () => {
     const result = await promptConnectionMode(makePrompt(["1"]));
+    expect(result).toEqual({ type: "connect" });
+  });
+
+  it('returns connect on text "share"', async () => {
+    const result = await promptConnectionMode(makePrompt(["share"]));
     expect(result).toEqual({ type: "connect" });
   });
 

@@ -818,22 +818,22 @@ export function computeSessionMetrics(
 
 /** Brand amber -- truecolor (#D4A030). */
 const BRAND = "\x1b[38;2;212;160;48m";
-/** Brand amber background + black text for connection status bar. */
+/** Brand amber background + black text for collaboration status bar. */
 const CONNECTED_BG = "\x1b[48;2;212;160;48m\x1b[30m";
 /** Brand-colored dot for items worked on by other session members. */
 export const REMOTE_DOT = `${BRAND}\u25CF${RESET}`; // ● in brand amber
 
 /**
- * Format connection status bar for display above the title line.
+ * Format collaboration status bar for display above the title line.
  * Uses brand amber background spanning the full terminal width.
- * Shows "Connected" for solo sessions, daemon count for multi-daemon crews.
+ * Shows "Sharing" for solo sessions, daemon count for multi-daemon crews.
  */
 export function formatConnectionPanel(status: CrewStatusInfo, termWidth: number = 80): string {
   let content: string;
   if (!status.connected) {
     content = `ninthwave.sh  |  OFFLINE -- reconnecting...`;
   } else if (status.daemonCount <= 1) {
-    content = `Connected to ninthwave.sh  |  ${status.availableCount} avail  |  ${status.claimedCount} claimed  |  ${status.completedCount} done`;
+    content = `Sharing via ninthwave.sh  |  ${status.availableCount} avail  |  ${status.claimedCount} claimed  |  ${status.completedCount} done`;
   } else {
     content = `${status.daemonCount} online  |  ${status.availableCount} avail  |  ${status.claimedCount} claimed  |  ${status.completedCount} done`;
   }
@@ -1211,10 +1211,10 @@ export function formatUnifiedProgress(
   return `  ${leftSide}  ${totalText}`;
 }
 
-/** Format inline connection status string (plain text, no ANSI). */
+/** Format inline collaboration status string (plain text, no ANSI). */
 export function formatConnectionInline(status: CrewStatusInfo): string {
   if (!status.connected) return "Offline";
-  if (status.daemonCount <= 1) return "Connected";
+  if (status.daemonCount <= 1) return "Sharing";
   return `${status.daemonCount} online`;
 }
 
@@ -2027,13 +2027,13 @@ export function renderHelpOverlay(
 
   const sections: string[][] = [];
 
-  // Session section (if connected to ninthwave.sh)
+  // Session section (if sharing via ninthwave.sh)
   if (sessionCode) {
     sections.push([
       `${BOLD}Session${RESET}`,
       `  ${BRAND}${sessionCode}${RESET}`,
       `  ${DIM}Dashboard: ${BRAND}ninthwave.sh${RESET}${DIM}/stats/${sessionCode}${RESET}`,
-      `  ${DIM}Invite:    nw watch --crew ${sessionCode}${RESET}`,
+      `  ${DIM}Join:      nw watch --crew ${sessionCode}${RESET}`,
     ]);
   }
 

@@ -372,18 +372,18 @@ export async function promptConnectionMode(
   prompt: PromptFn,
 ): Promise<ConnectionAction | null> {
   console.log();
-  console.log(`${BOLD}Connect to ninthwave.sh:${RESET}`);
+  console.log(`${BOLD}Collaborate via ninthwave.sh:${RESET}`);
   console.log();
-  console.log(`  ${BOLD}1${RESET}. ${CYAN}connect${RESET}  ${DIM}-- track delivery metrics at ninthwave.sh${RESET} ${GREEN}(default)${RESET}`);
-  console.log(`  ${BOLD}2${RESET}. ${CYAN}join${RESET}     ${DIM}-- coordinate with teammates on the same repo${RESET}`);
-  console.log(`  ${BOLD}3${RESET}. ${CYAN}local${RESET}    ${DIM}-- no connection, works offline${RESET}`);
+  console.log(`  ${BOLD}1${RESET}. ${CYAN}share${RESET}    ${DIM}-- share this session for collaboration${RESET} ${GREEN}(default)${RESET}`);
+  console.log(`  ${BOLD}2${RESET}. ${CYAN}join${RESET}     ${DIM}-- join an existing session${RESET}`);
+  console.log(`  ${BOLD}3${RESET}. ${CYAN}local${RESET}    ${DIM}-- local by default, no connection${RESET}`);
   console.log();
 
   while (true) {
     const answer = await prompt(`${BOLD}Choose [1-3]: ${RESET}`);
 
-    // Default to connect on empty input
-    if (answer === "" || answer === "1" || answer.toLowerCase() === "connect") {
+    // Default to share on empty input
+    if (answer === "" || answer === "1" || answer.toLowerCase() === "share" || answer.toLowerCase() === "connect") {
       return { type: "connect" };
     }
 
@@ -402,7 +402,7 @@ export async function promptConnectionMode(
       return null;
     }
 
-    console.log(`  ${YELLOW}Enter 1-3 or a mode name (connect/join/local).${RESET}`);
+    console.log(`  ${YELLOW}Enter 1-3 or a mode name (share/join/local).${RESET}`);
   }
 }
 
@@ -428,11 +428,11 @@ export async function confirmSummary(
   console.log(`  ${BOLD}AI reviews:${RESET}      ${result.reviewMode}`);
   if (result.connectionAction) {
     const connectionLabel = result.connectionAction.type === "connect"
-      ? "ninthwave.sh (new session)"
-      : `ninthwave.sh (joining ${result.connectionAction.code})`;
-    console.log(`  ${BOLD}Connection:${RESET}      ${connectionLabel}`);
+      ? "Share session (new)"
+      : `Join session (${result.connectionAction.code})`;
+    console.log(`  ${BOLD}Collaboration:${RESET}   ${connectionLabel}`);
   } else {
-    console.log(`  ${BOLD}Connection:${RESET}      Local`);
+    console.log(`  ${BOLD}Collaboration:${RESET}   Local by default`);
   }
   if (result.aiTools && result.aiTools.length > 0) {
     const toolLabel = result.aiTools.join(", ") + (result.aiTools.length > 1 ? " (round-robin)" : "");
