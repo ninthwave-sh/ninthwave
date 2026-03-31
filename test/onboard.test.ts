@@ -285,33 +285,41 @@ describe("cmdNoArgs", () => {
       id,
       title,
       priority: "medium",
-      source: "test",
       domain: "test",
-      description: "",
       dependencies: [],
-      dependents: [],
-      files: [],
-      filename: `2-test--${id}.md`,
-      inProgress: false,
+      bundleWith: [],
+      status: "open",
+      filePath: `2-test--${id}.md`,
+      repoAlias: "self",
+      rawText: "",
+      filePaths: [],
+      testPlan: "",
+      bootstrap: false,
     };
   }
 
   it("prints help when not in a TTY", async () => {
     let helpCalled = false;
+    let ensureMuxCalled = false;
     await cmdNoArgs("/some/project", {
       isTTY: false,
       printHelp: () => { helpCalled = true; },
+      ensureMux: async () => { ensureMuxCalled = true; },
     });
     expect(helpCalled).toBe(true);
+    expect(ensureMuxCalled).toBe(false);
   });
 
   it("prints help when projectRoot is null (no git repo)", async () => {
     let helpCalled = false;
+    let ensureMuxCalled = false;
     await cmdNoArgs(null, {
       isTTY: true,
       printHelp: () => { helpCalled = true; },
+      ensureMux: async () => { ensureMuxCalled = true; },
     });
     expect(helpCalled).toBe(true);
+    expect(ensureMuxCalled).toBe(false);
   });
 
   it("runs onboarding when .ninthwave/ does not exist", async () => {
@@ -323,7 +331,7 @@ describe("cmdNoArgs", () => {
     try {
       await cmdNoArgs(projectDir, {
         isTTY: true,
-        existsSync: (p: string) => !p.includes(".ninthwave"),
+        existsSync: (p) => typeof p === "string" && !p.includes(".ninthwave"),
         commandExists: () => false, // Will exit early at AI tool detection
         prompt: async () => "",
         getBundleDir: () => "/fake",
@@ -337,59 +345,66 @@ describe("cmdNoArgs", () => {
     expect(output).toContain("Welcome to ninthwave");
   });
 
-  it("waits for items and then routes to interactive flow when items appear", async () => {
+  it("routes zero items without a daemon into interactive startup without waiting", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
-    let parseCallCount = 0;
+    let ensureMuxCalled = false;
     let interactiveFlowCalled = false;
+    let receivedTodos: WorkItem[] | undefined;
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
-      parseWorkItems: () => {
-        parseCallCount++;
-        return parseCallCount > 1 ? [fakeWorkItem("H-1", "Test item")] : [];
-      },
-      sleep: async () => {},
+      parseWorkItems: () => [],
       isDaemonRunning: () => null,
-      runInteractiveFlow: async () => { interactiveFlowCalled = true; return null; },
+      ensureMux: async () => { ensureMuxCalled = true; },
+      sleep: async () => {
+        throw new Error("old wait loop should not run");
+      },
+      runInteractiveFlow: async (todos) => {
+        interactiveFlowCalled = true;
+        receivedTodos = todos;
+        return null;
+      },
     });
 
-    expect(parseCallCount).toBeGreaterThan(1);
+    expect(ensureMuxCalled).toBe(true);
     expect(interactiveFlowCalled).toBe(true);
+    expect(receivedTodos).toEqual([]);
   });
 
-  it("waits when work dir is missing until it appears", async () => {
+  it("routes zero items without a daemon into startup when work dir is missing", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
-    // No work/ subdirectory initially
 
-    let existsCallCount = 0;
+    let parseCalled = false;
     let interactiveFlowCalled = false;
 
     await cmdNoArgs(projectDir, {
       isTTY: true,
-      existsSync: (p: string) => {
-        // .ninthwave/ always exists; work dir appears after first sleep
-        if (typeof p === "string" && p.endsWith("work")) {
-          existsCallCount++;
-          return existsCallCount > 1;
-        }
+      existsSync: (p) => {
+        if (typeof p === "string" && p.endsWith("work")) return false;
         return true;
       },
-      parseWorkItems: () => [fakeWorkItem("H-1", "Test item")],
-      sleep: async () => {},
+      parseWorkItems: () => {
+        parseCalled = true;
+        return [fakeWorkItem("H-1", "Test item")];
+      },
       isDaemonRunning: () => null,
+      ensureMux: async () => {},
       runInteractiveFlow: async () => { interactiveFlowCalled = true; return null; },
     });
 
+    expect(parseCalled).toBe(false);
     expect(interactiveFlowCalled).toBe(true);
   });
 
-  it("routes to status view when daemon is running", async () => {
+  it("routes zero items with a running daemon straight to status", async () => {
     const projectDir = setupTempRepo();
-    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+    mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
 
+    let parseCalled = false;
+    let ensureMuxCalled = false;
     let statusWatchCalled = false;
     const logs: string[] = [];
     const origLog = console.log;
@@ -398,14 +413,20 @@ describe("cmdNoArgs", () => {
     try {
       await cmdNoArgs(projectDir, {
         isTTY: true,
-        parseWorkItems: () => [fakeWorkItem("H-1", "Test item")],
+        parseWorkItems: () => {
+          parseCalled = true;
+          return [];
+        },
         isDaemonRunning: () => 12345,
+        ensureMux: async () => { ensureMuxCalled = true; },
         runStatusWatch: async () => { statusWatchCalled = true; },
       });
     } finally {
       console.log = origLog;
     }
 
+    expect(parseCalled).toBe(false);
+    expect(ensureMuxCalled).toBe(false);
     expect(statusWatchCalled).toBe(true);
     const output = logs.join("\n");
     expect(output).toContain("Orchestrator is running");
@@ -432,10 +453,13 @@ describe("cmdNoArgs", () => {
       connectionAction: null,
     };
 
+    let ensureMuxCalled = false;
+
     await cmdNoArgs(projectDir, {
       isTTY: true,
       parseWorkItems: () => items,
       isDaemonRunning: () => null,
+      ensureMux: async () => { ensureMuxCalled = true; },
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
       runInteractiveFlow: async () => interactiveResult,
       runWatch: async (args) => {
@@ -444,6 +468,7 @@ describe("cmdNoArgs", () => {
       },
     });
 
+    expect(ensureMuxCalled).toBe(true);
     expect(watchCalled).toBe(true);
     expect(watchArgs).toContain("--items");
     expect(watchArgs).toContain("H-FOO-1");

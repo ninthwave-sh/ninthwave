@@ -34,6 +34,7 @@ import { printHelp } from "../help.ts";
 import { AI_TOOL_PROFILES } from "../ai-tools.ts";
 import type { AiToolProfile } from "../ai-tools.ts";
 import { detectInstalledAITools } from "../tool-select.ts";
+import { ensureMuxInteractiveOrDie } from "../mux.ts";
 import {
   runCheckboxList,
   createProcessIO,
@@ -86,6 +87,7 @@ export interface NoArgsDeps extends OnboardDeps {
   existsSync?: typeof existsSync;
   parseWorkItems?: (workDir: string, worktreeDir: string) => WorkItem[];
   isDaemonRunning?: (projectRoot: string) => number | null;
+  ensureMux?: (args: string[]) => Promise<void>;
   runInteractiveFlow?: (todos: WorkItem[], defaultWipLimit: number, deps?: InteractiveDeps) => Promise<InteractiveResult | null>;
   runWatch?: (args: string[], workDir: string, worktreeDir: string, projectRoot: string) => Promise<void>;
   runStatusWatch?: (worktreeDir: string, projectRoot: string) => Promise<void>;
@@ -305,9 +307,8 @@ export async function cmdOnboard(projectDir: string): Promise<void> {
  * 1. Non-TTY → print help text
  * 2. No git repo → print help text
  * 3. No `.ninthwave/` → first-run onboarding (init flow)
- * 4. `.ninthwave/` exists, no work items → guidance message
- * 5. Daemon running → live status view
- * 6. Work items exist, no daemon → TUI selection → cmdWatch
+ * 4. Daemon running → live status view
+ * 5. No daemon → interactive startup flow (including zero-item startup)
  */
 export async function cmdNoArgs(
   projectRoot: string | null,
@@ -317,6 +318,7 @@ export async function cmdNoArgs(
   const checkExists = deps.existsSync ?? existsSync;
   const doParseT = deps.parseWorkItems ?? parseWorkItems;
   const checkDaemon = deps.isDaemonRunning ?? isDaemonRunning;
+  const doEnsureMux = deps.ensureMux ?? ensureMuxInteractiveOrDie;
   const helpFn = deps.printHelp ?? printHelp;
 
   // Non-TTY: always print grouped help text
@@ -343,28 +345,7 @@ export async function cmdNoArgs(
   const workDir = join(projectRoot, ".ninthwave", "work");
   const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
 
-  // State 3: .ninthwave/ exists but no work item files
-  let todos: WorkItem[] = [];
-  if (checkExists(workDir)) {
-    todos = doParseT(workDir, worktreeDir);
-  }
-
-  if (todos.length === 0) {
-    process.stdout.write(
-      `\nWaiting for work items in ${BOLD}.ninthwave/work/${RESET} ...` +
-        ` ${DIM}(Ctrl+C to exit)${RESET}\n\n`,
-    );
-    const doSleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-    while (todos.length === 0) {
-      await doSleep(2000);
-      if (checkExists(workDir)) {
-        todos = doParseT(workDir, worktreeDir);
-      }
-    }
-    // Items appeared -- fall through to daemon check and interactive flow
-  }
-
-  // State 4: Daemon running → live status view
+  // State 3: Daemon running → live status view
   const daemonPid = checkDaemon(projectRoot);
   if (daemonPid !== null) {
     console.log(`${DIM}Orchestrator is running (PID ${daemonPid}). Showing live status...${RESET}`);
@@ -379,7 +360,15 @@ export async function cmdNoArgs(
     return;
   }
 
-  // State 5: Work items exist, no daemon → TUI selection → cmdWatch
+  // State 4: No daemon → interactive startup flow.
+  // Zero-item repos continue into the same startup path instead of blocking in a pre-watch wait loop.
+  let todos: WorkItem[] = [];
+  if (checkExists(workDir)) {
+    todos = doParseT(workDir, worktreeDir);
+  }
+
+  await doEnsureMux([]);
+
   // Load project config to determine review default + saved tool state
   const doLoadConfig = deps.loadConfig ?? loadConfig;
   const projectConfig = doLoadConfig(projectRoot);
