@@ -38,7 +38,7 @@ During active work, check again at natural boundaries:
 - before committing
 - before declaring yourself done or blocked
 
-If `nw inbox --check` returns a message, handle it immediately using Phase 11, then continue from the appropriate phase.
+If `nw inbox --check` returns one or more messages, handle them immediately using Phase 11, then continue from the appropriate phase.
 
 ## 1. Understand the Work Item
 
@@ -376,7 +376,7 @@ Simply stop and wait. Your session stays alive until the orchestrator writes the
 
 ### Responding to orchestrator daemon messages
 
-Messages from the orchestrator daemon are prefixed with `[ORCHESTRATOR]`. These are deterministic, machine-generated messages (not AI-generated) in a structured format. They arrive when `nw inbox --check` finds a pending message or when `nw inbox --wait` returns in idle mode.
+Messages from the orchestrator daemon are prefixed with `[ORCHESTRATOR]`. These are deterministic, machine-generated messages (not AI-generated) in a structured format. They arrive when `nw inbox --check` drains pending messages or when `nw inbox --wait` returns in idle mode.
 
 When you are idle again after processing a message, re-enter wait mode:
 

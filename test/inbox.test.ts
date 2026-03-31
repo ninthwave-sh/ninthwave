@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   writeInbox,
   checkInbox,
+  drainInbox,
   waitForInbox,
   cleanInbox,
   itemInboxDir,
@@ -96,6 +97,27 @@ describe("inbox", () => {
     });
   });
 
+  describe("drainInbox", () => {
+    it("returns an empty list when no messages exist", () => {
+      const { io } = makeMemIO();
+      expect(drainInbox("/fake/project", "H-FOO-1", io)).toEqual([]);
+    });
+
+    it("returns all queued messages in order and clears them", () => {
+      const { io, files } = makeMemIO();
+      writeInbox("/fake/project", "H-FOO-1", "first", io);
+      writeInbox("/fake/project", "H-FOO-1", "second", io);
+      writeInbox("/fake/project", "H-FOO-1", "third", io);
+
+      expect(drainInbox("/fake/project", "H-FOO-1", io)).toEqual([
+        "first",
+        "second",
+        "third",
+      ]);
+      expect(files.size).toBe(0);
+    });
+  });
+
   describe("waitForInbox", () => {
     it("returns immediately when message exists", () => {
       const { io } = makeMemIO();
@@ -159,9 +181,10 @@ describe("inbox", () => {
       expect(out).toContain("wrote message");
     });
 
-    it("checks for a message via --check", () => {
+    it("checks for all pending messages via --check", () => {
       const { io } = makeMemIO();
-      writeInbox("/fake/project", "H-FOO-1", "check-msg", io);
+      writeInbox("/fake/project", "H-FOO-1", "check-msg-1", io);
+      writeInbox("/fake/project", "H-FOO-1", "check-msg-2", io);
       const chunks: string[] = [];
       const origWrite = process.stdout.write;
       process.stdout.write = ((chunk: string) => { chunks.push(chunk); return true; }) as typeof process.stdout.write;
@@ -175,7 +198,7 @@ describe("inbox", () => {
       } finally {
         process.stdout.write = origWrite;
       }
-      expect(chunks.join("")).toBe("check-msg");
+      expect(chunks.join("")).toBe("check-msg-1\n\ncheck-msg-2");
     });
 
     it("auto-detects item ID from branch", () => {

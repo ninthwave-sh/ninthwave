@@ -6,7 +6,7 @@
 //
 // Usage:
 //   nw inbox --wait <item-id>              Block until a message arrives
-//   nw inbox --check <item-id>             Non-blocking check for message
+//   nw inbox --check <item-id>             Non-blocking check for all pending messages
 //   nw inbox --write <item-id> -m <text>   Write a message to the inbox
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync, renameSync } from "fs";
@@ -124,6 +124,24 @@ export function checkInbox(
 }
 
 /**
+ * Drain all currently pending messages without blocking.
+ * Returns messages in queue order and removes only the consumed files.
+ */
+export function drainInbox(
+  projectRoot: string,
+  itemId: string,
+  io: InboxIO = defaultDeps.io,
+): string[] {
+  const messages: string[] = [];
+  while (true) {
+    const message = checkInbox(projectRoot, itemId, io);
+    if (message === null) break;
+    messages.push(message);
+  }
+  return messages;
+}
+
+/**
  * Block until a message arrives. Polls every `pollMs` milliseconds.
  * Returns the oldest pending message and removes only that file.
  */
@@ -219,9 +237,9 @@ export function cmdInbox(
   }
 
   if (isCheck) {
-    const message = checkInbox(projectRoot, itemId, deps.io);
-    if (message) {
-      process.stdout.write(message);
+    const messages = drainInbox(projectRoot, itemId, deps.io);
+    if (messages.length > 0) {
+      process.stdout.write(messages.join("\n\n"));
     }
     return;
   }

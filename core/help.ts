@@ -445,7 +445,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     },
     flags: {
       "--wait": "Block until a message arrives (best when a worker is idle or done)",
-      "--check": "Non-blocking check for a pending message during active work",
+      "--check": "Non-blocking check that drains all pending messages during active work",
       "--write": "Write a message to the inbox",
       "-m, --message": "Message text (used with --write)",
     },
