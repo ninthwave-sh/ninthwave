@@ -876,6 +876,29 @@ describe("runStartupSettingsScreen", () => {
     second.sendKeys(["\x03"]);
     expect((await ctrlCPromise).cancelled).toBe(true);
   });
+
+  it("surfaces CI-first merge descriptions without renaming startup labels", async () => {
+    const { io, sendKeys, getOutput } = createMockIO();
+
+    const resultPromise = runStartupSettingsScreen(io, {
+      summaryLines: ["Items: A-1"],
+      defaultWipLimit: 4,
+    });
+
+    expect(getOutput()).toContain("[manual]");
+    expect(getOutput()).toContain("CI must pass, then a human merges the PR");
+
+    sendKeys(["\x1B[C"]);
+
+    expect(getOutput()).toContain("[auto]");
+    expect(getOutput()).toContain("CI must pass, then ninthwave auto-merges the PR");
+
+    sendKeys(["\r"]);
+
+    const result = await resultPromise;
+    expect(result.cancelled).toBe(false);
+    expect(result.mergeStrategy).toBe("auto");
+  });
 });
 
 // ── Selection screen (composite) ────────────────────────────────────

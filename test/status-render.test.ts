@@ -2585,10 +2585,11 @@ describe("buildStatusLayout", () => {
 });
 
 describe("strategyIndicator", () => {
-  it("returns correct icon and label for auto", () => {
+  it("returns green success styling for auto", () => {
     const result = strategyIndicator("auto");
     const plain = stripAnsi(result);
     expect(plain).toBe("› auto");
+    expect(result).toBe(`${GREEN}›${RESET} ${GREEN}auto${RESET}`);
   });
 
   it("returns correct icon and label for manual", () => {
@@ -3206,6 +3207,15 @@ describe("renderHelpOverlay", () => {
     expect(text).toMatch(/›.*auto/);
     expect(text).toMatch(/‖.*manual/);
     expect(text).toMatch(/».*bypass/);
+  });
+
+  it("describes merge strategies as CI-first behavior", () => {
+    const lines = renderHelpOverlay(100, 40);
+    const text = stripAnsi(lines.join("\n"));
+    expect(text).toContain("CI must pass -> ninthwave auto-merges");
+    expect(text).toContain("CI must pass -> human merges the PR");
+    expect(text).toContain("CI must pass -> admin merge skips human approval requirements");
+    expect(text).not.toContain("AI review + CI");
   });
 
   it("documents all keyboard shortcuts removed from footer in H-TUI-4", () => {

@@ -98,14 +98,14 @@ export interface ViewOptions {
  *
  * | Strategy | Icon | Color   |
  * |----------|------|---------|
- * | auto     | ›    | DIM     |
+ * | auto     | ›    | GREEN   |
  * | manual   | ‖    | YELLOW  |
  * | bypass   | »    | RED     |
  */
 export function strategyIndicator(strategy: MergeStrategy): string {
   switch (strategy) {
     case "auto":
-      return `${DIM}›${RESET} ${DIM}auto${RESET}`;
+      return `${GREEN}›${RESET} ${GREEN}auto${RESET}`;
     case "manual":
       return `${YELLOW}‖${RESET} ${YELLOW}manual${RESET}`;
     case "bypass":
@@ -2368,9 +2368,9 @@ export function renderHelpOverlay(
   // Merge strategies section -- reuse strategyIndicator() for icons/colors
   sections.push([
     `${BOLD}Merge Strategies${RESET}`,
-    `  ${strategyIndicator("auto")}     AI review + CI -> auto-merge`,
-    `  ${strategyIndicator("manual")}  AI review + CI, human merges`,
-    `  ${strategyIndicator("bypass")}  AI review + CI -> admin merge`,
+    `  ${strategyIndicator("auto")}     CI must pass -> ninthwave auto-merges`,
+    `  ${strategyIndicator("manual")}  CI must pass -> human merges the PR`,
+    `  ${strategyIndicator("bypass")}  CI must pass -> admin merge skips human approval requirements`,
   ]);
 
   // Keyboard shortcuts section
