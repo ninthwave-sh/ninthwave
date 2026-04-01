@@ -1497,6 +1497,24 @@ describe("initProject -- prerequisite checking", () => {
 // --- Agent selection ---
 
 describe("initProject -- agent selection", () => {
+  it("writes .github/copilot-instructions.md from the project's CLAUDE.md", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    writeFileSync(join(projectDir, "CLAUDE.md"), "# Project instructions\nUse the project file.\n");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    expect(readFileSync(join(projectDir, ".github", "copilot-instructions.md"), "utf-8")).toBe(
+      "# Project instructions\nUse the project file.\n",
+    );
+  });
+
   it("installs all agents to all tool dirs by default", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
@@ -1518,6 +1536,29 @@ describe("initProject -- agent selection", () => {
     expect(existsSync(join(projectDir, ".claude/agents/rebaser.md"))).toBe(true);
     expect(existsSync(join(projectDir, ".opencode/agents/rebaser.md"))).toBe(true);
     expect(existsSync(join(projectDir, ".github/agents/ninthwave-rebaser.agent.md"))).toBe(true);
+  });
+
+  it("skips Copilot instructions when Copilot is not selected", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    writeFileSync(join(projectDir, "CLAUDE.md"), "# Project instructions\n");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    const opts: InitProjectOpts = {
+      agentSelection: {
+        agents: ["implementer.md"],
+        toolDirs: [AGENT_TARGET_DIRS[0]!],
+      },
+    };
+
+    initProject(projectDir, bundleDir, deps, opts);
+
+    expect(existsSync(join(projectDir, ".github", "copilot-instructions.md"))).toBe(false);
   });
 
   it("installs newly discovered bundle agents by default", () => {

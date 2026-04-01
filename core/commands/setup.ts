@@ -27,7 +27,7 @@ import {
   confirmPrompt as defaultConfirmPrompt,
 } from "../prompt.ts";
 import type { CheckboxChoice, CheckboxPromptFn, ConfirmPromptFn } from "../prompt.ts";
-import { AI_TOOL_PROFILES } from "../ai-tools.ts";
+import { AI_TOOL_PROFILES, agentTargetFilename } from "../ai-tools.ts";
 
 /**
  * Resolve the absolute path to a command on PATH.
@@ -393,14 +393,10 @@ export function buildCopyPlan(
   for (const agentFile of selection.agents) {
     const agentSource = join(bundleDir, "agents", agentFile);
     if (!existsSync(agentSource)) continue;
-    const baseName = agentFile.replace(/\.md$/, "");
 
     for (const target of selection.toolDirs) {
       const targetDir = join(projectDir, target.dir);
-      const filename =
-        target.suffix === ".agent.md"
-          ? `ninthwave-${baseName}.agent.md`
-          : agentFile;
+      const filename = agentTargetFilename(agentFile, target);
       const linkPath = join(targetDir, filename);
       const displayPath = `${target.dir}/${filename}`;
       const sourceContent = readFileSync(agentSource, "utf-8");

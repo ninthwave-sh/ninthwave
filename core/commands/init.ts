@@ -39,6 +39,7 @@ import {
   pruneManagedGeneratedEntries,
 } from "./setup.ts";
 import { AI_TOOL_PROFILES } from "../ai-tools.ts";
+import { syncCopilotInstructionsFromClaude } from "../agent-files.ts";
 
 // --- Detection types ---
 
@@ -693,8 +694,17 @@ than average. Open a work item for anything that needs attention.
   }
 
   copySkillFiles(skillsDir, bundleDir);
+  const hasCopilotTargets = selection.toolDirs.some((target) =>
+    target.dir === ".github/agents" && target.suffix === ".agent.md"
+  );
+  const copilotInstructionsPath = hasCopilotTargets
+    ? syncCopilotInstructionsFromClaude(projectDir)
+    : null;
   const plan = buildCopyPlan(projectDir, bundleDir, selection);
   executeCopyPlan(plan);
+  if (copilotInstructionsPath) {
+    console.log(`  ${GREEN}✓${RESET} ${copilotInstructionsPath}`);
+  }
 
   // --- .ninthwave/.gitignore (deny-by-default: only explicitly allowed files are committed) ---
   const nwGitignorePath = join(projectDir, ".ninthwave", ".gitignore");

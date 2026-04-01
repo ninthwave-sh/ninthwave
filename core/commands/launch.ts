@@ -306,7 +306,7 @@ export function launchSingleItem(
     }
 
     // Seed agent files into worktree if missing (cross-repo or first-time setup)
-    const seededAgents = seedAgentFiles(worktreePath, projectRoot);
+    const seededFiles = seedAgentFiles(worktreePath, projectRoot);
 
     // Allocate partition
     let partition = getPartitionFor(partitionDir, item.id);
@@ -324,15 +324,15 @@ export function launchSingleItem(
     const itemText = extractItemText(workDir, item.id);
     const baseBranchLine = options.baseBranch ? `BASE_BRANCH: ${options.baseBranch}\n` : "";
     const hubRepoNwoLine = options.hubRepoNwo ? `HUB_REPO_NWO: ${options.hubRepoNwo}\n` : "";
-    const seededAgentsLine = seededAgents.length > 0
-      ? `\nNOTE: The following files were seeded into this worktree by ninthwave and should be included in your first commit: ${seededAgents.join(", ")}\n`
+    const seededFilesLine = seededFiles.length > 0
+      ? `\nNOTE: The following files were seeded into this worktree by ninthwave and should be included in your first commit: ${seededFiles.join(", ")}\n`
       : "";
     const systemPrompt = `YOUR_TODO_ID: ${item.id}
 YOUR_PARTITION: ${partition}
 PROJECT_ROOT: ${worktreePath}
 HUB_ROOT: ${projectRoot}
 IS_HUB_LOCAL: ${targetRepo === projectRoot}
-${baseBranchLine}${hubRepoNwoLine}${seededAgentsLine}
+${baseBranchLine}${hubRepoNwoLine}${seededFilesLine}
 ${itemText}`;
 
     // Write system prompt into the workspace (.ninthwave/.prompt, auto-ignored)
