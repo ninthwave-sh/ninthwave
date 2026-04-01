@@ -33,6 +33,7 @@ import {
   formatArmingBanner,
   waitForArmingKey,
   shouldShowStartupArmingWindow,
+  resolveInteractiveStartupConfig,
   ARMING_WINDOW_MS,
   LOG_BUFFER_MAX,
   type LogEntry,
@@ -4451,6 +4452,31 @@ describe("crew remote state: last broker update replaces stale snapshots", () =>
 });
 
 // ── parseWatchArgs (passthrough path) ──────────────────────────────────
+
+describe("resolveInteractiveStartupConfig", () => {
+  it("uses user config for saved tool IDs and skip-tool-step behavior", () => {
+    const result = resolveInteractiveStartupConfig(
+      { review_external: false, schedule_enabled: false, ai_tools: ["claude"] },
+      { ai_tools: ["opencode", "copilot"] },
+    );
+
+    expect(result.defaultReviewMode).toBe("mine");
+    expect(result.savedToolIds).toEqual(["opencode", "copilot"]);
+    expect(result.skipToolStep).toBe(true);
+  });
+
+  it("keeps review defaults project-scoped and honors explicit tool override", () => {
+    const result = resolveInteractiveStartupConfig(
+      { review_external: true, schedule_enabled: false },
+      {},
+      "claude",
+    );
+
+    expect(result.defaultReviewMode).toBe("all");
+    expect(result.savedToolIds).toBeUndefined();
+    expect(result.skipToolStep).toBe(true);
+  });
+});
 
 describe("parseWatchArgs", () => {
   it("parses --items --merge-strategy --wip-limit for passthrough", () => {

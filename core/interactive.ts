@@ -51,7 +51,7 @@ export interface InteractiveDeps {
   defaultReviewMode?: "all" | "mine" | "off";
   /** Pre-detected installed AI tool profiles. Skip tool step if undefined or single entry. */
   installedTools?: AiToolProfile[];
-  /** Pre-selected tool IDs from project config (multi-select). */
+  /** Pre-selected tool IDs from user config (multi-select). */
   savedToolIds?: string[];
   /** When true, skip the AI tool step (tool already determined by --tool or user config). */
   skipToolStep?: boolean;
