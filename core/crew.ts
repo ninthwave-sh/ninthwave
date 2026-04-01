@@ -183,6 +183,7 @@ export interface CrewRemoteItemSnapshot {
   ownerName: string | null;
   title?: string;
   prNumber?: number | null;
+  priorPrNumbers?: number[];
 }
 
 export interface CrewStatus {
@@ -224,6 +225,12 @@ function numberOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function numberArrayOrUndefined(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const numbers = value.filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry));
+  return numbers.length > 0 ? numbers : undefined;
+}
+
 function parseCrewRemoteItemState(value: unknown): CrewRemoteItemState | null {
   return typeof value === "string" && CREW_REMOTE_ITEM_STATES.has(value as CrewRemoteItemState)
     ? value as CrewRemoteItemState
@@ -257,6 +264,7 @@ function parseCrewRemoteItemSnapshot(value: unknown): CrewRemoteItemSnapshot | n
     ?? undefined;
   const rawPrNumber = item.prNumber ?? nestedItem?.prNumber;
   const prNumber = numberOrNull(rawPrNumber);
+  const priorPrNumbers = numberArrayOrUndefined(item.priorPrNumbers ?? nestedItem?.priorPrNumbers);
 
   return {
     id,
@@ -267,6 +275,7 @@ function parseCrewRemoteItemSnapshot(value: unknown): CrewRemoteItemSnapshot | n
     ...(prNumber !== null || rawPrNumber === null
       ? { prNumber }
       : {}),
+    ...(priorPrNumbers ? { priorPrNumbers } : {}),
   };
 }
 

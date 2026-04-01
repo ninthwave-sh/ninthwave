@@ -1581,6 +1581,40 @@ describe("daemonStateToStatusItems", () => {
     expect(items[0]!.progressLabel).toBe("Updating tests");
     expect(items[0]!.progressTs).toBe(now);
   });
+
+  it("keeps repair items active and preserves PR chain from remote snapshots", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "C-1-8",
+          state: "done",
+          prNumber: 41,
+          title: "Repairing item",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          remoteSnapshot: {
+            state: "merged",
+            ownerDaemonId: "daemon-2",
+            ownerName: "remote-host",
+            prNumber: 77,
+          },
+        },
+      ],
+    };
+
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]).toMatchObject({
+      state: "verifying",
+      prNumber: 77,
+      priorPrNumbers: [41],
+      remote: true,
+    });
+  });
 });
 
 // ── TUI mode detection ────────────────────────────────────────────────────────
@@ -1791,6 +1825,30 @@ describe("orchestratorItemsToStatusItems", () => {
       remote: true,
       title: "Reviewing remotely",
       prNumber: 88,
+    });
+  });
+
+  it("keeps repair re-entry rows verifying while surfacing the repair PR", () => {
+    const item = makeOrchestratorItem("R-REPAIR", "done");
+    item.prNumber = 41;
+
+    const remoteSnapshots = new Map<string, CrewRemoteItemSnapshot>([
+      ["R-REPAIR", {
+        id: "R-REPAIR",
+        state: "merged",
+        ownerDaemonId: "daemon-2",
+        ownerName: "remote-host",
+        prNumber: 77,
+      }],
+    ]);
+
+    const [result] = orchestratorItemsToStatusItems([item], remoteSnapshots);
+
+    expect(result).toMatchObject({
+      state: "verifying",
+      prNumber: 77,
+      priorPrNumbers: [41],
+      remote: true,
     });
   });
 });

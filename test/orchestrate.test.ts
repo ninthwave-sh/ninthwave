@@ -4422,15 +4422,84 @@ describe("orchestrateLoop crew mode", () => {
     expect(blockLogs.length).toBeGreaterThan(0);
   });
 
-  it("calls broker.complete after merge/done actions", async () => {
-    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
+  it("calls broker.complete when an item reaches true completion", async () => {
+    const orch = new Orchestrator({ fixForward: false, wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1"));
-    orch.getItem("T-1")!.reviewCompleted = true;
+    orch.getItem("T-1")!.prNumber = 1;
+    orch.hydrateState("T-1", "merged");
+
+    const { broker, completedIds } = mockCrewBroker({
+      connected: true,
+    });
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot: (): PollSnapshot => ({ items: [], readyIds: [] }),
+      sleep: () => Promise.resolve(),
+      log: () => {},
+      actionDeps: mockActionDeps(),
+      crewBroker: broker,
+      getFreeMem: () => 16 * 1024 ** 3,
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 4 });
+
+    expect(orch.getItem("T-1")!.state).toBe("done");
+    expect(completedIds).toContain("T-1");
+  });
+
+  it("reports complete with model and token usage before broker.complete", async () => {
+    const ctx = createTelemetryCtx("implementer.md", "claude-sonnet-4-6");
+    try {
+      const orch = new Orchestrator({ fixForward: false, wipLimit: 2, mergeStrategy: "auto" });
+      orch.addItem(makeWorkItem("T-2"));
+      orch.getItem("T-2")!.prNumber = 2;
+      orch.getItem("T-2")!.startedAt = new Date(Date.now() - 5_000).toISOString();
+      orch.hydrateState("T-2", "merged");
+
+      const { broker } = mockCrewBroker({
+        connected: true,
+      });
+
+      const deps: OrchestrateLoopDeps = {
+        buildSnapshot: (): PollSnapshot => ({ items: [], readyIds: [] }),
+        sleep: () => Promise.resolve(),
+        log: () => {},
+        actionDeps: mockActionDeps(),
+        crewBroker: broker,
+        getFreeMem: () => 16 * 1024 ** 3,
+        readTokenUsage: () => ({ inputTokens: 100, outputTokens: 40, cacheTokens: 10 }),
+      };
+
+      await orchestrateLoop(orch, ctx, deps, { maxIterations: 4 });
+
+      const completeReportCall = (broker.report as any).mock.calls.find(([event]: [string]) => event === "complete");
+      const completeReportIndex = (broker.report as any).mock.calls.findIndex(([event]: [string]) => event === "complete");
+      expect(completeReportCall).toBeDefined();
+      expect(completeReportCall).toEqual([
+        "complete",
+        "T-2",
+        expect.objectContaining({ state: "done", prNumber: 2 }),
+        {
+          model: "claude-sonnet-4-6",
+          tokenUsage: { inputTokens: 100, outputTokens: 40, cacheTokens: 10 },
+        },
+      ]);
+
+      expect((broker.report as any).mock.invocationCallOrder[completeReportIndex]).toBeLessThan((broker.complete as any).mock.invocationCallOrder[0]);
+    } finally {
+      rmSync(ctx.projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("withholds broker completion until repair verification finishes", async () => {
+    const orch = new Orchestrator({ fixForward: true, wipLimit: 2, mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("T-REPAIR-1"));
+    orch.getItem("T-REPAIR-1")!.reviewCompleted = true;
 
     let cycle = 0;
     const { broker, completedIds } = mockCrewBroker({
       connected: true,
-      claimResults: ["T-1"],
+      claimResults: ["T-REPAIR-1"],
     });
 
     const deps: OrchestrateLoopDeps = {
@@ -4438,13 +4507,33 @@ describe("orchestrateLoop crew mode", () => {
         cycle++;
         switch (cycle) {
           case 1:
-            return { items: [], readyIds: ["T-1"] };
+            return { items: [], readyIds: ["T-REPAIR-1"] };
           case 2:
-            return { items: [{ id: "T-1", workerAlive: true }], readyIds: [] };
+            return { items: [{ id: "T-REPAIR-1", workerAlive: true }], readyIds: [] };
           case 3:
-            return { items: [{ id: "T-1", prNumber: 1, prState: "open", ciStatus: "pass" }], readyIds: [] };
+            return { items: [{ id: "T-REPAIR-1", prNumber: 11, prState: "open", ciStatus: "pass" }], readyIds: [] };
           case 4:
-            return { items: [{ id: "T-1", prState: "merged" }], readyIds: [] };
+            return {
+              items: [{ id: "T-REPAIR-1", prNumber: 11, prState: "merged", mergeCommitSha: "sha-original", defaultBranch: "main" }],
+              readyIds: [],
+            };
+          case 5:
+            return { items: [], readyIds: [] };
+          case 6:
+            return { items: [{ id: "T-REPAIR-1", mergeCommitCIStatus: "fail" }], readyIds: [] };
+          case 7:
+            return { items: [{ id: "T-REPAIR-1", mergeCommitCIStatus: "fail" }], readyIds: [] };
+          case 8:
+            return { items: [{ id: "T-REPAIR-1", prNumber: 77, prState: "open", ciStatus: "pending" }], readyIds: [] };
+          case 9:
+            return {
+              items: [{ id: "T-REPAIR-1", prNumber: 77, prState: "merged", mergeCommitSha: "sha-repair", defaultBranch: "main" }],
+              readyIds: [],
+            };
+          case 10:
+            return { items: [], readyIds: [] };
+          case 11:
+            return { items: [{ id: "T-REPAIR-1", mergeCommitCIStatus: "pass" }], readyIds: [] };
           default:
             return { items: [], readyIds: [] };
         }
@@ -4456,68 +4545,27 @@ describe("orchestrateLoop crew mode", () => {
       getFreeMem: () => 16 * 1024 ** 3,
     };
 
-    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 10 });
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 20 });
 
-    // Broker should have been notified of completion
-    expect(completedIds).toContain("T-1");
-  });
+    expect(orch.getItem("T-REPAIR-1")!.state).toBe("done");
+    expect(completedIds).toEqual(["T-REPAIR-1"]);
 
-  it("reports complete with model and token usage before broker.complete", async () => {
-    const ctx = createTelemetryCtx("implementer.md", "claude-sonnet-4-6");
-    try {
-      const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
-      orch.addItem(makeWorkItem("T-2"));
-      orch.getItem("T-2")!.reviewCompleted = true;
+    const completeReports = (broker.report as any).mock.calls.filter(([event]: [string]) => event === "complete");
+    expect(completeReports).toHaveLength(1);
+    expect(completeReports[0]).toEqual([
+      "complete",
+      "T-REPAIR-1",
+      expect.objectContaining({ state: "done", prNumber: 77 }),
+      expect.any(Object),
+    ]);
 
-      let cycle = 0;
-      const { broker } = mockCrewBroker({
-        connected: true,
-        claimResults: ["T-2"],
-      });
-
-      const deps: OrchestrateLoopDeps = {
-        buildSnapshot: (): PollSnapshot => {
-          cycle++;
-          switch (cycle) {
-            case 1:
-              return { items: [], readyIds: ["T-2"] };
-            case 2:
-              return { items: [{ id: "T-2", workerAlive: true }], readyIds: [] };
-            case 3:
-              return { items: [{ id: "T-2", prNumber: 2, prState: "open", ciStatus: "pass" }], readyIds: [] };
-            case 4:
-              return { items: [{ id: "T-2", prState: "merged" }], readyIds: [] };
-            default:
-              return { items: [], readyIds: [] };
-          }
-        },
-        sleep: () => Promise.resolve(),
-        log: () => {},
-        actionDeps: mockActionDeps(),
-        crewBroker: broker,
-        getFreeMem: () => 16 * 1024 ** 3,
-        readTokenUsage: () => ({ inputTokens: 100, outputTokens: 40, cacheTokens: 10 }),
-      };
-
-      await orchestrateLoop(orch, ctx, deps, { maxIterations: 10 });
-
-      const completeReportCall = (broker.report as any).mock.calls.find(([event]: [string]) => event === "complete");
-      const completeReportIndex = (broker.report as any).mock.calls.findIndex(([event]: [string]) => event === "complete");
-      expect(completeReportCall).toBeDefined();
-      expect(completeReportCall).toEqual([
-        "complete",
-        "T-2",
-        expect.objectContaining({ state: "merged", prNumber: 2 }),
-        {
-          model: "claude-sonnet-4-6",
-          tokenUsage: { inputTokens: 100, outputTokens: 40, cacheTokens: 10 },
-        },
-      ]);
-
-      expect((broker.report as any).mock.invocationCallOrder[completeReportIndex]).toBeLessThan((broker.complete as any).mock.invocationCallOrder[0]);
-    } finally {
-      rmSync(ctx.projectRoot, { recursive: true, force: true });
-    }
+    const mergedReports = (broker.report as any).mock.calls.filter(([event]: [string]) => event === "pr_merged");
+    expect(mergedReports).toHaveLength(2);
+    expect((broker.complete as any).mock.invocationCallOrder[0]).toBeGreaterThan(
+      (broker.report as any).mock.invocationCallOrder[
+        (broker.report as any).mock.calls.findIndex(([event]: [string]) => event === "fix_forward_started")
+      ],
+    );
   });
 });
 
@@ -6652,6 +6700,17 @@ describe("formatExitSummary", () => {
     const result = formatExitSummary([], new Date().toISOString());
     expect(result).toContain("0 merged, 0 stuck, 0 queued");
   });
+
+  it("treats repair verification as active instead of complete", () => {
+    const result = formatExitSummary([
+      { ...makeOrchestratorItem("E-4"), state: "done" as any },
+      { ...makeOrchestratorItem("E-5"), state: "forward-fix-pending" as any },
+    ], new Date(Date.now() - 30_000).toISOString());
+
+    expect(result).toContain("1 done");
+    expect(result).toContain("1 active");
+    expect(result).not.toContain("1 merged, 0 stuck, 0 queued");
+  });
 });
 
 describe("formatCompletionBanner", () => {
@@ -6668,6 +6727,18 @@ describe("formatCompletionBanner", () => {
     expect(text).toContain("[r] Run more");
     expect(text).toContain("[c] Clean up");
     expect(text).toContain("[q] Quit");
+  });
+
+  it("does not claim completion while repair verification is still active", () => {
+    const lines = formatCompletionBanner([
+      { ...makeOrchestratorItem("B-4"), state: "done" as any },
+      { ...makeOrchestratorItem("B-5"), state: "fixing-forward" as any },
+    ], new Date(Date.now() - 60_000).toISOString());
+
+    const text = lines.join("\n");
+    expect(text).toContain("Work still in progress");
+    expect(text).toContain("1 done, 1 active, 0 stuck");
+    expect(text).not.toContain("All 2 items complete");
   });
 });
 
@@ -6825,6 +6896,51 @@ describe("post-completion prompt (orchestrateLoop)", () => {
     // Watch mode takes precedence -- prompt should NOT be called
     expect(promptCalled).toBe(false);
     expect(logs.some((l) => l.event === "watch_mode_waiting")).toBe(true);
+  });
+
+  it("withholds completion prompt while a canonical item is still repairing", async () => {
+    const orch = new Orchestrator({ fixForward: true, wipLimit: 2, mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("P-REPAIR-1"));
+    orch.getItem("P-REPAIR-1")!.reviewCompleted = true;
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+    let promptCalled = false;
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot: (): PollSnapshot => {
+        cycle++;
+        switch (cycle) {
+          case 1: return { items: [], readyIds: ["P-REPAIR-1"] };
+          case 2: return { items: [{ id: "P-REPAIR-1", workerAlive: true }], readyIds: [] };
+          case 3: return { items: [{ id: "P-REPAIR-1", prNumber: 5, prState: "open", ciStatus: "pass" }], readyIds: [] };
+          case 4:
+            return {
+              items: [{ id: "P-REPAIR-1", prNumber: 5, prState: "merged", mergeCommitSha: "sha-original", defaultBranch: "main" }],
+              readyIds: [],
+            };
+          case 5: return { items: [], readyIds: [] };
+          case 6: return { items: [{ id: "P-REPAIR-1", mergeCommitCIStatus: "fail" }], readyIds: [] };
+          case 7: return { items: [{ id: "P-REPAIR-1", mergeCommitCIStatus: "fail" }], readyIds: [] };
+          case 8: return { items: [{ id: "P-REPAIR-1", prNumber: 55, prState: "open", ciStatus: "pending" }], readyIds: [] };
+          default: return { items: [], readyIds: [] };
+        }
+      },
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+      completionPrompt: async () => {
+        promptCalled = true;
+        return "quit";
+      },
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 8, tuiMode: true });
+
+    expect(promptCalled).toBe(false);
+    expect(orch.getItem("P-REPAIR-1")!.state).toBe("ci-pending");
+    expect(logs.some((l) => l.event === "completion_prompt")).toBe(false);
+    expect(logs.some((l) => l.event === "orchestrate_complete")).toBe(false);
   });
 
   it("returns run-more when user picks r", async () => {

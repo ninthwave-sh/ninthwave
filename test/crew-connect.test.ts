@@ -97,6 +97,7 @@ describe("parseCrewStatusUpdate", () => {
           owner: { daemonId: "daemon-review", name: "reviewer" },
           title: "Remote review item",
           prNumber: 42,
+          priorPrNumbers: [21],
         },
       ],
     }, "daemon-local");
@@ -117,6 +118,7 @@ describe("parseCrewStatusUpdate", () => {
         ownerName: "reviewer",
         title: "Remote review item",
         prNumber: 42,
+        priorPrNumbers: [21],
       },
     ]);
   });
