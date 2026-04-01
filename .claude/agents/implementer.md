@@ -260,6 +260,8 @@ Before creating the PR, delete your work item file so that merging the PR automa
 2. Verify it's gone: `ls .ninthwave/work/*--YOUR_TODO_ID.md` should return "No such file"
 3. Commit: `git add .ninthwave/work/ && git commit -m "chore: remove YOUR_TODO_ID"`
 
+If `git diff origin/main -- .ninthwave/work/` shows unrelated work item drift, do not create or restore other work item files by hand just to make the diff clean. Only remove your own file and leave the unrelated drift alone.
+
 > **Why?** The work item file exists in your worktree (branched from main). Use relative paths and stay in your worktree -- do not use `${HUB_ROOT}` absolute paths here. Committing the deletion on your branch means merging the PR removes it from main. Each work item is a separate file, so this cannot conflict with other workers.
 
 **Cross-repo items** (when `IS_HUB_LOCAL` is `false`):
@@ -443,7 +445,7 @@ Ignore comments prefixed with `[Orchestrator]` -- these are audit trail entries 
 ## Constraints (CRITICAL)
 
 - **Do NOT modify** `VERSION` or `CHANGELOG.md`
-- **Work item files**: Only delete your own file from `.ninthwave/work/` (step 8). Do not modify other work item files.
+- **Work item files**: Only delete your own file from `.ninthwave/work/` (step 8). Do not create, restore, or modify other work item files. If unrelated `.ninthwave/work/` drift appears, leave it alone instead of "fixing" it by hand.
 - **Do NOT expand scope** beyond the work item. Note related issues in the PR body but don't fix them.
 - **Do NOT run shipping/deploy workflows**. Version bumping is deferred to post-merge.
 - **Keep changes scoped** to files mentioned in the work item.
