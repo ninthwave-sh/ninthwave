@@ -74,6 +74,8 @@ export interface ViewOptions {
   apiErrorSummary?: PollSnapshot["apiErrorSummary"];
   /** Alternate empty-state copy for watch flows that are already armed. */
   emptyState?: EmptyStateMode;
+  /** When true, render the mode indicator inline on the title line. */
+  inlineModeIndicatorOnTitle?: boolean;
 }
 
 /**
@@ -1413,13 +1415,7 @@ export function formatConnectionInline(status: CrewStatusInfo): string {
   return `${status.daemonCount} online`;
 }
 
-/**
- * Format a dim mode indicator line for the status header.
- * Shows collaboration mode and review mode inline on the main page.
- * E.g., "  local · reviews off" or "  shared · reviews: ninthwave PRs"
- * Returns empty string when no mode info is available in viewOptions.
- */
-export function formatModeIndicator(viewOptions?: ViewOptions): string {
+function modeIndicatorText(viewOptions?: ViewOptions): string {
   if (!viewOptions) return "";
   const collab = viewOptions.collaborationMode;
   const review = viewOptions.reviewMode;
@@ -1433,7 +1429,18 @@ export function formatModeIndicator(viewOptions?: ViewOptions): string {
       : "reviews: all PRs";
     parts.push(label);
   }
-  return `  ${DIM}${parts.join(" · ")}${RESET}`;
+  return parts.join(" · ");
+}
+
+/**
+ * Format a dim mode indicator line for the status header.
+ * Shows collaboration mode and review mode inline on the main page.
+ * E.g., "  local · reviews off" or "  shared · reviews: ninthwave PRs"
+ * Returns empty string when no mode info is available in viewOptions.
+ */
+export function formatModeIndicator(viewOptions?: ViewOptions): string {
+  const text = modeIndicatorText(viewOptions);
+  return text ? `  ${DIM}${text}${RESET}` : "";
 }
 
 /**
@@ -1454,6 +1461,7 @@ export function formatTitleMetrics(
   termWidth: number = 80,
   sessionStartedAt?: string,
   crewStatus?: CrewStatusInfo,
+  modeIndicator?: string,
 ): string {
   const title = `${BOLD}Ninthwave${RESET}`;
   const titlePlain = "Ninthwave";
@@ -1466,7 +1474,10 @@ export function formatTitleMetrics(
     crewStr = `  ${BRAND}${formatConnectionInline(crewStatus)}${RESET}`;
   }
 
-  const leftPlain = titlePlain + crewPlain;
+  const modePlain = modeIndicator ? `  ${modeIndicator}` : "";
+  const modeStr = modeIndicator ? `  ${DIM}${modeIndicator}${RESET}` : "";
+
+  const leftPlain = titlePlain + crewPlain + modePlain;
 
   // Compute metrics
   const metrics = computeSessionMetrics(items, sessionStartedAt);
@@ -1483,7 +1494,7 @@ export function formatTitleMetrics(
 
   // No metrics or terminal too narrow -- title + crew only
   if (metricParts.length === 0 || termWidth < 60) {
-    return `${title}${crewStr}`;
+    return `${title}${crewStr}${modeStr}`;
   }
 
   const metricsStr = metricParts.join("  ");
@@ -1494,10 +1505,10 @@ export function formatTitleMetrics(
     // Subtract 1 to leave a safety margin -- some terminals clip the last
     // character when the line fills exactly termWidth (deferred-wrap behaviour).
     const gap = termWidth - leftPlain.length - metricsStr.length - 1;
-    return `${title}${crewStr}${" ".repeat(gap)}${DIM}${metricsStr}${RESET}`;
+    return `${title}${crewStr}${modeStr}${" ".repeat(gap)}${DIM}${metricsStr}${RESET}`;
   }
   // Not enough room for metrics -- title + crew only
-  return `${title}${crewStr}`;
+  return `${title}${crewStr}${modeStr}`;
 }
 
 /**
@@ -1548,11 +1559,20 @@ export function buildStatusLayout(
   }
 
   // Header: title with inline crew status + right-aligned metrics
-  headerLines.push(formatTitleMetrics(items, termWidth, opts.sessionStartedAt, opts.crewStatus));
+  const inlineModeIndicator = opts.inlineModeIndicatorOnTitle
+    ? modeIndicatorText(opts)
+    : "";
+  headerLines.push(formatTitleMetrics(
+    items,
+    termWidth,
+    opts.sessionStartedAt,
+    opts.crewStatus,
+    inlineModeIndicator,
+  ));
 
   // Mode indicator: collaboration + review state (always visible on main page)
   const modeIndicator = formatModeIndicator(viewOptions);
-  if (modeIndicator) {
+  if (modeIndicator && !opts.inlineModeIndicatorOnTitle) {
     headerLines.push(modeIndicator);
   }
 
