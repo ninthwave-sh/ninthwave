@@ -289,7 +289,6 @@ export interface OrchestratorDeps {
   ) => boolean;
   prMerge: (repoRoot: string, prNumber: number, options?: { admin?: boolean }) => boolean;
   prComment: (repoRoot: string, prNumber: number, body: string) => boolean;
-  sendMessage: (workspaceRef: string, message: string) => boolean;
   /** Write a message to the file-based inbox for a worker worktree. */
   writeInbox: (projectRoot: string, itemId: string, message: string) => void;
   closeWorkspace: (workspaceRef: string) => boolean;

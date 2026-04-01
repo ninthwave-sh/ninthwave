@@ -25,7 +25,9 @@ function createMockMux(): Multiplexer & Record<string, Mock> {
     readScreen: vi.fn(() => "line1\nline2\nline3\nline4\n"),
     listWorkspaces: vi.fn(() => ""),
     closeWorkspace: vi.fn(() => true),
-  };
+    setStatus: vi.fn(() => true),
+    setProgress: vi.fn(() => true),
+  } as any;
 }
 
 /** Create mock LaunchGitDeps for dependency injection. */
@@ -42,7 +44,7 @@ function createMockLaunchDeps(): LaunchGitDeps & Record<string, Mock> {
     deleteBranch: vi.fn(),
     findWorktreeForBranch: vi.fn(() => null),
     prList: vi.fn(() => ({ ok: true as const, data: [] as Array<{ number: number; title: string }> })),
-  };
+  } as any;
 }
 
 /**
@@ -498,18 +500,15 @@ describe("launchSingleItem", () => {
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    // Use a custom tool so the full system prompt is sent via sendMessage (not embedded in cmd)
     await captureOutput(() => {
-      launchSingleItem(item, workDir, worktreeDir, repo, "my-custom-tool", mockMux, {
+      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {
         baseBranch: "ninthwave/H-1-1",
       }, deps);
     });
 
-    // For custom tools, the system prompt is included in the initial message sent via sendMessage
-    const sendCall = mockMux.sendMessage.mock.calls[0];
-    expect(sendCall).toBeDefined();
-    const sentPrompt = sendCall[1] as string;
-    expect(sentPrompt).toContain("BASE_BRANCH: ninthwave/H-1-1");
+    const promptPath = join(worktreeDir, "ninthwave-M-CI-1", ".ninthwave", ".prompt");
+    const prompt = readFileSync(promptPath, "utf-8");
+    expect(prompt).toContain("BASE_BRANCH: ninthwave/H-1-1");
   });
 
   it("does not include BASE_BRANCH in system prompt when baseBranch is not set", async () => {
@@ -521,16 +520,13 @@ describe("launchSingleItem", () => {
     const items = parseWorkItems(workDir, worktreeDir);
     const item = items.find((i) => i.id === "M-CI-1")!;
 
-    // Use a custom tool so the full system prompt is sent via sendMessage
     await captureOutput(() => {
-      launchSingleItem(item, workDir, worktreeDir, repo, "my-custom-tool", mockMux, {}, deps);
+      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
     });
 
-    // The system prompt should NOT contain BASE_BRANCH
-    const sendCall = mockMux.sendMessage.mock.calls[0];
-    expect(sendCall).toBeDefined();
-    const sentPrompt = sendCall[1] as string;
-    expect(sentPrompt).not.toContain("BASE_BRANCH:");
+    const promptPath = join(worktreeDir, "ninthwave-M-CI-1", ".ninthwave", ".prompt");
+    const prompt = readFileSync(promptPath, "utf-8");
+    expect(prompt).not.toContain("BASE_BRANCH:");
   });
 
   it("non-stacked launch still fetches main and calls ffMerge", async () => {
@@ -1283,26 +1279,16 @@ describe("launchAiSession agentName", () => {
     expect(cmd).toContain("OPENCODE_PERMISSION");
   });
 
-  it("custom/unknown tool falls back to raw command launch with post-launch send", () => {
+  it("throws for an unregistered tool ID", () => {
     const mockMux = createMockMux();
-    // Return stable multi-line screen content so ready-wait succeeds immediately
-    mockMux.readScreen = vi.fn(() => "⠋ Thinking...\nLine2\nLine3\nLine4");
     const repo = setupTempRepo();
     const promptFile = join(repo, "prompt.txt");
     writeFileSync(promptFile, "implement the work item");
 
-    const wsRef = launchAiSession("my-custom-tool", repo, "T-1", "Test", promptFile, mockMux);
-
-    expect(wsRef).not.toBeNull();
-    // Command should be the raw tool string (not a launcher script or known tool command)
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
-    const cmd = launchCall[1] as string;
-    expect(cmd).toBe("my-custom-tool");
-    // Post-launch send should occur (prompt delivered via sendMessage)
-    expect(mockMux.sendMessage.mock.calls.length).toBeGreaterThan(0);
-    // Sent message should include the prompt file content
-    const sentMsg = mockMux.sendMessage.mock.calls[0][1] as string;
-    expect(sentMsg).toContain("implement the work item");
+    expect(() =>
+      launchAiSession("my-custom-tool", repo, "T-1", "Test", promptFile, mockMux)
+    ).toThrow("Unknown AI tool: my-custom-tool. Supported: claude, opencode, copilot");
+    expect(mockMux.launchWorkspace).not.toHaveBeenCalled();
   });
 });
 
@@ -1418,19 +1404,17 @@ describe("launchReviewWorker", () => {
     const deps = createMockLaunchDeps();
     const repo = setupTempRepo();
 
-    // Use a custom tool so the system prompt is sent via sendMessage
     await captureOutput(() => {
-      launchReviewWorker(99, "H-RVW-2", "direct", repo, "my-custom-tool", mockMux, {}, deps);
+      launchReviewWorker(99, "H-RVW-2", "direct", repo, "claude", mockMux, {}, deps);
     });
 
-    const sendCall = mockMux.sendMessage.mock.calls[0];
-    expect(sendCall).toBeDefined();
-    const sentPrompt = sendCall[1] as string;
-    expect(sentPrompt).toContain("YOUR_REVIEW_PR: 99");
-    expect(sentPrompt).toContain("YOUR_REVIEW_ITEM_ID: H-RVW-2");
-    expect(sentPrompt).toContain("AUTO_FIX_MODE: direct");
-    expect(sentPrompt).toContain(`PROJECT_ROOT: ${join(repo, ".ninthwave", ".worktrees", "review-H-RVW-2")}`);
-    expect(sentPrompt).toContain(`REPO_ROOT: ${repo}`);
+    const promptPath = join(repo, ".ninthwave", ".worktrees", "review-H-RVW-2", ".ninthwave", ".prompt");
+    const prompt = readFileSync(promptPath, "utf-8");
+    expect(prompt).toContain("YOUR_REVIEW_PR: 99");
+    expect(prompt).toContain("YOUR_REVIEW_ITEM_ID: H-RVW-2");
+    expect(prompt).toContain("AUTO_FIX_MODE: direct");
+    expect(prompt).toContain(`PROJECT_ROOT: ${join(repo, ".ninthwave", ".worktrees", "review-H-RVW-2")}`);
+    expect(prompt).toContain(`REPO_ROOT: ${repo}`);
   });
 
   it("system prompt contains AUTO_FIX_MODE off for off mode", async () => {
@@ -1439,14 +1423,13 @@ describe("launchReviewWorker", () => {
     const repo = setupTempRepo();
 
     await captureOutput(() => {
-      launchReviewWorker(50, "H-RVW-3", "off", repo, "my-custom-tool", mockMux, {}, deps);
+      launchReviewWorker(50, "H-RVW-3", "off", repo, "claude", mockMux, {}, deps);
     });
 
-    const sendCall = mockMux.sendMessage.mock.calls[0];
-    expect(sendCall).toBeDefined();
-    const sentPrompt = sendCall[1] as string;
-    expect(sentPrompt).toContain("YOUR_REVIEW_PR: 50");
-    expect(sentPrompt).toContain("AUTO_FIX_MODE: off");
+    const promptPath = join(repo, ".ninthwave", ".worktrees", "review-H-RVW-3", ".ninthwave", ".prompt");
+    const prompt = readFileSync(promptPath, "utf-8");
+    expect(prompt).toContain("YOUR_REVIEW_PR: 50");
+    expect(prompt).toContain("AUTO_FIX_MODE: off");
   });
 
   it("includes BASE_BRANCH in system prompt when baseBranch is set", async () => {
@@ -1455,15 +1438,14 @@ describe("launchReviewWorker", () => {
     const repo = setupTempRepo();
 
     await captureOutput(() => {
-      launchReviewWorker(42, "H-RVW-1", "off", repo, "my-custom-tool", mockMux, {
+      launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux, {
         baseBranch: "ninthwave/H-DEP-1",
       }, deps);
     });
 
-    const sendCall = mockMux.sendMessage.mock.calls[0];
-    expect(sendCall).toBeDefined();
-    const sentPrompt = sendCall[1] as string;
-    expect(sentPrompt).toContain("BASE_BRANCH: ninthwave/H-DEP-1");
+    const promptPath = join(repo, ".ninthwave", ".worktrees", "review-H-RVW-1", ".ninthwave", ".prompt");
+    const prompt = readFileSync(promptPath, "utf-8");
+    expect(prompt).toContain("BASE_BRANCH: ninthwave/H-DEP-1");
   });
 
   it("does not include BASE_BRANCH when baseBranch is not set", async () => {
@@ -1472,13 +1454,12 @@ describe("launchReviewWorker", () => {
     const repo = setupTempRepo();
 
     await captureOutput(() => {
-      launchReviewWorker(42, "H-RVW-1", "off", repo, "my-custom-tool", mockMux, {}, deps);
+      launchReviewWorker(42, "H-RVW-1", "off", repo, "claude", mockMux, {}, deps);
     });
 
-    const sendCall = mockMux.sendMessage.mock.calls[0];
-    expect(sendCall).toBeDefined();
-    const sentPrompt = sendCall[1] as string;
-    expect(sentPrompt).not.toContain("BASE_BRANCH:");
+    const promptPath = join(repo, ".ninthwave", ".worktrees", "review-H-RVW-1", ".ninthwave", ".prompt");
+    const prompt = readFileSync(promptPath, "utf-8");
+    expect(prompt).not.toContain("BASE_BRANCH:");
   });
 
   it("launches with --agent ninthwave-reviewer for all modes", async () => {
