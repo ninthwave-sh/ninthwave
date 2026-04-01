@@ -32,6 +32,14 @@ export interface InboxDeps {
   getBranch: () => string | null;
 }
 
+export interface InboxWaitRuntime {
+  writeStdout: (text: string) => void;
+  writeStderr: (text: string) => void;
+  exit: (code: number) => never;
+  onSignal: (signal: NodeJS.Signals, handler: () => void) => void;
+  removeSignalListener: (signal: NodeJS.Signals, handler: () => void) => void;
+}
+
 const defaultDeps: InboxDeps = {
   io: { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, unlinkSync, renameSync },
   sleep: (ms) => Bun.sleepSync(ms),
@@ -42,6 +50,22 @@ const defaultDeps: InboxDeps = {
     } catch {
       return null;
     }
+  },
+};
+
+const defaultWaitRuntime: InboxWaitRuntime = {
+  writeStdout: (text) => {
+    process.stdout.write(text);
+  },
+  writeStderr: (text) => {
+    process.stderr.write(text);
+  },
+  exit: (code) => process.exit(code),
+  onSignal: (signal, handler) => {
+    process.on(signal, handler);
+  },
+  removeSignalListener: (signal, handler) => {
+    process.removeListener(signal, handler);
   },
 };
 
@@ -160,6 +184,41 @@ export function waitForInbox(
   }
 }
 
+export function runInboxWait(
+  projectRoot: string,
+  itemId: string,
+  deps: Pick<InboxDeps, "io" | "sleep"> = defaultDeps,
+  runtime: InboxWaitRuntime = defaultWaitRuntime,
+): void {
+  let delivered = false;
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    runtime.removeSignalListener("SIGINT", onInterrupt);
+    runtime.removeSignalListener("SIGTERM", onInterrupt);
+  };
+  const onInterrupt = () => {
+    if (delivered) return;
+    cleanup();
+    runtime.writeStderr(
+      `Inbox wait interrupted before delivery; rerun 'nw inbox --wait ${itemId}' with a very long timeout.\n`,
+    );
+    runtime.exit(1);
+  };
+
+  runtime.onSignal("SIGINT", onInterrupt);
+  runtime.onSignal("SIGTERM", onInterrupt);
+
+  try {
+    const message = waitForInbox(projectRoot, itemId, deps);
+    delivered = true;
+    runtime.writeStdout(message);
+  } finally {
+    cleanup();
+  }
+}
+
 /**
  * Remove all pending inbox files for an item. Used during worker cleanup.
  */
@@ -190,6 +249,7 @@ export function cmdInbox(
   args: string[],
   projectRoot: string,
   deps: InboxDeps = defaultDeps,
+  runtime: InboxWaitRuntime = defaultWaitRuntime,
 ): void {
   const isWait = args.includes("--wait");
   const isCheck = args.includes("--check");
@@ -246,8 +306,7 @@ export function cmdInbox(
 
   if (isWait) {
     // Blocking wait -- intended for workers that are idle or done
-    const message = waitForInbox(projectRoot, itemId, deps);
-    process.stdout.write(message);
+    runInboxWait(projectRoot, itemId, deps, runtime);
     return;
   }
 }

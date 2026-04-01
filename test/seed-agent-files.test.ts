@@ -225,6 +225,8 @@ describe("seedAgentFiles", () => {
       "## 0. Inbox Contract",
       "nw inbox --check YOUR_TODO_ID",
       "nw inbox --wait YOUR_TODO_ID",
+      "set the timeout to the longest practical value available",
+      "immediately run the same wait command again",
     ].join("\n");
 
     mkdirSync(join(hubRoot, "agents"), { recursive: true });
@@ -243,6 +245,8 @@ describe("seedAgentFiles", () => {
     const claudeAgent = join(worktree, ".claude/agents/implementer.md");
     expect(readFileSync(claudeAgent, "utf-8")).toContain("nw inbox --check YOUR_TODO_ID");
     expect(readFileSync(claudeAgent, "utf-8")).toContain("nw inbox --wait YOUR_TODO_ID");
+    expect(readFileSync(claudeAgent, "utf-8")).toContain("set the timeout to the longest practical value available");
+    expect(readFileSync(claudeAgent, "utf-8")).toContain("immediately run the same wait command again");
 
     rmSync(hubRoot, { recursive: true, force: true });
     rmSync(worktree, { recursive: true, force: true });

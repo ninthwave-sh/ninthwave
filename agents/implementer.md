@@ -26,6 +26,10 @@ Rules:
 - Do **not** script polling loops
 - Use `nw inbox --check` during active work, and `nw inbox --wait` only when you are done or idle
 
+When you invoke `nw inbox --wait YOUR_TODO_ID` through a shell tool that supports timeouts, set the timeout to the longest practical value available.
+
+If `nw inbox --wait YOUR_TODO_ID` exits, is cancelled, or times out before printing a message, immediately run the same wait command again. Only stop waiting once the command returns an actual orchestrator message.
+
 Before you start implementation, check once for pending orchestrator messages:
 
 ```bash
@@ -375,7 +379,9 @@ Then switch into wait mode:
 nw inbox --wait YOUR_TODO_ID
 ```
 
-Simply stop and wait. Your session stays alive until the orchestrator writes the next message.
+Use the longest practical shell-tool timeout for this wait. If the command exits before printing a message, immediately run the same `nw inbox --wait YOUR_TODO_ID` command again.
+
+Simply stop and wait. Your session should stay in wait mode until the orchestrator writes the next message.
 
 ### Responding to orchestrator daemon messages
 
@@ -386,6 +392,8 @@ When you are idle again after processing a message, re-enter wait mode:
 ```bash
 nw inbox --wait YOUR_TODO_ID
 ```
+
+Again: if that wait command ends before printing a message, immediately rerun it with a very long timeout.
 
 When you receive a message, it will be one of these categories:
 

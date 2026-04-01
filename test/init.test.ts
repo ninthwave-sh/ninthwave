@@ -77,7 +77,13 @@ function createFakeBundle(dir: string): string {
   mkdirSync(join(bundleDir, "agents"), { recursive: true });
   writeFileSync(
     join(bundleDir, "agents", "implementer.md"),
-    "# Implementer Agent\n",
+    [
+      "# Implementer Agent",
+      "nw inbox --wait YOUR_TODO_ID",
+      "set the timeout to the longest practical value available",
+      "immediately run the same wait command again",
+      "",
+    ].join("\n"),
   );
   writeFileSync(
     join(bundleDir, "agents", "reviewer.md"),
@@ -666,6 +672,12 @@ describe("initProject", () => {
     expect(
       existsSync(join(projectDir, ".github/agents/ninthwave-implementer.agent.md")),
     ).toBe(true);
+    expect(readFileSync(join(projectDir, ".claude/agents/implementer.md"), "utf-8")).toContain(
+      "set the timeout to the longest practical value available",
+    );
+    expect(readFileSync(join(projectDir, ".claude/agents/implementer.md"), "utf-8")).toContain(
+      "immediately run the same wait command again",
+    );
 
     // Detection result returned
     expect(detection).toBeDefined();

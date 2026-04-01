@@ -445,13 +445,14 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
       cmdInbox(ctx.args, ctx.projectRoot);
     },
     flags: {
-      "--wait": "Block until a message arrives (best when a worker is idle or done)",
+      "--wait": "Block until a message arrives; long-lived, but parent tools may still interrupt it",
       "--check": "Non-blocking check that drains all pending messages during active work",
       "--write": "Write a message to the inbox",
       "-m, --message": "Message text (used with --write)",
     },
     examples: [
       "nw inbox --wait H-FOO-1",
+      "# If interrupted before output, rerun the same wait with a very long timeout",
       "nw inbox --check H-FOO-1",
       'nw inbox --write H-FOO-1 -m "Fix CI"',
     ],

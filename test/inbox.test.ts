@@ -9,6 +9,7 @@ import {
   cmdInbox,
   type InboxIO,
   type InboxDeps,
+  type InboxWaitRuntime,
 } from "../core/commands/inbox.ts";
 import { captureOutput } from "./helpers.ts";
 // ── In-memory IO for fast unit tests ─────────────────────────────────
@@ -40,6 +41,36 @@ function makeMemIO() {
     },
   };
   return { io, files, dirs };
+}
+
+function makeWaitRuntime() {
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const handlers = new Map<NodeJS.Signals, () => void>();
+  let exitCode: number | null = null;
+
+  const runtime: InboxWaitRuntime = {
+    writeStdout: (text) => {
+      stdout.push(text);
+    },
+    writeStderr: (text) => {
+      stderr.push(text);
+    },
+    exit: (code) => {
+      exitCode = code;
+      throw new Error(`EXIT:${code}`);
+    },
+    onSignal: (signal, handler) => {
+      handlers.set(signal, handler);
+    },
+    removeSignalListener: (signal, handler) => {
+      if (handlers.get(signal) === handler) {
+        handlers.delete(signal);
+      }
+    },
+  };
+
+  return { runtime, stdout, stderr, handlers, getExitCode: () => exitCode };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -234,6 +265,28 @@ describe("inbox", () => {
       };
       const out = captureOutput(() => cmdInbox([], "/fake/project", deps));
       expect(out).toContain("Usage");
+    });
+
+    it("emits rerun guidance and exits non-zero when wait is interrupted before delivery", () => {
+      const { io } = makeMemIO();
+      const waitRuntime = makeWaitRuntime();
+      let sleepCount = 0;
+      const deps: InboxDeps = {
+        io,
+        sleep: () => {
+          sleepCount++;
+          if (sleepCount === 2) {
+            waitRuntime.handlers.get("SIGTERM")?.();
+          }
+        },
+        getBranch: () => "ninthwave/H-FOO-1",
+      };
+
+      expect(() => cmdInbox(["--wait", "H-FOO-1"], "/fake/project", deps, waitRuntime.runtime)).toThrow("EXIT:1");
+      expect(waitRuntime.getExitCode()).toBe(1);
+      expect(waitRuntime.stdout).toEqual([]);
+      expect(waitRuntime.stderr.join("")).toContain("rerun 'nw inbox --wait H-FOO-1' with a very long timeout");
+      expect(waitRuntime.handlers.size).toBe(0);
     });
   });
 });
