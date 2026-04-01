@@ -1088,10 +1088,12 @@ export function mapDaemonItemState(orchState: string, flags?: { rebaseRequested?
 export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
   return state.items.map((item) => ({
     id: item.id,
-    title: item.title,
+    title: item.remoteSnapshot?.title ?? item.title,
     ...(item.descriptionSnippet ? { descriptionSnippet: item.descriptionSnippet } : {}),
-    state: mapDaemonItemState(item.state, { rebaseRequested: item.rebaseRequested }),
-    prNumber: item.prNumber,
+    state: item.remoteSnapshot?.state ?? mapDaemonItemState(item.state, { rebaseRequested: item.rebaseRequested }),
+    prNumber: item.remoteSnapshot
+      ? item.remoteSnapshot.prNumber ?? null
+      : item.prNumber,
     ageMs: Date.now() - new Date(item.lastTransition).getTime(),
     repoLabel: "",
     failureReason: item.failureReason,
@@ -1102,6 +1104,7 @@ export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
     stderrTail: item.stderrTail,
     worktreePath: item.worktreePath,
     workspaceRef: item.workspaceRef,
+    remote: item.remoteSnapshot ? item.remoteSnapshot.ownerDaemonId !== null : false,
   }));
 }
 

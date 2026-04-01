@@ -339,7 +339,14 @@ function gatherStatusItems(
         items: items.map((i) => ({ ...i })), // copy to avoid mutation
         wipLimit: daemonState.wipLimit,
         sessionStartedAt: daemonState.startedAt,
-        ...(daemonState.emptyState ? { viewOptions: { emptyState: daemonState.emptyState } } : {}),
+        ...((daemonState.emptyState || daemonState.crewStatus)
+          ? {
+              viewOptions: {
+                ...(daemonState.emptyState ? { emptyState: daemonState.emptyState } : {}),
+                ...(daemonState.crewStatus ? { crewStatus: daemonState.crewStatus } : {}),
+              },
+            }
+          : {}),
       };
     }
   }
@@ -430,6 +437,7 @@ export function renderStatus(worktreeDir: string, projectRoot: string, flat: boo
         ...viewOptions,
         sessionStartedAt: daemonState.startedAt,
         ...(daemonState.emptyState ? { emptyState: daemonState.emptyState } : {}),
+        ...(daemonState.crewStatus ? { crewStatus: daemonState.crewStatus } : {}),
       };
       lines.push(formatStatusTable(items, termWidth, daemonState.wipLimit, flat, mergedOpts));
 

@@ -67,6 +67,7 @@ import {
   readLayoutPreference,
   writeLayoutPreference,
   type DaemonState,
+  type DaemonCrewStatus,
   type ExternalReviewItem,
 } from "../daemon.ts";
 import type { TokenUsage } from "../crew.ts";
@@ -213,6 +214,22 @@ export function crewStatusToRemoteItemSnapshots(
   return new Map(crewStatus.remoteItems.map((item) => [item.id, item]));
 }
 
+function crewStatusToDaemonCrewStatus(
+  crewStatus: CrewStatus | null | undefined,
+  crewCode: string | null | undefined,
+  connected: boolean,
+): DaemonCrewStatus | undefined {
+  if (!crewStatus && !crewCode) return undefined;
+  return {
+    crewCode: crewStatus?.crewCode ?? crewCode ?? "",
+    daemonCount: crewStatus?.daemonCount ?? 0,
+    availableCount: crewStatus?.availableCount ?? 0,
+    claimedCount: crewStatus?.claimedCount ?? 0,
+    completedCount: crewStatus?.completedCount ?? 0,
+    connected,
+  };
+}
+
 export function crewStatusToRemoteOwnedItemIds(
   crewStatus: CrewStatus | null | undefined,
 ): Set<string> | undefined {
@@ -264,7 +281,7 @@ export function orchestratorItemsToStatusItems(
         ? { descriptionSnippet: item.workItem.descriptionSnippet }
         : {}),
       state,
-      prNumber: remoteSnapshot && "prNumber" in remoteSnapshot
+      prNumber: remoteSnapshot
         ? remoteSnapshot.prNumber ?? null
         : item.prNumber ?? null,
       ageMs: now - new Date(item.lastTransition).getTime(),
@@ -2570,9 +2587,12 @@ export async function cmdOrchestrate(
   // This ensures `ninthwave status` never shows items from a previous run mixed
   // with the current run -- even before the first poll cycle completes.
   cleanStateFile(projectRoot);
+  const initialCrewStatus = crewBroker?.getCrewStatus();
   const initialState = serializeOrchestratorState(orch.getAllItems(), process.pid, daemonStartedAt, {
     wipLimit,
     operatorId,
+    remoteItemSnapshots: crewStatusToRemoteItemSnapshots(initialCrewStatus),
+    crewStatus: crewStatusToDaemonCrewStatus(initialCrewStatus, crewCode, crewBroker?.isConnected() ?? false),
     ...(futureOnlyStartup ? { emptyState: "watch-armed" as const } : {}),
   });
   writeStateFile(projectRoot, initialState);
@@ -2696,10 +2716,13 @@ export async function cmdOrchestrate(
       };
     }
     try {
+      const crewStatus = crewBroker?.getCrewStatus();
       const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
         statusPaneRef: null,
         wipLimit,
         operatorId,
+        remoteItemSnapshots: crewStatusToRemoteItemSnapshots(crewStatus),
+        crewStatus: crewStatusToDaemonCrewStatus(crewStatus, crewCode, crewBroker?.isConnected() ?? false),
         ...(tuiState.viewOptions.emptyState ? { emptyState: tuiState.viewOptions.emptyState } : {}),
       });
       writeStateFile(projectRoot, state);
