@@ -689,6 +689,7 @@ export function renderTuiPanelFrame(
     const controlsLines = renderControlsOverlay(termWidth, termRows, {
       collaborationMode: tuiState.collaborationMode,
       collaborationIntent: tuiState.collaborationIntent,
+      sessionCode: tuiState.sessionCode,
       collaborationJoinInputActive: tuiState.collaborationJoinInputActive,
       collaborationJoinInputValue: tuiState.collaborationJoinInputValue,
       collaborationBusy: tuiState.collaborationBusy,
@@ -861,6 +862,7 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
       const controlsLines = renderControlsOverlay(termWidth, termRows, {
         collaborationMode: tuiState.collaborationMode,
         collaborationIntent: tuiState.collaborationIntent,
+        sessionCode: tuiState.sessionCode,
         collaborationJoinInputActive: tuiState.collaborationJoinInputActive,
         collaborationJoinInputValue: tuiState.collaborationJoinInputValue,
         collaborationBusy: tuiState.collaborationBusy,
