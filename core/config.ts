@@ -95,6 +95,7 @@ export interface UserConfig {
   merge_strategy?: PersistedMergeStrategy;
   review_mode?: PersistedReviewMode;
   collaboration_mode?: PersistedCollaborationMode;
+  update_checks_enabled?: boolean;
 }
 
 /**
@@ -134,6 +135,9 @@ export function loadUserConfig(homeOverride?: string): UserConfig {
     }
     if (isPersistedCollaborationMode(parsed.collaboration_mode)) {
       result.collaboration_mode = parsed.collaboration_mode;
+    }
+    if (typeof parsed.update_checks_enabled === "boolean") {
+      result.update_checks_enabled = parsed.update_checks_enabled;
     }
     return result;
   } catch {
@@ -207,6 +211,12 @@ export function saveUserConfig(
     }
     if (key === "ai_tools") {
       if (Array.isArray(value) && value.every((entry) => typeof entry === "string") && value.length > 0) {
+        merged[key] = value;
+      }
+      continue;
+    }
+    if (key === "update_checks_enabled") {
+      if (typeof value === "boolean") {
         merged[key] = value;
       }
       continue;

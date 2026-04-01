@@ -326,6 +326,19 @@ describe("loadUserConfig", () => {
     expect(config.backend_mode).toBe("cmux");
   });
 
+  it("reads update_checks_enabled from valid JSON", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ update_checks_enabled: false }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.update_checks_enabled).toBe(false);
+  });
+
   it("ignores invalid persisted TUI enum values safely", () => {
     const tmpHome = setupTempRepo();
     const configDir = join(tmpHome, ".ninthwave");
@@ -528,6 +541,29 @@ describe("saveUserConfig", () => {
     const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
     expect(content.custom_key).toBe("hello");
     expect(content.wip_limit).toBe(4);
+  });
+
+  it("saves update_checks_enabled without clobbering unrelated keys", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ custom_key: "hello", ai_tools: ["claude"] }),
+    );
+
+    saveUserConfig({ update_checks_enabled: false }, tmpHome);
+
+    const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
+    expect(content.custom_key).toBe("hello");
+    expect(content.ai_tools).toEqual(["claude"]);
+    expect(content.update_checks_enabled).toBe(false);
+
+    const config = loadUserConfig(tmpHome);
+    expect(config).toMatchObject({
+      ai_tools: ["claude"],
+      update_checks_enabled: false,
+    });
   });
 
   it("overwrites existing wip_limit value", () => {
