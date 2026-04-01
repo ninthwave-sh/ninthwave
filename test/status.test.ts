@@ -389,6 +389,8 @@ describe("formatStatusTable", () => {
     expect(output).toContain("To get started:");
     expect(output).toContain("ninthwave list --ready");
     expect(output).toContain("ninthwave start <ID>");
+    expect(output).toContain("Show available work items");
+    expect(output).toContain("Start a work item");
   });
 
   it("includes unified progress line", () => {

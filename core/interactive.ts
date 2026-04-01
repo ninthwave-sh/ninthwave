@@ -145,7 +145,7 @@ export interface PromptItemsResult {
 }
 
 /**
- * Display available TODOs and let the user toggle selections.
+ * Display available work items and let the user toggle selections.
  * Accepts space/comma-separated numbers or ranges (e.g. "1 3 5" or "1-4,6").
  * Entering "all" or selecting every item sets allSelected: true.
  */
@@ -189,7 +189,7 @@ export async function promptItems(
   );
 
   while (true) {
-    const answer = await prompt(`${BOLD}Select items: ${RESET}`);
+    const answer = await prompt(`${BOLD}Select work items: ${RESET}`);
 
     if (answer.toLowerCase() === "q" || answer.toLowerCase() === "quit") {
       return { ids: [], allSelected: false };
@@ -202,7 +202,7 @@ export async function promptItems(
     const indices = parseSelection(answer, sorted.length);
     if (indices.length === 0) {
       console.log(
-        `  ${YELLOW}No valid selection. Enter numbers 1-${sorted.length}, ranges, "all", or "q".${RESET}`,
+        `  ${YELLOW}No valid selection. Enter work item numbers 1-${sorted.length}, ranges, "all", or "q".${RESET}`,
       );
       continue;
     }

@@ -139,6 +139,13 @@ describe("CLI dispatch", () => {
     expect(result.stderr).toContain("Unknown command: nonexistent-command");
   });
 
+  it("suggests uppercase work item IDs for lowercase input", () => {
+    const result = runCli("m-wq-2");
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain("Did you mean M-WQ-2?");
+    expect(result.stderr).toContain("Work item IDs are uppercase.");
+  });
+
   it("dispatches version command without project root", () => {
     const result = runCli("version");
     expect(result.exitCode).toBe(0);
@@ -194,6 +201,11 @@ describe("grouped help (nw --help)", () => {
   it("shows Usage header", () => {
     const result = runCli("--help");
     expect(result.stdout).toContain("Usage:");
+  });
+
+  it("describes waiting for queued work items", () => {
+    const result = runCli("--help");
+    expect(result.stdout).toContain("waits for queued work items if none exist");
   });
 
   it("help output snapshot format", () => {
@@ -293,6 +305,17 @@ describe("per-command rich help (nw <command> --help)", () => {
     expect(result.stdout).toContain("Flags:");
     expect(result.stdout).toContain("--ready");
     expect(result.stdout).toContain("--domain");
+    expect(result.stdout).toContain("Show only work items with no unmet dependencies");
+  });
+
+  it("shows work item terminology in command descriptions", () => {
+    const historyHelp = runCli("history", "--help");
+    expect(historyHelp.exitCode).toBe(0);
+    expect(historyHelp.stdout).toContain("Show state transition timeline for a work item");
+
+    const retryHelp = runCli("retry", "--help");
+    expect(retryHelp.exitCode).toBe(0);
+    expect(retryHelp.stdout).toContain("Retry stuck or done work items");
   });
 
   it("shows rich help for commands without flags", () => {

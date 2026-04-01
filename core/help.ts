@@ -190,8 +190,8 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
       "--priority": "Filter by priority level (e.g. High, Medium)",
       "--domain": "Filter by domain (e.g. core, tui-status)",
       "--feature": "Filter by feature name",
-      "--ready": "Show only items with no unmet dependencies",
-      "--remote": "Show remote/local status per item (pushed to origin/main vs local-only)",
+      "--ready": "Show only work items with no unmet dependencies",
+      "--remote": "Show remote/local status per work item (pushed to origin/main vs local-only)",
     },
     examples: [
       "nw list",
@@ -226,7 +226,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "batch-order",
     usage: "batch-order <ID1> [ID2]...",
-    description: "Group items into dependency-ordered batches",
+    description: "Group work items into dependency-ordered batches",
     group: "diagnostic",
     needsRoot: true,
     needsWork: true,
@@ -250,7 +250,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "history",
     usage: "history <ID>",
-    description: "Show state transition timeline for an item",
+    description: "Show state transition timeline for a work item",
     group: "diagnostic",
     needsRoot: true,
     needsWork: false,
@@ -268,7 +268,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     handler: async (ctx) => { await cmdLogs(ctx.args, ctx.projectRoot); },
     flags: {
       "--follow, -f": "Tail the log file, printing new entries as they appear",
-      "--item": "Filter entries to those containing the specified item ID",
+      "--item": "Filter entries to those containing the specified work item ID",
       "--level": "Filter by minimum severity level (warn or error)",
       "--lines, -n": "Show last N entries (default: 50)",
     },
@@ -350,7 +350,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "close-workspace",
     usage: "close-workspace <ID>",
-    description: "Close cmux workspace for a single item",
+    description: "Close cmux workspace for a single work item",
     group: "advanced",
     needsRoot: true,
     needsWork: false,
@@ -383,7 +383,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "retry",
     usage: "retry <ID> [ID2...]",
-    description: "Retry stuck or done items (reset to queued)",
+    description: "Retry stuck or done work items (reset to queued)",
     group: "advanced",
     needsRoot: true,
     needsWork: false,
@@ -418,7 +418,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "heartbeat",
     usage: "heartbeat --progress <0-1> --label <text> [--pr <number>]",
-    description: "Report worker progress (auto-detects item ID from branch)",
+    description: "Report worker progress (auto-detects work item ID from branch)",
     group: "advanced",
     needsRoot: true,
     needsWork: false,
@@ -474,7 +474,7 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
   {
     name: "merged-ids",
     usage: "merged-ids",
-    description: "List IDs of already-merged worktree items",
+    description: "List IDs of already-merged work items",
     group: "advanced",
     needsRoot: true,
     needsWork: false,
@@ -591,7 +591,7 @@ function printGroup(label: string, commands: CommandEntry[]): void {
 
 /** Print grouped usage help (Workflow + Diagnostics only). */
 export function printHelp(): void {
-  console.log("Usage: nw [options]             Run orchestration (waits for items if none exist)");
+  console.log("Usage: nw [options]             Run orchestration (waits for queued work items if none exist)");
   console.log("       nw <ID> [ID2...]          Launch work items by ID");
   console.log("       nw <command> [options]    Run a specific command");
   console.log();
@@ -607,7 +607,7 @@ export function printHelp(): void {
 
 /** Print full usage help with all groups including Advanced. */
 export function printHelpAll(): void {
-  console.log("Usage: nw [options]             Run orchestration (waits for items if none exist)");
+  console.log("Usage: nw [options]             Run orchestration (waits for queued work items if none exist)");
   console.log("       nw <ID> [ID2...]          Launch work items by ID");
   console.log("       nw <command> [options]    Run a specific command");
   console.log();

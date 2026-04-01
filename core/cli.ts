@@ -108,7 +108,7 @@ if (allAreIds) {
   const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
 
   if (!existsSync(workDir)) {
-    die(`Todos directory not found at ${workDir}`);
+    die(`Work item queue not found at ${workDir}`);
   }
 
   // Parse --wip-limit flag from args
@@ -135,11 +135,11 @@ if (allAreIds) {
 
 const entry = lookupCommand(command);
 if (!entry) {
-  // Check if the command looks like a lowercase TODO ID -- offer a hint
+  // Check if the command looks like a lowercase work item ID -- offer a hint
   const lowercaseIdPattern = /^[a-z]+-[a-z0-9]+-\d+[a-z]*$/;
   if (lowercaseIdPattern.test(command)) {
     const suggestion = command.toUpperCase();
-    die(`Unknown command: ${command}. Did you mean ${suggestion}? TODO IDs are uppercase.`);
+    die(`Unknown command: ${command}. Did you mean ${suggestion}? Work item IDs are uppercase.`);
   }
   die(`Unknown command: ${command}`);
 }
@@ -170,7 +170,7 @@ const worktreeDir = join(projectRoot, ".ninthwave", ".worktrees");
 const partitionDir = join(worktreeDir, ".partitions");
 
 if (entry.needsWork && !existsSync(workDir)) {
-  die(`Todos directory not found at ${workDir}`);
+  die(`Work item queue not found at ${workDir}`);
 }
 
 await entry.handler({ args, projectRoot, workDir, worktreeDir, partitionDir });

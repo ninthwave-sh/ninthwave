@@ -18,6 +18,10 @@ import {
 import type { WidgetIO } from "../core/tui-widgets.ts";
 import type { WorkItem } from "../core/types.ts";
 
+function stripAnsi(text: string): string {
+  return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function makeWorkItem(
@@ -172,6 +176,19 @@ describe("promptItems", () => {
     // Sorted by priority: A-1(high), B-2(medium), C-3(low)
     expect(result.ids).toEqual(["A-1", "C-3"]);
     expect(result.allSelected).toBe(false);
+  });
+
+  it("prompts with work item terminology", async () => {
+    const items = [makeWorkItem("A-1", "First task", "high")];
+    const questions: string[] = [];
+    const prompt: PromptFn = async (question) => {
+      questions.push(stripAnsi(question));
+      return "1";
+    };
+
+    await promptItems(items, prompt);
+
+    expect(questions).toContain("Select work items: ");
   });
 
   it("returns all IDs and allSelected: true when 'all' is entered", async () => {
