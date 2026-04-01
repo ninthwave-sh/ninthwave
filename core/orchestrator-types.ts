@@ -33,6 +33,7 @@ export interface OrchestratorItem {
   id: string;
   workItem: WorkItem;
   state: OrchestratorItemState;
+  /** Active PR currently driving this item's lifecycle. Can switch to a repair PR after post-merge CI failure. */
   prNumber?: number;
   partition?: number;
   /** Multiplexer workspace reference (e.g., "workspace:1" or "session:nw:H-1-1"). */

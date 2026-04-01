@@ -1059,6 +1059,34 @@ export class Orchestrator {
   ): Action[] {
     const actions: Action[] = [];
 
+    // A repair PR now exists for the canonical item. Re-enter the normal PR
+    // lifecycle using that PR as the active one instead of continuing to look
+    // post-merge-complete.
+    if (snap?.prNumber && (snap.prState === "open" || snap.prState === "merged")) {
+      item.prNumber = snap.prNumber;
+      item.reviewCompleted = false;
+      item.reviewRound = undefined;
+      item.lastCommentCheck = undefined;
+      item.ciFailCount = 0;
+      item.mergeFailCount = 0;
+      item.ciFailureNotified = false;
+      item.ciFailureNotifiedAt = undefined;
+      item.rebaseRequested = false;
+      item.notAliveCount = 0;
+
+      if (snap.prState === "merged") {
+        this.transition(item, "merged", snap?.eventTime);
+        if (item.fixForwardWorkspaceRef) {
+          actions.push({ type: "clean-forward-fixer", itemId: item.id });
+        }
+        return actions;
+      }
+
+      this.transition(item, "ci-pending", snap?.eventTime);
+      actions.push(...this.handlePrLifecycle(item, snap));
+      return actions;
+    }
+
     // CI recovered on main (forward-fixer's fix merged, or flaky test resolved)
     if (snap?.mergeCommitCIStatus === "pass") {
       this.transition(item, "done");
@@ -1365,8 +1393,15 @@ export class Orchestrator {
       const dep = this.items.get(depId);
       if (!dep) return { canStack: false }; // unknown dep -- can't stack
 
-      if (dep.state === "done" || dep.state === "merged" || dep.state === "forward-fix-pending" || dep.state === "fix-forward-failed") {
+      if (dep.state === "done" || (!this.config.fixForward && dep.state === "merged")) {
         continue; // this dep is finished (code is on main)
+      }
+
+      // Once a dependency has failed post-merge verification, downstream work
+      // must stay blocked until the canonical item fully completes its repair
+      // PR and final verification cycle.
+      if ((dep.fixForwardFailCount ?? 0) > 0) {
+        return { canStack: false };
       }
 
       if (STACKABLE_STATES.has(dep.state)) {

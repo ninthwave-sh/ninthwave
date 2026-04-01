@@ -58,6 +58,70 @@ function restoreTrackedPrSnapshot(
   }
 }
 
+function dependencySatisfied(depItem: OrchestratorItem | undefined, fixForward: boolean): boolean {
+  if (!depItem) return true;
+  if (depItem.state === "done") return true;
+  if (!fixForward && depItem.state === "merged") return true;
+  return false;
+}
+
+function trackedPrPollIds(orchItem: OrchestratorItem): string[] {
+  if (orchItem.state === "fixing-forward") {
+    return [`fix-forward-${orchItem.id}`, `revert-${orchItem.id}`];
+  }
+  return [orchItem.id];
+}
+
+function pollTrackedPrStatus(
+  orchItem: OrchestratorItem,
+  repoRoot: string,
+  checkPr: (id: string, projectRoot: string) => string | null | PrStatusPollResult,
+): PrStatusPollResult {
+  let firstFailure: PrStatusPollResult | undefined;
+  let noPrResult: PrStatusPollResult | undefined;
+
+  for (const candidateId of trackedPrPollIds(orchItem)) {
+    const result = normalizePrStatusResult(checkPr(candidateId, repoRoot));
+    if (!isBlindPrPoll(result.statusLine)) {
+      return result;
+    }
+    if (result.failure && !firstFailure) {
+      firstFailure = result;
+      continue;
+    }
+    if (!noPrResult) {
+      noPrResult = result;
+    }
+  }
+
+  return noPrResult ?? firstFailure ?? { statusLine: `${orchItem.id}\t\tno-pr` };
+}
+
+async function pollTrackedPrStatusAsync(
+  orchItem: OrchestratorItem,
+  repoRoot: string,
+  checkPr: (id: string, projectRoot: string) => Promise<string | null | PrStatusPollResult>,
+): Promise<PrStatusPollResult> {
+  let firstFailure: PrStatusPollResult | undefined;
+  let noPrResult: PrStatusPollResult | undefined;
+
+  for (const candidateId of trackedPrPollIds(orchItem)) {
+    const result = normalizePrStatusResult(await checkPr(candidateId, repoRoot));
+    if (!isBlindPrPoll(result.statusLine)) {
+      return result;
+    }
+    if (result.failure && !firstFailure) {
+      firstFailure = result;
+      continue;
+    }
+    if (!noPrResult) {
+      noPrResult = result;
+    }
+  }
+
+  return noPrResult ?? firstFailure ?? { statusLine: `${orchItem.id}\t\tno-pr` };
+}
+
 function enrichMergedMetadata(
   snap: ItemSnapshot,
   orchItem: OrchestratorItem,
@@ -225,8 +289,7 @@ export function buildSnapshot(
     if (orchItem.state === "queued") {
       const allDepsMet = orchItem.workItem.dependencies.every((depId) => {
         const depItem = orch.getItem(depId);
-        // Dep is met if: not tracked, or in done/merged state
-        return !depItem || depItem.state === "done" || depItem.state === "merged";
+        return dependencySatisfied(depItem, orch.config.fixForward);
       });
       if (allDepsMet) {
         readyIds.push(orchItem.id);
@@ -256,7 +319,7 @@ export function buildSnapshot(
 
     // Check PR status via gh -- use the item's resolved repo root for cross-repo items
     const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
-    const prResult = normalizePrStatusResult(checkPr(orchItem.id, repoRoot));
+    const prResult = pollTrackedPrStatus(orchItem, repoRoot, checkPr);
     const statusLine = prResult.statusLine;
     if (prResult.failure && prPollStates.has(orchItem.state)) {
       apiErrorCount++;
@@ -446,7 +509,7 @@ export async function buildSnapshotAsync(
     if (orchItem.state === "queued") {
       const allDepsMet = orchItem.workItem.dependencies.every((depId) => {
         const depItem = orch.getItem(depId);
-        return !depItem || depItem.state === "done" || depItem.state === "merged";
+        return dependencySatisfied(depItem, orch.config.fixForward);
       });
       if (allDepsMet) {
         readyIds.push(orchItem.id);
@@ -476,7 +539,7 @@ export async function buildSnapshotAsync(
 
     // Check PR status via async gh -- yields to event loop per call
     const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
-    const prResult = normalizePrStatusResult(await checkPr(orchItem.id, repoRoot));
+    const prResult = await pollTrackedPrStatusAsync(orchItem, repoRoot, checkPr);
     const statusLine = prResult.statusLine;
     if (prResult.failure && prPollStates.has(orchItem.state)) {
       apiErrorCount++;

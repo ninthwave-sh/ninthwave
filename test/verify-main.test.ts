@@ -47,6 +47,39 @@ function snapshotWith(items: ItemSnapshot[], readyIds: string[] = []): PollSnaps
   return { items, readyIds };
 }
 
+function approvingReviewVerdict() {
+  return {
+    verdict: "approve" as const,
+    summary: "Looks good.",
+    blockingCount: 0,
+    nonBlockingCount: 0,
+    architectureScore: 8,
+    codeQualityScore: 8,
+    performanceScore: 8,
+    testCoverageScore: 8,
+    unresolvedDecisions: 0,
+    criticalGaps: 0,
+    confidence: 8,
+  };
+}
+
+function buildRepairPrSnapshot(
+  orch: Orchestrator,
+  branchId: string,
+  statusLine: string,
+): PollSnapshot {
+  const fakeMux = { listWorkspaces: () => "", readScreen: () => "" } as any;
+  const fakeCheckPr = (id: string) => (id === branchId ? statusLine : `${id}\t\tno-pr`);
+  return buildSnapshot(
+    orch,
+    "/tmp/proj",
+    "/tmp/proj/.ninthwave/.worktrees",
+    fakeMux,
+    () => null,
+    fakeCheckPr,
+  );
+}
+
 const NOW = new Date("2026-01-15T12:00:00Z");
 
 // ── Merged → Verifying transition ────────────────────────────────────
@@ -323,7 +356,6 @@ describe("merge commit SHA retrieval in executeMerge", () => {
       cleanSingleWorktree: () => true,
       prMerge: () => true,
       prComment: () => true,
-      sendMessage: () => true,
       writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
@@ -364,7 +396,6 @@ describe("merge commit SHA retrieval in executeMerge", () => {
       cleanSingleWorktree: () => true,
       prMerge: () => true,
       prComment: () => true,
-      sendMessage: () => true,
       writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
@@ -406,7 +437,6 @@ describe("merge commit SHA retrieval in executeMerge", () => {
       cleanSingleWorktree: () => true,
       prMerge: () => true,
       prComment: () => true,
-      sendMessage: () => true,
       writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin: () => {},
@@ -449,7 +479,6 @@ describe("merge commit SHA retrieval in executeMerge", () => {
       cleanSingleWorktree: () => true,
       prMerge: () => true,
       prComment: () => true,
-      sendMessage: () => true,
       writeInbox: () => {},
       closeWorkspace: () => true,
       fetchOrigin,
@@ -568,8 +597,26 @@ describe("dependency resolution with fix-forward", () => {
     expect(snap.readyIds).toContain("H-1-2");
   });
 
-  it("deps in merged state still satisfy readyIds (transient state)", () => {
+  it("deps in merged state do not unblock dependents while verification is pending", () => {
     const orch = new Orchestrator({ fixForward: true });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.addItem(makeWorkItem("H-1-2", ["H-1-1"]));
+    orch.hydrateState("H-1-1", "merged");
+    orch.getItem("H-1-1")!.mergeCommitSha = "sha-abc";
+
+    const fakeMux = { listWorkspaces: () => "", readScreen: () => "" } as any;
+
+    const snap = buildSnapshot(
+      orch, "/tmp/proj", "/tmp/proj/.ninthwave/.worktrees",
+      fakeMux, () => null, () => null,
+    );
+
+    expect(snap.readyIds).not.toContain("H-1-2");
+  });
+
+  it("deps in merged state still unblock when post-merge verification is disabled", () => {
+    const orch = new Orchestrator({ fixForward: false });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
     orch.addItem(makeWorkItem("H-1-2", ["H-1-1"]));
@@ -582,7 +629,6 @@ describe("dependency resolution with fix-forward", () => {
       fakeMux, () => null, () => null,
     );
 
-    // merged is still dep-satisfied (transient state, transitions to forward-fix-pending or done)
     expect(snap.readyIds).toContain("H-1-2");
   });
 });
@@ -697,6 +743,131 @@ describe("end-to-end: merge → fix-forward → done flow", () => {
       NOW,
     );
     expect(orch.getItem("H-1-1")!.state).toBe("done");
+  });
+
+  it("re-enters the canonical item through a fix-forward repair PR until final verification passes", () => {
+    const orch = new Orchestrator({ fixForward: true, maxFixForwardRetries: 3 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.addItem(makeWorkItem("H-1-2", ["H-1-1"]));
+    orch.hydrateState("H-1-1", "merged");
+    orch.getItem("H-1-1")!.mergeCommitSha = "sha-original";
+    orch.getItem("H-1-1")!.prNumber = 41;
+
+    orch.processTransitions(emptySnapshot(), NOW);
+    expect(orch.getItem("H-1-1")!.state).toBe("forward-fix-pending");
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", mergeCommitCIStatus: "fail" }]),
+      NOW,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("fix-forward-failed");
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", mergeCommitCIStatus: "fail" }]),
+      NOW,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("fixing-forward");
+
+    const repairSnap = buildRepairPrSnapshot(
+      orch,
+      "fix-forward-H-1-1",
+      "fix-forward-H-1-1\t77\tpending\tMERGEABLE\t2026-01-15T12:01:00Z",
+    );
+    expect(repairSnap.items.find((s) => s.id === "H-1-1"))?.toMatchObject({
+      prNumber: 77,
+      prState: "open",
+      ciStatus: "pending",
+    });
+
+    orch.processTransitions(repairSnap, NOW);
+    expect(orch.getItem("H-1-1")!.state).toBe("ci-pending");
+    expect(orch.getItem("H-1-1")!.prNumber).toBe(77);
+    expect(orch.getItem("H-1-1")!.reviewCompleted).toBe(false);
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", prNumber: 77, prState: "open", ciStatus: "pass", isMergeable: true }]),
+      NOW,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("reviewing");
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", prNumber: 77, prState: "open", ciStatus: "pass", reviewVerdict: approvingReviewVerdict() }]),
+      NOW,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("merging");
+
+    const downstreamWhileRepairMerged = buildSnapshot(
+      orch,
+      "/tmp/proj",
+      "/tmp/proj/.ninthwave/.worktrees",
+      { listWorkspaces: () => "", readScreen: () => "" } as any,
+      () => null,
+      () => null,
+    );
+    expect(downstreamWhileRepairMerged.readyIds).not.toContain("H-1-2");
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", prNumber: 77, prState: "merged", mergeCommitSha: "sha-repair", defaultBranch: "main" }]),
+      NOW,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("merged");
+
+    orch.processTransitions(emptySnapshot(), NOW);
+    expect(orch.getItem("H-1-1")!.state).toBe("forward-fix-pending");
+
+    const gatedDuringRepairVerification = buildSnapshot(
+      orch,
+      "/tmp/proj",
+      "/tmp/proj/.ninthwave/.worktrees",
+      { listWorkspaces: () => "", readScreen: () => "" } as any,
+      () => null,
+      () => null,
+      undefined,
+      () => "pending",
+    );
+    expect(gatedDuringRepairVerification.readyIds).not.toContain("H-1-2");
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", mergeCommitCIStatus: "pass" }]),
+      NOW,
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("done");
+
+    const readyAfterFinalVerification = buildSnapshot(
+      orch,
+      "/tmp/proj",
+      "/tmp/proj/.ninthwave/.worktrees",
+      { listWorkspaces: () => "", readScreen: () => "" } as any,
+      () => null,
+      () => null,
+    );
+    expect(readyAfterFinalVerification.readyIds).toContain("H-1-2");
+  });
+
+  it("re-enters the canonical item through a revert repair PR", () => {
+    const orch = new Orchestrator({ fixForward: true, maxFixForwardRetries: 3 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "fixing-forward");
+    orch.getItem("H-1-1")!.mergeCommitSha = "sha-original";
+    orch.getItem("H-1-1")!.prNumber = 41;
+
+    const repairSnap = buildRepairPrSnapshot(
+      orch,
+      "revert-H-1-1",
+      "revert-H-1-1\t88\tci-passed\tMERGEABLE\t2026-01-15T12:02:00Z",
+    );
+    expect(repairSnap.items.find((s) => s.id === "H-1-1"))?.toMatchObject({
+      prNumber: 88,
+      prState: "open",
+      ciStatus: "pass",
+    });
+
+    orch.processTransitions(repairSnap, NOW);
+    expect(orch.getItem("H-1-1")!.state).toBe("reviewing");
+    expect(orch.getItem("H-1-1")!.prNumber).toBe(88);
+    expect(orch.getItem("H-1-1")!.reviewCompleted).toBe(false);
   });
 });
 
@@ -854,8 +1025,7 @@ describe("executeLaunchForwardFixer action", () => {
     cleanSingleWorktree: () => true,
     prMerge: () => true,
     prComment: () => true,
-    sendMessage: () => true,
-      writeInbox: () => {},
+    writeInbox: () => {},
     closeWorkspace: () => true,
     fetchOrigin: () => {},
     ffMerge: () => {},
@@ -945,8 +1115,7 @@ describe("executeCleanForwardFixer action", () => {
     cleanSingleWorktree: () => true,
     prMerge: () => true,
     prComment: () => true,
-    sendMessage: () => true,
-      writeInbox: () => {},
+    writeInbox: () => {},
     closeWorkspace: () => true,
     fetchOrigin: () => {},
     ffMerge: () => {},
