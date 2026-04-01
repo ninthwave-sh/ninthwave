@@ -44,10 +44,8 @@ import { ID_IN_FILENAME, PRIORITY_NUM } from "../types.ts";
 import { loadConfig, saveConfig, loadUserConfig, saveUserConfig } from "../config.ts";
 import type { ProjectConfig, UserConfig } from "../config.ts";
 import {
-  mergeStrategyToPersisted,
   persistedCollaborationModeToRuntime,
   resolveTuiSettingsDefaults,
-  reviewModeToPersisted,
   type TuiSettingsDefaults,
 } from "../tui-settings.ts";
 import { preflight } from "../preflight.ts";
@@ -137,6 +135,14 @@ import {
 import { processExternalReviews, type ExternalReviewDeps } from "../external-review.ts";
 import { processScheduledTasks, type ScheduleLoopDeps } from "../schedule-processing.ts";
 import { syncStackComments as syncStackCommentsForRepo } from "../stack-comments.ts";
+import {
+  createWatchEngineRunner,
+  createDetachedDaemonEngineRunner,
+  createInteractiveChildEngineRunner,
+  createRuntimeControlHandlers,
+  type WatchEngineControlCommand,
+  type WatchEngineSnapshotEvent,
+} from "../watch-engine-runner.ts";
 // ── Re-exports for backward compatibility ────────────────────────────
 // These keep existing importers (tests, other modules) working without changes.
 export { buildSnapshotAsync, isWorkerAlive, isWorkerAliveWithCache, getWorktreeLastCommitTime, getWorktreeLastCommitTimeAsync } from "../snapshot.ts";
@@ -147,6 +153,15 @@ export { setupKeyboardShortcuts, filterLogsByLevel, pushLogBuffer, LOG_BUFFER_MA
 export { processExternalReviews, type ExternalReviewDeps } from "../external-review.ts";
 export { processScheduledTasks, type ScheduleLoopDeps } from "../schedule-processing.ts";
 export { forkDaemon } from "../daemon.ts";
+export {
+  createWatchEngineRunner,
+  createDetachedDaemonEngineRunner,
+  createInteractiveChildEngineRunner,
+  createRuntimeControlHandlers,
+  type WatchEngineSnapshotEvent,
+  type WatchEngineControlCommand,
+  type WatchEngineRunner,
+} from "../watch-engine-runner.ts";
 export type { LogEntry } from "../types.ts";
 
 // ── Structured logging ─────────────────────────────────────────────
@@ -215,85 +230,6 @@ export function resolveInteractiveStartupConfig(
     defaults: resolveTuiSettingsDefaults(userConfig),
     savedToolIds: userConfig.ai_tools,
     skipToolStep: !!toolOverride || (userConfig.ai_tools?.length ?? 0) > 0,
-  };
-}
-
-export interface RuntimeControlHandlerDeps {
-  orch: Pick<Orchestrator, "config" | "setMergeStrategy" | "setSkipReview" | "setWipLimit">;
-  log: (entry: LogEntry) => void;
-  getWipLimit: () => number;
-  setWipLimit: (limit: number) => void;
-  saveUserConfigFn?: typeof saveUserConfig;
-}
-
-export function createRuntimeControlHandlers(
-  deps: RuntimeControlHandlerDeps,
-): Pick<TuiState, "onStrategyChange" | "onWipChange" | "onReviewChange" | "onCollaborationLocal" | "onCollaborationShare" | "onCollaborationJoinSubmit"> {
-  const saveUserConfigFn = deps.saveUserConfigFn ?? saveUserConfig;
-  const logCollaborationIntent = (mode: "local" | "shared" | "joined", code?: string) => {
-    deps.log({
-      ts: new Date().toISOString(),
-      level: "info",
-      event: "collaboration_mode_changed",
-      mode,
-      ...(code ? { code } : {}),
-      source: "keyboard",
-    });
-    return { mode };
-  };
-
-  return {
-    onStrategyChange: (strategy) => {
-      deps.orch.setMergeStrategy(strategy);
-      const persisted = mergeStrategyToPersisted(strategy);
-      if (persisted) {
-        try {
-          saveUserConfigFn({ merge_strategy: persisted });
-        } catch {
-          // Best-effort persistence only.
-        }
-      }
-    },
-    onWipChange: (delta) => {
-      const currentLimit = deps.getWipLimit();
-      const newLimit = Math.max(1, currentLimit + delta);
-      if (newLimit === currentLimit) return;
-      deps.orch.setWipLimit(newLimit);
-      deps.setWipLimit(newLimit);
-      deps.log({
-        ts: new Date().toISOString(),
-        level: "info",
-        event: "wip_limit_changed",
-        oldLimit: currentLimit,
-        newLimit,
-        source: "keyboard",
-      });
-      try {
-        saveUserConfigFn({ wip_limit: newLimit });
-      } catch {
-        // Best-effort persistence only.
-      }
-    },
-    onReviewChange: (mode) => {
-      const skip = mode === "off";
-      deps.orch.setSkipReview(skip);
-      deps.log({
-        ts: new Date().toISOString(),
-        level: "info",
-        event: "review_mode_changed",
-        mode,
-        skipReview: skip,
-        source: "keyboard",
-      });
-      try {
-        saveUserConfigFn({ review_mode: reviewModeToPersisted(mode) });
-      } catch {
-        // Best-effort persistence only.
-      }
-    },
-    onCollaborationLocal: () => logCollaborationIntent("local"),
-    onCollaborationShare: () => logCollaborationIntent("shared"),
-    onCollaborationJoinSubmit: (code) => logCollaborationIntent("joined", code),
   };
 }
 
@@ -466,7 +402,6 @@ export function createEventLoopLagSampler(
     },
   };
 }
-
 // ── TUI mode helpers ────────────────────────────────────────────────
 
 /**
@@ -534,19 +469,6 @@ export function filterCrewRemoteWriteActions(
     "launch-verifier", "clean-verifier", "workspace-close",
   ]);
   return actions.filter((action) => !(WRITE_ACTIONS.has(action.type) && remoteIds.has(action.itemId)));
-}
-
-function snapshotToHeartbeatMap(
-  snapshot: PollSnapshot | undefined,
-): Map<string, WorkerProgress> {
-  const heartbeats = new Map<string, WorkerProgress>();
-  if (!snapshot) return heartbeats;
-  for (const item of snapshot.items) {
-    if (item.lastHeartbeat) {
-      heartbeats.set(item.id, item.lastHeartbeat);
-    }
-  }
-  return heartbeats;
 }
 
 export function orchestratorItemsToStatusItems(
@@ -3120,13 +3042,12 @@ export async function cmdOrchestrate(
 
   let lastTuiItems: OrchestratorItem[] = orch.getAllItems();
   let lastTuiHeartbeats = new Map<string, WorkerProgress>();
+  let sendRuntimeControl = (_command: WatchEngineControlCommand) => {};
   const runtimeControlHandlers = createRuntimeControlHandlers({
-    orch,
-    log,
-    getWipLimit: () => wipLimit,
-    setWipLimit: (limit) => {
-      wipLimit = limit;
+    sendControl: (command) => {
+      sendRuntimeControl(command);
     },
+    getWipLimit: () => wipLimit,
   });
   const tuiState: TuiState = {
     scrollOffset: 0,
@@ -3187,14 +3108,28 @@ export async function cmdOrchestrate(
     tmuxSessionName: tmuxOutsideSession ? tmuxSessionName : undefined,
   };
 
-  const onPollComplete = (
-    items: OrchestratorItem[],
-    snapshot: PollSnapshot,
-    _pollIntervalMs?: number,
-    interactiveTiming?: InteractiveWatchTiming,
-  ) => {
-    lastTuiItems = items;
-    lastTuiHeartbeats = snapshotToHeartbeatMap(snapshot);
+  const handleEngineSnapshot = ({ state, pollSnapshot: snapshot, runtime, interactiveTiming }: WatchEngineSnapshotEvent) => {
+    lastTuiItems = orch.getAllItems();
+    lastTuiHeartbeats = new Map(
+      state.items
+        .filter((item) => item.progress != null && item.progressLabel && item.progressTs)
+        .map((item) => [
+          item.id,
+          {
+            id: item.id,
+            progress: item.progress!,
+            label: item.progressLabel!,
+            ts: item.progressTs!,
+            ...(item.prNumber != null ? { prNumber: item.prNumber } : {}),
+          },
+        ]),
+    );
+    tuiState.mergeStrategy = runtime.mergeStrategy;
+    tuiState.viewOptions.mergeStrategy = runtime.mergeStrategy;
+    tuiState.reviewMode = runtime.reviewMode;
+    tuiState.viewOptions.reviewMode = runtime.reviewMode;
+    tuiState.collaborationMode = runtime.collaborationMode;
+    tuiState.viewOptions.collaborationMode = runtime.collaborationMode;
     // Update crew status from broker
     if (crewBroker && crewCode) {
       const cs = crewBroker.getCrewStatus();
@@ -3208,16 +3143,6 @@ export async function cmdOrchestrate(
       };
     }
     try {
-      const crewStatus = crewBroker?.getCrewStatus();
-      const state = serializeOrchestratorState(items, process.pid, daemonStartedAt, {
-        statusPaneRef: null,
-        wipLimit,
-        operatorId,
-        remoteItemSnapshots: crewStatusToRemoteItemSnapshots(crewStatus),
-        heartbeats: lastTuiHeartbeats,
-        crewStatus: crewStatusToDaemonCrewStatus(crewStatus, crewCode, crewBroker?.isConnected() ?? false),
-        ...(tuiState.viewOptions.emptyState ? { emptyState: tuiState.viewOptions.emptyState } : {}),
-      });
       writeStateFile(projectRoot, state);
     } catch {
       // Non-fatal -- state persistence failure shouldn't block the orchestrator
@@ -3238,7 +3163,7 @@ export async function cmdOrchestrate(
       }
       const renderStartMs = interactiveTiming ? Date.now() : 0;
       try {
-        renderTuiPanelFrame(items, wipLimit, tuiState, undefined, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
+        renderTuiPanelFrame(lastTuiItems, wipLimit, tuiState, undefined, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
       } catch {
         // Non-fatal -- TUI render failure shouldn't block the orchestrator
       }
@@ -3323,7 +3248,6 @@ export async function cmdOrchestrate(
     getFreeMem: getAvailableMemory,
     reconcile,
     readScreen: (ref, lines) => mux.readScreen(ref, lines),
-    onPollComplete,
     syncDisplay: (o, snap) => {
       syncWorkerDisplay(o, snap, mux);
       tuiState.viewOptions.apiErrorCount = snap.apiErrorCount ?? 0;
@@ -3384,6 +3308,41 @@ export async function cmdOrchestrate(
     ...(watchIntervalSecs !== undefined ? { watchIntervalMs: watchIntervalSecs * 1000 } : {}),
     ...(tuiMode ? { tuiMode: true } : {}),
   };
+
+  const buildEngineState = (
+    items: OrchestratorItem[],
+    heartbeats: ReadonlyMap<string, WorkerProgress>,
+    _snapshot: PollSnapshot,
+  ) => {
+    const crewStatus = crewBroker?.getCrewStatus();
+    return serializeOrchestratorState(items, process.pid, daemonStartedAt, {
+      statusPaneRef: null,
+      wipLimit,
+      operatorId,
+      remoteItemSnapshots: crewStatusToRemoteItemSnapshots(crewStatus),
+      heartbeats,
+      crewStatus: crewStatusToDaemonCrewStatus(crewStatus, crewCode, crewBroker?.isConnected() ?? false),
+      ...(tuiState.viewOptions.emptyState ? { emptyState: tuiState.viewOptions.emptyState } : {}),
+    });
+  };
+
+  const engineRunner = (isDaemonChild ? createDetachedDaemonEngineRunner : createWatchEngineRunner)({
+    orch,
+    ctx,
+    loopDeps,
+    loopConfig,
+    runLoop: orchestrateLoop,
+    emitLog: log,
+    emitSnapshot: handleEngineSnapshot,
+    buildState: buildEngineState,
+    initialReviewMode,
+    initialCollaborationMode,
+    getWipLimit: () => wipLimit,
+    setWipLimit: (limit) => {
+      wipLimit = limit;
+    },
+  });
+  sendRuntimeControl = engineRunner.sendControl;
 
   // Set up keyboard shortcuts in TUI mode (q, Ctrl-C, m, d, ?, ↑/↓)
   let cleanupKeyboard = () => {};
@@ -3584,13 +3543,7 @@ export async function cmdOrchestrate(
     // Run-more loop: re-enter interactive flow when the user picks [r] at the completion prompt
     let keepRunning = true;
     while (keepRunning) {
-      const result = await orchestrateLoop(
-        orch,
-        ctx,
-        loopDeps,
-        loopConfig,
-        abortController.signal,
-      );
+      const result = await engineRunner.run(abortController.signal);
 
       if (result.completionAction === "run-more" && tuiMode) {
         // Release keyboard shortcuts so TUI widgets can handle raw keys

@@ -34,6 +34,9 @@ import {
   waitForArmingKey,
   shouldShowStartupArmingWindow,
   createRuntimeControlHandlers,
+  createWatchEngineRunner,
+  createDetachedDaemonEngineRunner,
+  createInteractiveChildEngineRunner,
   resolveInteractiveStartupConfig,
   INTERACTIVE_WATCH_STAGE_WARN_MS,
   ARMING_WINDOW_MS,
@@ -46,6 +49,7 @@ import {
   type TuiState,
   type CompletionAction,
   type StartupIntent,
+  type WatchEngineSnapshotEvent,
 } from "../core/commands/orchestrate.ts";
 import type { LogEntry as PanelLogEntry } from "../core/status-render.ts";
 import { daemonStateToStatusItems } from "../core/status-render.ts";
@@ -4698,24 +4702,17 @@ describe("resolveInteractiveStartupConfig", () => {
 describe("createRuntimeControlHandlers", () => {
   it("persists merge, review, and WIP changes while keeping collaboration runtime-only", () => {
     const savedUpdates: Array<Record<string, unknown>> = [];
-    const logs: LogEntry[] = [];
+    const sentControls: Array<Record<string, unknown>> = [];
     let currentWipLimit = 3;
-    const orch = {
-      config: { wipLimit: 3 },
-      setMergeStrategy: vi.fn(),
-      setSkipReview: vi.fn(),
-      setWipLimit: vi.fn((limit: number) => {
-        orch.config.wipLimit = limit;
-      }),
-    } as any;
 
     const handlers = createRuntimeControlHandlers({
-      orch,
-      log: (entry) => logs.push(entry),
-      getWipLimit: () => currentWipLimit,
-      setWipLimit: (limit) => {
-        currentWipLimit = limit;
+      sendControl: (command) => {
+        sentControls.push(command as Record<string, unknown>);
+        if (command.type === "set-wip-limit") {
+          currentWipLimit = command.limit;
+        }
       },
+      getWipLimit: () => currentWipLimit,
       saveUserConfigFn: (updates) => {
         savedUpdates.push(updates as Record<string, unknown>);
       },
@@ -4728,10 +4725,15 @@ describe("createRuntimeControlHandlers", () => {
     handlers.onReviewChange?.("all-prs");
     handlers.onWipChange?.(1);
 
-    expect(orch.setMergeStrategy).toHaveBeenCalledWith("auto");
-    expect(orch.setSkipReview).toHaveBeenCalledWith(false);
-    expect(orch.setWipLimit).toHaveBeenCalledWith(4);
     expect(currentWipLimit).toBe(4);
+    expect(sentControls).toEqual([
+      { type: "set-collaboration-mode", mode: "shared", source: "keyboard" },
+      { type: "set-collaboration-mode", mode: "joined", code: "ABCD-1234", source: "keyboard" },
+      { type: "set-collaboration-mode", mode: "local", source: "keyboard" },
+      { type: "set-merge-strategy", strategy: "auto", source: "keyboard" },
+      { type: "set-review-mode", mode: "all-prs", source: "keyboard" },
+      { type: "set-wip-limit", limit: 4, source: "keyboard" },
+    ]);
     expect(savedUpdates).toEqual([
       { merge_strategy: "auto" },
       { review_mode: "all" },
@@ -4740,23 +4742,13 @@ describe("createRuntimeControlHandlers", () => {
     expect(shareResult).toEqual({ mode: "shared" });
     expect(joinResult).toEqual({ mode: "joined" });
     expect(localResult).toEqual({ mode: "local" });
-    expect(logs.map((entry) => entry.event)).toContain("review_mode_changed");
-    expect(logs.map((entry) => entry.event)).toContain("collaboration_mode_changed");
-    expect(logs.map((entry) => entry.event)).toContain("wip_limit_changed");
   });
 
   it("does not persist bypass as a default merge strategy", () => {
     const saveUserConfigFn = vi.fn();
     const handlers = createRuntimeControlHandlers({
-      orch: {
-        config: { wipLimit: 3 },
-        setMergeStrategy: vi.fn(),
-        setSkipReview: vi.fn(),
-        setWipLimit: vi.fn(),
-      } as any,
-      log: () => {},
+      sendControl: () => {},
       getWipLimit: () => 3,
-      setWipLimit: () => {},
       saveUserConfigFn,
     });
 
@@ -4919,6 +4911,200 @@ describe("interactive watch instrumentation", () => {
 
     expect(logs.some((entry) => entry.event === "interactive_watch_timing")).toBe(false);
     expect(logs.some((entry) => entry.event === "interactive_watch_stall")).toBe(false);
+  });
+});
+
+describe("watch engine runner", () => {
+  function makeEngineRunner(
+    orch: Orchestrator,
+    runLoop: (
+      orch: Orchestrator,
+      ctx: ExecutionContext,
+      deps: OrchestrateLoopDeps,
+    ) => Promise<unknown>,
+    logs: LogEntry[],
+    snapshots: WatchEngineSnapshotEvent[],
+    getWipLimit: () => number,
+    setWipLimit: (limit: number) => void,
+  ) {
+    return createWatchEngineRunner({
+      orch,
+      ctx: defaultCtx,
+      loopDeps: {
+        buildSnapshot: () => ({ items: [], readyIds: [] }),
+        sleep: () => Promise.resolve(),
+        log: () => {},
+        actionDeps: mockActionDeps(),
+      },
+      runLoop: runLoop as any,
+      emitLog: (entry) => logs.push(entry),
+      emitSnapshot: (event) => snapshots.push(event),
+      buildState: (items, heartbeats) => serializeOrchestratorState(items, 99, "2026-04-01T00:00:00.000Z", {
+        wipLimit: getWipLimit(),
+        heartbeats,
+      }),
+      initialReviewMode: "ninthwave-prs",
+      initialCollaborationMode: "local",
+      getWipLimit,
+      setWipLimit,
+    });
+  }
+
+  it("starts the shared engine, emits snapshots, and forwards logs", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("ENG-1"));
+    const logs: LogEntry[] = [];
+    const snapshots: WatchEngineSnapshotEvent[] = [];
+    let currentWipLimit = 2;
+
+    const runLoop = vi.fn(async (innerOrch: Orchestrator, _ctx: ExecutionContext, deps: OrchestrateLoopDeps) => {
+      deps.log({ ts: "2026-04-01T00:00:00.000Z", level: "info", event: "orchestrate_start" });
+      deps.onPollComplete?.(
+        innerOrch.getAllItems(),
+        {
+          items: [{
+            id: "ENG-1",
+            lastHeartbeat: {
+              id: "ENG-1",
+              progress: 0.4,
+              label: "Writing code",
+              ts: "2026-04-01T00:00:01.000Z",
+            },
+          }],
+          readyIds: [],
+        },
+        1500,
+      );
+      return {};
+    });
+
+    const runner = makeEngineRunner(
+      orch,
+      runLoop,
+      logs,
+      snapshots,
+      () => currentWipLimit,
+      (limit) => {
+        currentWipLimit = limit;
+      },
+    );
+
+    await runner.run();
+
+    expect(runLoop).toHaveBeenCalledTimes(1);
+    expect(logs.map((entry) => entry.event)).toEqual(["orchestrate_start"]);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]!.pollIntervalMs).toBe(1500);
+    expect(snapshots[0]!.state.items[0]).toMatchObject({
+      id: "ENG-1",
+      progress: 0.4,
+      progressLabel: "Writing code",
+    });
+    expect(snapshots[0]!.runtime).toEqual({
+      mergeStrategy: "manual",
+      wipLimit: 2,
+      reviewMode: "ninthwave-prs",
+      collaborationMode: "local",
+    });
+  });
+
+  it("applies control messages in order and reflects them in subsequent snapshots", async () => {
+    const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("ENG-2"));
+    const logs: LogEntry[] = [];
+    const snapshots: WatchEngineSnapshotEvent[] = [];
+    let currentWipLimit = 2;
+    let continueLoop!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      continueLoop = resolve;
+    });
+
+    const runLoop = async (innerOrch: Orchestrator, _ctx: ExecutionContext, deps: OrchestrateLoopDeps) => {
+      deps.onPollComplete?.(innerOrch.getAllItems(), { items: [], readyIds: [] }, 1000);
+      await gate;
+      deps.onPollComplete?.(innerOrch.getAllItems(), { items: [], readyIds: [] }, 1000);
+      return {};
+    };
+
+    const runner = makeEngineRunner(
+      orch,
+      runLoop,
+      logs,
+      snapshots,
+      () => currentWipLimit,
+      (limit) => {
+        currentWipLimit = limit;
+      },
+    );
+
+    const runPromise = runner.run();
+    runner.sendControl({ type: "set-review-mode", mode: "off", source: "test-1" });
+    runner.sendControl({ type: "set-collaboration-mode", mode: "shared", source: "test-2" });
+    runner.sendControl({ type: "set-wip-limit", limit: 4, source: "test-3" });
+    runner.sendControl({ type: "set-merge-strategy", strategy: "auto", source: "test-4" });
+    continueLoop();
+    await runPromise;
+
+    expect(logs.map((entry) => entry.event)).toEqual([
+      "review_mode_changed",
+      "collaboration_mode_changed",
+      "wip_limit_changed",
+    ]);
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]!.runtime).toEqual({
+      mergeStrategy: "manual",
+      wipLimit: 2,
+      reviewMode: "ninthwave-prs",
+      collaborationMode: "local",
+    });
+    expect(snapshots[1]!.runtime).toEqual({
+      mergeStrategy: "auto",
+      wipLimit: 4,
+      reviewMode: "off",
+      collaborationMode: "shared",
+    });
+    expect(orch.config.mergeStrategy).toBe("auto");
+    expect(orch.config.skipReview).toBe(true);
+  });
+});
+
+describe("shared engine wrappers", () => {
+  it("binds detached daemon mode and interactive child mode to the same runner entry", () => {
+    const sharedRunner = {
+      run: vi.fn(async () => ({})),
+      sendControl: vi.fn(),
+      createRuntimeControlHandlers: vi.fn(),
+    };
+    const createRunner = vi.fn(() => sharedRunner);
+    const orch = new Orchestrator({ wipLimit: 1, mergeStrategy: "auto" });
+    const deps = {
+      orch,
+      ctx: defaultCtx,
+      loopDeps: {
+        buildSnapshot: () => ({ items: [], readyIds: [] }),
+        sleep: () => Promise.resolve(),
+        log: () => {},
+        actionDeps: mockActionDeps(),
+      },
+      runLoop: vi.fn(async () => ({})),
+      emitLog: vi.fn(),
+      emitSnapshot: vi.fn(),
+      buildState: (items: OrchestratorItem[], heartbeats: ReadonlyMap<string, any>) =>
+        serializeOrchestratorState(items, 1, "2026-04-01T00:00:00.000Z", { heartbeats }),
+      initialReviewMode: "ninthwave-prs" as const,
+      initialCollaborationMode: "local" as const,
+      getWipLimit: () => 1,
+      setWipLimit: () => {},
+    };
+
+    const detached = createDetachedDaemonEngineRunner(deps as any, createRunner as any);
+    const interactive = createInteractiveChildEngineRunner(deps as any, createRunner as any);
+
+    expect(detached).toBe(sharedRunner);
+    expect(interactive).toBe(sharedRunner);
+    expect(createRunner).toHaveBeenCalledTimes(2);
+    expect(createRunner).toHaveBeenNthCalledWith(1, deps);
+    expect(createRunner).toHaveBeenNthCalledWith(2, deps);
   });
 });
 
