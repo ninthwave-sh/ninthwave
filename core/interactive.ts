@@ -13,6 +13,13 @@ import type { ConnectionAction } from "./commands/crew.ts";
 import { isCrewCode } from "./commands/crew.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 import {
+  STARTUP_COLLABORATION_MODE_OPTIONS,
+  STARTUP_MERGE_STRATEGY_OPTIONS,
+  STARTUP_REVIEW_MODE_OPTIONS,
+  type StartupReviewMode as ReviewMode,
+  type TuiSettingsDefaults,
+} from "./tui-settings.ts";
+import {
   runSelectionScreen,
   createProcessIO,
   type WidgetIO,
@@ -49,6 +56,8 @@ export interface InteractiveDeps {
   showConnectionStep?: boolean;
   /** Default review mode from project config. */
   defaultReviewMode?: "all" | "mine" | "off";
+  /** Resolved startup settings defaults for future TUI settings widgets. */
+  defaultSettings?: TuiSettingsDefaults;
   /** Pre-detected installed AI tool profiles. Skip tool step if undefined or single entry. */
   installedTools?: AiToolProfile[];
   /** Pre-selected tool IDs from user config (multi-select). */
@@ -69,26 +78,7 @@ const defaultPrompt: PromptFn = (question: string): Promise<string> => {
   });
 };
 
-// ── Merge strategy descriptions ──────────────────────────────────────
-
-interface StrategyOption {
-  value: MergeStrategy;
-  label: string;
-  description: string;
-}
-
-const MERGE_STRATEGIES: StrategyOption[] = [
-  {
-    value: "auto",
-    label: "auto",
-    description: "Auto-merge when CI passes (and review completes, if enabled)",
-  },
-  {
-    value: "manual",
-    label: "manual",
-    description: "Create PR, never auto-merge -- human clicks merge",
-  },
-];
+const STARTUP_MERGE_STRATEGIES = STARTUP_MERGE_STRATEGY_OPTIONS;
 
 // ── Detection ────────────────────────────────────────────────────────
 
@@ -254,36 +244,36 @@ export async function promptMergeStrategy(
   console.log();
   console.log(`${BOLD}Merge strategy:${RESET}`);
   console.log();
-  for (let i = 0; i < MERGE_STRATEGIES.length; i++) {
-    const s = MERGE_STRATEGIES[i]!;
-    const defaultTag = s.value === "auto" ? ` ${GREEN}(default)${RESET}` : "";
+  for (let i = 0; i < STARTUP_MERGE_STRATEGIES.length; i++) {
+    const s = STARTUP_MERGE_STRATEGIES[i]!;
+    const defaultTag = s.runtimeValue === "auto" ? ` ${GREEN}(default)${RESET}` : "";
     console.log(
-      `  ${BOLD}${i + 1}${RESET}. ${CYAN}${s.label}${RESET}  ${DIM}-- ${s.description}${RESET}${defaultTag}`,
+      `  ${BOLD}${i + 1}${RESET}. ${CYAN}${s.startupLabel}${RESET}  ${DIM}-- ${s.startupDescription}${RESET}${defaultTag}`,
     );
   }
   console.log();
 
   while (true) {
     const answer = await prompt(
-      `${BOLD}Choose [1-${MERGE_STRATEGIES.length}]: ${RESET}`,
+      `${BOLD}Choose [1-${STARTUP_MERGE_STRATEGIES.length}]: ${RESET}`,
     );
 
     // Default to auto on empty input
     if (answer === "") return "auto";
 
     const idx = parseInt(answer, 10) - 1;
-    if (idx >= 0 && idx < MERGE_STRATEGIES.length) {
-      return MERGE_STRATEGIES[idx]!.value;
+    if (idx >= 0 && idx < STARTUP_MERGE_STRATEGIES.length) {
+      return STARTUP_MERGE_STRATEGIES[idx]!.runtimeValue;
     }
 
     // Also accept typing the name directly
-    const byName = MERGE_STRATEGIES.find(
-      (s) => s.value === answer.toLowerCase(),
+    const byName = STARTUP_MERGE_STRATEGIES.find(
+      (s) => s.startupLabel === answer.toLowerCase(),
     );
-    if (byName) return byName.value;
+    if (byName) return byName.runtimeValue;
 
     console.log(
-      `  ${YELLOW}Enter 1-${MERGE_STRATEGIES.length} or a strategy name.${RESET}`,
+      `  ${YELLOW}Enter 1-${STARTUP_MERGE_STRATEGIES.length} or a strategy name.${RESET}`,
     );
   }
 }
@@ -311,10 +301,6 @@ export async function promptWipLimit(
   }
 }
 
-// ── Review mode prompt ──────────────────────────────────────────────
-
-export type ReviewMode = "all" | "mine" | "off";
-
 /**
  * Prompt the user to choose AI review mode.
  * Returns "all", "mine", or "off".
@@ -326,40 +312,34 @@ export async function promptReviewMode(
   console.log();
   console.log(`${BOLD}AI reviews:${RESET}`);
   console.log();
-  const options: { value: ReviewMode; label: string; description: string }[] = [
-    { value: "all", label: "all", description: "Review all PRs (including external)" },
-    { value: "mine", label: "mine", description: "Review only ninthwave-managed PRs" },
-    { value: "off", label: "off", description: "No AI reviews" },
-  ];
-
-  for (let i = 0; i < options.length; i++) {
-    const o = options[i]!;
-    const defaultTag = o.value === defaultMode ? ` ${GREEN}(default)${RESET}` : "";
+  for (let i = 0; i < STARTUP_REVIEW_MODE_OPTIONS.length; i++) {
+    const o = STARTUP_REVIEW_MODE_OPTIONS[i]!;
+    const defaultTag = o.persistedValue === defaultMode ? ` ${GREEN}(default)${RESET}` : "";
     console.log(
-      `  ${BOLD}${i + 1}${RESET}. ${CYAN}${o.label}${RESET}  ${DIM}-- ${o.description}${RESET}${defaultTag}`,
+      `  ${BOLD}${i + 1}${RESET}. ${CYAN}${o.startupLabel}${RESET}  ${DIM}-- ${o.startupDescription}${RESET}${defaultTag}`,
     );
   }
   console.log();
 
   while (true) {
     const answer = await prompt(
-      `${BOLD}Choose [1-${options.length}]: ${RESET}`,
+      `${BOLD}Choose [1-${STARTUP_REVIEW_MODE_OPTIONS.length}]: ${RESET}`,
     );
 
     // Default on empty input
     if (answer === "") return defaultMode;
 
     const idx = parseInt(answer, 10) - 1;
-    if (idx >= 0 && idx < options.length) {
-      return options[idx]!.value;
+    if (idx >= 0 && idx < STARTUP_REVIEW_MODE_OPTIONS.length) {
+      return STARTUP_REVIEW_MODE_OPTIONS[idx]!.persistedValue;
     }
 
     // Accept typing the name directly
-    const byName = options.find((o) => o.value === answer.toLowerCase());
-    if (byName) return byName.value;
+    const byName = STARTUP_REVIEW_MODE_OPTIONS.find((o) => o.startupLabel === answer.toLowerCase());
+    if (byName) return byName.persistedValue;
 
     console.log(
-      `  ${YELLOW}Enter 1-${options.length} or a mode name (all/mine/off).${RESET}`,
+      `  ${YELLOW}Enter 1-${STARTUP_REVIEW_MODE_OPTIONS.length} or a mode name (all/mine/off).${RESET}`,
     );
   }
 }
@@ -376,9 +356,11 @@ export async function promptConnectionMode(
   console.log();
   console.log(`${BOLD}Collaborate via ninthwave.sh:${RESET}`);
   console.log();
-  console.log(`  ${BOLD}1${RESET}. ${CYAN}share${RESET}    ${DIM}-- share this session for collaboration${RESET} ${GREEN}(default)${RESET}`);
-  console.log(`  ${BOLD}2${RESET}. ${CYAN}join${RESET}     ${DIM}-- join an existing session${RESET}`);
-  console.log(`  ${BOLD}3${RESET}. ${CYAN}local${RESET}    ${DIM}-- local by default, no connection${RESET}`);
+  for (let i = 0; i < STARTUP_COLLABORATION_MODE_OPTIONS.length; i++) {
+    const option = STARTUP_COLLABORATION_MODE_OPTIONS[i]!;
+    const defaultTag = option.persistedValue === "share" ? ` ${GREEN}(default)${RESET}` : "";
+    console.log(`  ${BOLD}${i + 1}${RESET}. ${CYAN}${option.startupLabel}${RESET}    ${DIM}-- ${option.startupDescription}${RESET}${defaultTag}`);
+  }
   console.log();
 
   while (true) {
@@ -480,6 +462,7 @@ export async function runTuiSelectionFlow(
   try {
     const result = await runSelectionScreen(io, todos, defaultWipLimit, {
       defaultReviewMode: deps.defaultReviewMode,
+      defaultSettings: deps.defaultSettings,
       showConnectionStep: deps.showConnectionStep,
       installedTools: deps.skipToolStep ? undefined : deps.installedTools,
       savedToolIds: deps.savedToolIds,

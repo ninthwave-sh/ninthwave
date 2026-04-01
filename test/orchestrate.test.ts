@@ -4571,26 +4571,49 @@ describe("crew remote state: last broker update replaces stale snapshots", () =>
 // ── parseWatchArgs (passthrough path) ──────────────────────────────────
 
 describe("resolveInteractiveStartupConfig", () => {
-  it("uses user config for saved tool IDs and skip-tool-step behavior", () => {
+  it("prefers persisted user defaults over hardcoded local-first fallbacks", () => {
     const result = resolveInteractiveStartupConfig(
       { review_external: false, schedule_enabled: false, ai_tools: ["claude"] },
-      { ai_tools: ["opencode", "copilot"] },
+      {
+        ai_tools: ["opencode", "copilot"],
+        merge_strategy: "auto",
+        review_mode: "all",
+        collaboration_mode: "share",
+      },
     );
 
-    expect(result.defaultReviewMode).toBe("mine");
+    expect(result.defaults).toEqual({
+      mergeStrategy: "auto",
+      reviewMode: "all",
+      collaborationMode: "share",
+    });
     expect(result.savedToolIds).toEqual(["opencode", "copilot"]);
     expect(result.skipToolStep).toBe(true);
   });
 
-  it("keeps review defaults project-scoped and honors explicit tool override", () => {
+  it("falls back to manual/off/local when persisted defaults are absent", () => {
     const result = resolveInteractiveStartupConfig(
       { review_external: true, schedule_enabled: false },
       {},
+    );
+
+    expect(result.defaults).toEqual({
+      mergeStrategy: "manual",
+      reviewMode: "off",
+      collaborationMode: "local",
+    });
+    expect(result.savedToolIds).toBeUndefined();
+    expect(result.skipToolStep).toBe(false);
+  });
+
+  it("honors explicit tool override while keeping resolved startup defaults", () => {
+    const result = resolveInteractiveStartupConfig(
+      { review_external: true, schedule_enabled: false },
+      { review_mode: "mine" },
       "claude",
     );
 
-    expect(result.defaultReviewMode).toBe("all");
-    expect(result.savedToolIds).toBeUndefined();
+    expect(result.defaults.reviewMode).toBe("mine");
     expect(result.skipToolStep).toBe(true);
   });
 });

@@ -1,0 +1,248 @@
+// Shared TUI settings metadata used by startup selection and runtime controls.
+
+import type { MergeStrategy } from "./orchestrator.ts";
+
+export type StartupReviewMode = "off" | "mine" | "all";
+export type ReviewMode = "off" | "ninthwave-prs" | "all-prs";
+
+export type StartupCollaborationMode = "local" | "share" | "join";
+export type CollaborationMode = "local" | "shared" | "joined";
+
+export type PersistedMergeStrategy = Extract<MergeStrategy, "auto" | "manual">;
+export type PersistedReviewMode = StartupReviewMode;
+export type PersistedCollaborationMode = StartupCollaborationMode;
+
+export interface TuiSettingsDefaults {
+  mergeStrategy: PersistedMergeStrategy;
+  reviewMode: PersistedReviewMode;
+  collaborationMode: PersistedCollaborationMode;
+}
+
+export interface ChoiceSettingOption<PersistedValue extends string, RuntimeValue extends string> {
+  persistedValue: PersistedValue;
+  runtimeValue: RuntimeValue;
+  startupLabel: string;
+  startupDescription: string;
+  runtimeLabel: string;
+  runtimeKey?: string;
+  persistable: boolean;
+}
+
+export const TUI_SETTINGS_DEFAULTS: TuiSettingsDefaults = {
+  mergeStrategy: "manual",
+  reviewMode: "off",
+  collaborationMode: "local",
+};
+
+export const COLLABORATION_MODE_OPTIONS: readonly ChoiceSettingOption<PersistedCollaborationMode, CollaborationMode>[] = [
+  {
+    persistedValue: "local",
+    runtimeValue: "local",
+    startupLabel: "local",
+    startupDescription: "Local by default, no connection",
+    runtimeLabel: "Local",
+    runtimeKey: "1",
+    persistable: true,
+  },
+  {
+    persistedValue: "share",
+    runtimeValue: "shared",
+    startupLabel: "share",
+    startupDescription: "Share this session for collaboration",
+    runtimeLabel: "Share",
+    runtimeKey: "2",
+    persistable: true,
+  },
+  {
+    persistedValue: "join",
+    runtimeValue: "joined",
+    startupLabel: "join",
+    startupDescription: "Join an existing session",
+    runtimeLabel: "Join",
+    runtimeKey: "3",
+    persistable: true,
+  },
+] as const;
+
+export const STARTUP_COLLABORATION_MODE_OPTIONS = [
+  COLLABORATION_MODE_OPTIONS[1]!,
+  COLLABORATION_MODE_OPTIONS[2]!,
+  COLLABORATION_MODE_OPTIONS[0]!,
+] as const;
+
+export const REVIEW_MODE_OPTIONS: readonly ChoiceSettingOption<PersistedReviewMode, ReviewMode>[] = [
+  {
+    persistedValue: "off",
+    runtimeValue: "off",
+    startupLabel: "off",
+    startupDescription: "No AI reviews",
+    runtimeLabel: "Off",
+    runtimeKey: "4",
+    persistable: true,
+  },
+  {
+    persistedValue: "mine",
+    runtimeValue: "ninthwave-prs",
+    startupLabel: "mine",
+    startupDescription: "Review only ninthwave-managed PRs",
+    runtimeLabel: "Ninthwave PRs",
+    runtimeKey: "5",
+    persistable: true,
+  },
+  {
+    persistedValue: "all",
+    runtimeValue: "all-prs",
+    startupLabel: "all",
+    startupDescription: "Review all PRs (including external)",
+    runtimeLabel: "All PRs",
+    runtimeKey: "6",
+    persistable: true,
+  },
+] as const;
+
+export const STARTUP_REVIEW_MODE_OPTIONS = [
+  REVIEW_MODE_OPTIONS[2]!,
+  REVIEW_MODE_OPTIONS[1]!,
+  REVIEW_MODE_OPTIONS[0]!,
+] as const;
+
+export const MERGE_STRATEGY_OPTIONS: readonly ChoiceSettingOption<PersistedMergeStrategy, MergeStrategy>[] = [
+  {
+    persistedValue: "manual",
+    runtimeValue: "manual",
+    startupLabel: "manual",
+    startupDescription: "Create PR, never auto-merge -- human clicks merge",
+    runtimeLabel: "Manual",
+    runtimeKey: "7",
+    persistable: true,
+  },
+  {
+    persistedValue: "auto",
+    runtimeValue: "auto",
+    startupLabel: "auto",
+    startupDescription: "Auto-merge when CI passes (and review completes, if enabled)",
+    runtimeLabel: "Auto",
+    runtimeKey: "8",
+    persistable: true,
+  },
+  {
+    persistedValue: "manual",
+    runtimeValue: "bypass",
+    startupLabel: "bypass",
+    startupDescription: "Merge immediately without waiting for review or CI",
+    runtimeLabel: "Bypass",
+    runtimeKey: "9",
+    persistable: false,
+  },
+] as const;
+
+export const STARTUP_MERGE_STRATEGY_OPTIONS = [
+  MERGE_STRATEGY_OPTIONS[1]!,
+  MERGE_STRATEGY_OPTIONS[0]!,
+] as const;
+
+export const TUI_SETTINGS_ROWS = [
+  {
+    id: "collaboration_mode",
+    title: "Collaboration",
+    kind: "choice",
+    options: COLLABORATION_MODE_OPTIONS,
+  },
+  {
+    id: "review_mode",
+    title: "Reviews",
+    kind: "choice",
+    options: REVIEW_MODE_OPTIONS,
+  },
+  {
+    id: "merge_strategy",
+    title: "Merge",
+    kind: "choice",
+    options: MERGE_STRATEGY_OPTIONS,
+  },
+  {
+    id: "wip_limit",
+    title: "WIP Limit",
+    kind: "number",
+    min: 1,
+  },
+] as const;
+
+function hasPersistedValue<PersistedValue extends string, RuntimeValue extends string>(
+  options: readonly ChoiceSettingOption<PersistedValue, RuntimeValue>[],
+  value: unknown,
+): value is PersistedValue {
+  return options.some((option) => option.persistable && option.persistedValue === value);
+}
+
+function getByRuntimeValue<PersistedValue extends string, RuntimeValue extends string>(
+  options: readonly ChoiceSettingOption<PersistedValue, RuntimeValue>[],
+  value: RuntimeValue,
+): ChoiceSettingOption<PersistedValue, RuntimeValue> {
+  const option = options.find((candidate) => candidate.runtimeValue === value);
+  if (!option) {
+    throw new Error(`Unknown TUI settings runtime value: ${String(value)}`);
+  }
+  return option;
+}
+
+function getByPersistedValue<PersistedValue extends string, RuntimeValue extends string>(
+  options: readonly ChoiceSettingOption<PersistedValue, RuntimeValue>[],
+  value: PersistedValue,
+): ChoiceSettingOption<PersistedValue, RuntimeValue> {
+  const option = options.find((candidate) => candidate.persistable && candidate.persistedValue === value);
+  if (!option) {
+    throw new Error(`Unknown TUI settings persisted value: ${String(value)}`);
+  }
+  return option;
+}
+
+export function isPersistedMergeStrategy(value: unknown): value is PersistedMergeStrategy {
+  return hasPersistedValue(MERGE_STRATEGY_OPTIONS, value);
+}
+
+export function isPersistedReviewMode(value: unknown): value is PersistedReviewMode {
+  return hasPersistedValue(REVIEW_MODE_OPTIONS, value);
+}
+
+export function isPersistedCollaborationMode(value: unknown): value is PersistedCollaborationMode {
+  return hasPersistedValue(COLLABORATION_MODE_OPTIONS, value);
+}
+
+export function persistedReviewModeToRuntime(mode: PersistedReviewMode): ReviewMode {
+  return getByPersistedValue(REVIEW_MODE_OPTIONS, mode).runtimeValue;
+}
+
+export function persistedCollaborationModeToRuntime(mode: PersistedCollaborationMode): CollaborationMode {
+  return getByPersistedValue(COLLABORATION_MODE_OPTIONS, mode).runtimeValue;
+}
+
+export function reviewModeLabel(mode: ReviewMode): string {
+  return getByRuntimeValue(REVIEW_MODE_OPTIONS, mode).runtimeLabel;
+}
+
+export function collaborationLabel(mode: CollaborationMode): string {
+  return getByRuntimeValue(COLLABORATION_MODE_OPTIONS, mode).runtimeLabel;
+}
+
+export function resolveTuiSettingsDefaults(userConfig: {
+  merge_strategy?: unknown;
+  review_mode?: unknown;
+  collaboration_mode?: unknown;
+}): TuiSettingsDefaults {
+  return {
+    mergeStrategy: isPersistedMergeStrategy(userConfig.merge_strategy)
+      ? userConfig.merge_strategy
+      : TUI_SETTINGS_DEFAULTS.mergeStrategy,
+    reviewMode: isPersistedReviewMode(userConfig.review_mode)
+      ? userConfig.review_mode
+      : TUI_SETTINGS_DEFAULTS.reviewMode,
+    collaborationMode: isPersistedCollaborationMode(userConfig.collaboration_mode)
+      ? userConfig.collaboration_mode
+      : TUI_SETTINGS_DEFAULTS.collaborationMode,
+  };
+}
+
+export const REVIEW_MODE_CYCLE: ReviewMode[] = REVIEW_MODE_OPTIONS.map((option) => option.runtimeValue);
+
+export const COLLABORATION_MODE_CYCLE: CollaborationMode[] = COLLABORATION_MODE_OPTIONS.map((option) => option.runtimeValue);

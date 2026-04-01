@@ -8,12 +8,16 @@ import {
   type ViewOptions,
   type PanelMode,
   type LogEntry as PanelLogEntry,
-  type CollaborationMode,
-  type ReviewMode,
   getTerminalHeight,
   clampScrollOffset,
   detailOverlayMaxScroll,
 } from "./status-render.ts";
+import {
+  COLLABORATION_MODE_CYCLE,
+  REVIEW_MODE_CYCLE,
+  type CollaborationMode,
+  type ReviewMode,
+} from "./tui-settings.ts";
 
 // ── Log ring buffer ────────────────────────────────────────────────
 
@@ -72,13 +76,8 @@ function extractLogLevel(message: string): string {
 }
 
 // Re-export runtime control types from status-render for consumers
-export type { CollaborationMode, ReviewMode } from "./status-render.ts";
-
-/** Cycle order for review mode. */
-export const REVIEW_MODE_CYCLE: ReviewMode[] = ["off", "ninthwave-prs", "all-prs"];
-
-/** Cycle order for collaboration mode. */
-export const COLLABORATION_MODE_CYCLE: CollaborationMode[] = ["local", "shared", "joined"];
+export type { CollaborationMode, ReviewMode } from "./tui-settings.ts";
+export { REVIEW_MODE_CYCLE, COLLABORATION_MODE_CYCLE };
 
 /** Debounce window for merge strategy changes triggered from the TUI. */
 export const STRATEGY_DEBOUNCE_MS = 5000;

@@ -3,6 +3,14 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
+import {
+  isPersistedCollaborationMode,
+  isPersistedMergeStrategy,
+  isPersistedReviewMode,
+  type PersistedCollaborationMode,
+  type PersistedMergeStrategy,
+  type PersistedReviewMode,
+} from "./tui-settings.ts";
 
 /** Project config shape. */
 export interface ProjectConfig {
@@ -81,6 +89,9 @@ export function saveConfig(
 export interface UserConfig {
   ai_tools?: string[];
   wip_limit?: number;
+  merge_strategy?: PersistedMergeStrategy;
+  review_mode?: PersistedReviewMode;
+  collaboration_mode?: PersistedCollaborationMode;
 }
 
 /**
@@ -108,6 +119,15 @@ export function loadUserConfig(homeOverride?: string): UserConfig {
     }
     if (typeof parsed.wip_limit === "number" && Number.isFinite(parsed.wip_limit) && parsed.wip_limit >= 1) {
       result.wip_limit = Math.floor(parsed.wip_limit);
+    }
+    if (isPersistedMergeStrategy(parsed.merge_strategy)) {
+      result.merge_strategy = parsed.merge_strategy;
+    }
+    if (isPersistedReviewMode(parsed.review_mode)) {
+      result.review_mode = parsed.review_mode;
+    }
+    if (isPersistedCollaborationMode(parsed.collaboration_mode)) {
+      result.collaboration_mode = parsed.collaboration_mode;
     }
     return result;
   } catch {
@@ -146,9 +166,40 @@ export function saveUserConfig(
 
   const merged = { ...existing };
   for (const [key, value] of Object.entries(updates)) {
-    if (value !== undefined) {
-      merged[key] = value;
+    if (value === undefined) {
+      continue;
     }
+    if (key === "merge_strategy") {
+      if (isPersistedMergeStrategy(value)) {
+        merged[key] = value;
+      }
+      continue;
+    }
+    if (key === "review_mode") {
+      if (isPersistedReviewMode(value)) {
+        merged[key] = value;
+      }
+      continue;
+    }
+    if (key === "collaboration_mode") {
+      if (isPersistedCollaborationMode(value)) {
+        merged[key] = value;
+      }
+      continue;
+    }
+    if (key === "wip_limit") {
+      if (typeof value === "number" && Number.isFinite(value) && value >= 1) {
+        merged[key] = Math.floor(value);
+      }
+      continue;
+    }
+    if (key === "ai_tools") {
+      if (Array.isArray(value) && value.every((entry) => typeof entry === "string") && value.length > 0) {
+        merged[key] = value;
+      }
+      continue;
+    }
+    merged[key] = value;
   }
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n");

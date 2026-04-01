@@ -294,6 +294,44 @@ describe("loadUserConfig", () => {
     expect(Object.keys(config)).toEqual(["ai_tools"]);
   });
 
+  it("reads persisted TUI defaults from valid JSON", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({
+        merge_strategy: "auto",
+        review_mode: "all",
+        collaboration_mode: "share",
+      }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.merge_strategy).toBe("auto");
+    expect(config.review_mode).toBe("all");
+    expect(config.collaboration_mode).toBe("share");
+  });
+
+  it("ignores invalid persisted TUI enum values safely", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({
+        merge_strategy: "bypass",
+        review_mode: "sometimes",
+        collaboration_mode: "remote",
+      }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.merge_strategy).toBeUndefined();
+    expect(config.review_mode).toBeUndefined();
+    expect(config.collaboration_mode).toBeUndefined();
+  });
+
   it("reads wip_limit from valid JSON", () => {
     const tmpHome = setupTempRepo();
     const configDir = join(tmpHome, ".ninthwave");
@@ -413,6 +451,38 @@ describe("saveUserConfig", () => {
     const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
     expect(content.ai_tools).toEqual(["claude"]);
     expect(content.wip_limit).toBe(3);
+  });
+
+  it("round-trips persisted TUI defaults without dropping unknown keys", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ custom_key: "hello" }),
+    );
+
+    saveUserConfig({
+      merge_strategy: "auto",
+      review_mode: "mine",
+      collaboration_mode: "join",
+      wip_limit: 4,
+    }, tmpHome);
+
+    const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
+    expect(content.custom_key).toBe("hello");
+    expect(content.merge_strategy).toBe("auto");
+    expect(content.review_mode).toBe("mine");
+    expect(content.collaboration_mode).toBe("join");
+    expect(content.wip_limit).toBe(4);
+
+    const config = loadUserConfig(tmpHome);
+    expect(config).toMatchObject({
+      merge_strategy: "auto",
+      review_mode: "mine",
+      collaboration_mode: "join",
+      wip_limit: 4,
+    });
   });
 
   it("preserves unknown keys in config file", () => {

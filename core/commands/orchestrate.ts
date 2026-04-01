@@ -43,6 +43,10 @@ import type { WorkItem, LogEntry } from "../types.ts";
 import { ID_IN_FILENAME, PRIORITY_NUM } from "../types.ts";
 import { loadConfig, saveConfig, loadUserConfig, saveUserConfig } from "../config.ts";
 import type { ProjectConfig, UserConfig } from "../config.ts";
+import {
+  resolveTuiSettingsDefaults,
+  type TuiSettingsDefaults,
+} from "../tui-settings.ts";
 import { preflight } from "../preflight.ts";
 import {
   collectRunMetrics,
@@ -192,18 +196,18 @@ export function getTmuxStartupInfo(
 }
 
 export interface InteractiveStartupConfig {
-  defaultReviewMode: "all" | "mine";
+  defaults: TuiSettingsDefaults;
   savedToolIds?: string[];
   skipToolStep: boolean;
 }
 
 export function resolveInteractiveStartupConfig(
-  projectConfig: ProjectConfig,
+  _projectConfig: ProjectConfig,
   userConfig: UserConfig,
   toolOverride?: string,
 ): InteractiveStartupConfig {
   return {
-    defaultReviewMode: projectConfig.review_external ? "all" : "mine",
+    defaults: resolveTuiSettingsDefaults(userConfig),
     savedToolIds: userConfig.ai_tools,
     skipToolStep: !!toolOverride || (userConfig.ai_tools?.length ?? 0) > 0,
   };
@@ -2297,17 +2301,18 @@ export async function cmdOrchestrate(
   // Parse work items (needed for both interactive and flag-based modes)
   // Pass projectRoot to filter to only items pushed to origin/main
   const workItems = parseWorkItems(workDir, worktreeDir, projectRoot);
+  const preConfig = loadConfig(projectRoot);
+  const interactiveStartupConfig = resolveInteractiveStartupConfig(preConfig, persistedUserCfg, toolOverride);
 
   // Interactive mode: no --items and stdin is a TTY
   let interactiveSkipReview = false;
   if (shouldEnterInteractive(itemIds.length > 0)) {
     // Pre-detect tools and config for TUI flow
     const installedTools = detectInstalledAITools();
-    const preConfig = loadConfig(projectRoot);
-    const interactiveStartupConfig = resolveInteractiveStartupConfig(preConfig, persistedUserCfg, toolOverride);
 
     const result = await runInteractiveFlow(workItems, wipLimit, {
-      defaultReviewMode: interactiveStartupConfig.defaultReviewMode,
+      defaultReviewMode: interactiveStartupConfig.defaults.reviewMode,
+      defaultSettings: interactiveStartupConfig.defaults,
       installedTools,
       savedToolIds: interactiveStartupConfig.savedToolIds,
       skipToolStep: interactiveStartupConfig.skipToolStep,

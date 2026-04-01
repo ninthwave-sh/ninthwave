@@ -14,14 +14,19 @@ import {
 import type { DaemonState } from "./daemon.ts";
 import type { MergeStrategy, PollSnapshot } from "./orchestrator.ts";
 import { ghFailureKindLabel } from "./gh.ts";
+import {
+  COLLABORATION_MODE_OPTIONS,
+  MERGE_STRATEGY_OPTIONS,
+  REVIEW_MODE_OPTIONS,
+  collaborationLabel,
+  reviewModeLabel,
+  type CollaborationMode,
+  type ReviewMode,
+} from "./tui-settings.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-/** Collaboration mode: local-only, sharing a session, or joined to another. */
-export type CollaborationMode = "local" | "shared" | "joined";
-
-/** AI review mode: off (skip gate), ninthwave-prs (review ninthwave-managed PRs), all-prs (review everything). */
-export type ReviewMode = "off" | "ninthwave-prs" | "all-prs";
+export type { CollaborationMode, ReviewMode } from "./tui-settings.ts";
 
 /** Crew status info for TUI display. */
 export interface CrewStatusInfo {
@@ -2292,23 +2297,7 @@ export function renderHelpOverlay(
 
 // ─── Controls overlay ───────────────────────────────────────────────────────
 
-/** Human-readable label for a collaboration mode. */
-export function collaborationLabel(mode: CollaborationMode): string {
-  switch (mode) {
-    case "local": return "Local";
-    case "shared": return "Share";
-    case "joined": return "Join";
-  }
-}
-
-/** Human-readable label for a review mode. */
-export function reviewModeLabel(mode: ReviewMode): string {
-  switch (mode) {
-    case "off": return "Off";
-    case "ninthwave-prs": return "Ninthwave PRs";
-    case "all-prs": return "All PRs";
-  }
-}
+export { collaborationLabel, reviewModeLabel } from "./tui-settings.ts";
 
 /**
  * Render a full-screen controls overlay for runtime settings.
@@ -2330,14 +2319,12 @@ export function renderControlsOverlay(
   const sections: string[][] = [];
 
   // Collaboration section
-  const collabOptions: [string, CollaborationMode][] = [
-    ["1", "local"], ["2", "shared"], ["3", "joined"],
-  ];
-  const collabLine = collabOptions.map(([key, mode]) => {
-    const label = collaborationLabel(mode);
+  const collabLine = COLLABORATION_MODE_OPTIONS.map((option) => {
+    const key = option.runtimeKey!;
+    const mode = option.runtimeValue;
     return mode === collaborationMode
-      ? `${BOLD}[${key}] ${label}${RESET}`
-      : `${DIM}[${key}]${RESET} ${label}`;
+      ? `${BOLD}[${key}] ${option.runtimeLabel}${RESET}`
+      : `${DIM}[${key}]${RESET} ${option.runtimeLabel}`;
   }).join("   ");
   sections.push([
     `${BOLD}Collaboration${RESET}`,
@@ -2345,14 +2332,12 @@ export function renderControlsOverlay(
   ]);
 
   // Reviews section
-  const reviewOptions: [string, ReviewMode][] = [
-    ["4", "off"], ["5", "ninthwave-prs"], ["6", "all-prs"],
-  ];
-  const reviewLine = reviewOptions.map(([key, mode]) => {
-    const label = reviewModeLabel(mode);
+  const reviewLine = REVIEW_MODE_OPTIONS.map((option) => {
+    const key = option.runtimeKey!;
+    const mode = option.runtimeValue;
     return mode === reviewMode
-      ? `${BOLD}[${key}] ${label}${RESET}`
-      : `${DIM}[${key}]${RESET} ${label}`;
+      ? `${BOLD}[${key}] ${option.runtimeLabel}${RESET}`
+      : `${DIM}[${key}]${RESET} ${option.runtimeLabel}`;
   }).join("   ");
   sections.push([
     `${BOLD}Reviews${RESET}`,
@@ -2360,15 +2345,14 @@ export function renderControlsOverlay(
   ]);
 
   // Merge section
-  const mergeOptions: [string, MergeStrategy, string][] = [
-    ["7", "manual", "Manual"],
-    ["8", "auto", "Auto"],
-  ];
-  if (bypassEnabled) mergeOptions.push(["9", "bypass", "Bypass"]);
-  const mergeLine = mergeOptions.map(([key, strat, label]) => {
-    return strat === mergeStrategy
-      ? `${BOLD}[${key}] ${strategyIndicator(strat)} ${label}${RESET}`
-      : `${DIM}[${key}]${RESET} ${strategyIndicator(strat)} ${label}`;
+  const mergeLine = MERGE_STRATEGY_OPTIONS
+    .filter((option) => bypassEnabled || option.runtimeValue !== "bypass")
+    .map((option) => {
+      const key = option.runtimeKey!;
+      const strat = option.runtimeValue;
+      return strat === mergeStrategy
+        ? `${BOLD}[${key}] ${strategyIndicator(strat)} ${option.runtimeLabel}${RESET}`
+        : `${DIM}[${key}]${RESET} ${strategyIndicator(strat)} ${option.runtimeLabel}`;
   }).join("   ");
   sections.push([
     `${BOLD}Merge${RESET}`,

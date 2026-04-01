@@ -9,6 +9,7 @@ import { PRIORITY_NUM } from "./types.ts";
 import type { MergeStrategy } from "./orchestrator.ts";
 import type { ConnectionAction } from "./commands/crew.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
+import type { TuiSettingsDefaults } from "./tui-settings.ts";
 
 // ── ANSI escape helpers ─────────────────────────────────────────────
 
@@ -655,6 +656,7 @@ export async function runSelectionScreen(
   defaultWipLimit: number,
   opts: {
     defaultReviewMode?: "all" | "mine" | "off";
+    defaultSettings?: TuiSettingsDefaults;
     showConnectionStep?: boolean;
     /** Installed AI tools for the tool selection step. Empty/single = skip screen. */
     installedTools?: AiToolProfile[];
