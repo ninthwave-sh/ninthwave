@@ -1236,35 +1236,73 @@ export function mapDaemonItemState(orchState: string, flags?: { rebaseRequested?
   }
 }
 
+export function normalizeRemoteItemState(state: ItemState): ItemState {
+  return state === "merged" ? "verifying" : state;
+}
+
+export function buildDisplayPrContext(
+  localPrNumber: number | null | undefined,
+  localPriorPrNumbers?: number[],
+  remotePrNumber?: number | null,
+  remotePriorPrNumbers?: number[],
+): { prNumber: number | null; priorPrNumbers?: number[] } {
+  const prNumber = remotePrNumber !== undefined ? remotePrNumber : (localPrNumber ?? null);
+  const priorPrNumbers = [...(remotePriorPrNumbers ?? localPriorPrNumbers ?? [])];
+
+  if (
+    remotePrNumber !== undefined
+    && remotePrNumber !== null
+    && localPrNumber != null
+    && localPrNumber !== remotePrNumber
+    && !priorPrNumbers.includes(localPrNumber)
+  ) {
+    priorPrNumbers.push(localPrNumber);
+  }
+
+  return {
+    prNumber,
+    ...(priorPrNumbers.length > 0 ? { priorPrNumbers } : {}),
+  };
+}
+
 /**
  * Convert daemon state items to StatusItems for display.
  * Uses the state file data (fast, no GitHub API calls).
  */
 export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
-  return state.items.map((item) => ({
-    id: item.id,
-    title: item.remoteSnapshot?.title ?? item.title,
-    ...(item.descriptionSnippet ? { descriptionSnippet: item.descriptionSnippet } : {}),
-    state: item.remoteSnapshot?.state ?? mapDaemonItemState(item.state, { rebaseRequested: item.rebaseRequested }),
-    prNumber: item.remoteSnapshot
-      ? item.remoteSnapshot.prNumber ?? null
-      : item.prNumber,
-    priorPrNumbers: item.priorPrNumbers,
-    ageMs: Date.now() - new Date(item.lastTransition).getTime(),
-    repoLabel: "",
-    failureReason: item.failureReason,
-    dependencies: item.dependencies ?? [],
-    startedAt: item.startedAt,
-    endedAt: item.endedAt,
-    exitCode: item.exitCode,
-    stderrTail: item.stderrTail,
-    worktreePath: item.worktreePath,
-    workspaceRef: item.workspaceRef,
-    progress: item.progress,
-    progressLabel: item.progressLabel,
-    progressTs: item.progressTs,
-    remote: item.remoteSnapshot ? item.remoteSnapshot.ownerDaemonId !== null : false,
-  }));
+  return state.items.map((item) => {
+    const prContext = buildDisplayPrContext(
+      item.prNumber,
+      item.priorPrNumbers,
+      item.remoteSnapshot ? (item.remoteSnapshot.prNumber ?? null) : undefined,
+      item.remoteSnapshot?.priorPrNumbers,
+    );
+
+    return {
+      id: item.id,
+      title: item.remoteSnapshot?.title ?? item.title,
+      ...(item.descriptionSnippet ? { descriptionSnippet: item.descriptionSnippet } : {}),
+      state: item.remoteSnapshot
+        ? normalizeRemoteItemState(item.remoteSnapshot.state)
+        : mapDaemonItemState(item.state, { rebaseRequested: item.rebaseRequested }),
+      prNumber: prContext.prNumber,
+      ...(prContext.priorPrNumbers ? { priorPrNumbers: prContext.priorPrNumbers } : {}),
+      ageMs: Date.now() - new Date(item.lastTransition).getTime(),
+      repoLabel: "",
+      failureReason: item.failureReason,
+      dependencies: item.dependencies ?? [],
+      startedAt: item.startedAt,
+      endedAt: item.endedAt,
+      exitCode: item.exitCode,
+      stderrTail: item.stderrTail,
+      worktreePath: item.worktreePath,
+      workspaceRef: item.workspaceRef,
+      progress: item.progress,
+      progressLabel: item.progressLabel,
+      progressTs: item.progressTs,
+      remote: item.remoteSnapshot ? item.remoteSnapshot.ownerDaemonId !== null : false,
+    };
+  });
 }
 
 export function wrapDetailText(text: string, maxWidth: number): string[] {

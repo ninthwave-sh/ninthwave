@@ -98,6 +98,7 @@ export interface DaemonRemoteItemSnapshot {
   ownerName: string | null;
   title?: string;
   prNumber?: number | null;
+  priorPrNumbers?: number[];
 }
 
 export interface DaemonCrewStatus {
@@ -659,6 +660,7 @@ export function serializeOrchestratorState(
                 ownerName: remoteSnapshot.ownerName,
                 ...(remoteSnapshot.title ? { title: remoteSnapshot.title } : {}),
                 ...(remoteSnapshot.prNumber !== undefined ? { prNumber: remoteSnapshot.prNumber } : {}),
+                ...(remoteSnapshot.priorPrNumbers?.length ? { priorPrNumbers: remoteSnapshot.priorPrNumbers } : {}),
               },
             }
           : {}),

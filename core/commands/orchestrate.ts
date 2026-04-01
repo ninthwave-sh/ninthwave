@@ -82,10 +82,12 @@ import {
 } from "../daemon.ts";
 import type { TokenUsage } from "../crew.ts";
 import {
+  buildDisplayPrContext,
   buildVisibleStatusLayoutMetadata,
   daemonStateToStatusItems,
   formatStatusTable,
   mapDaemonItemState,
+  normalizeRemoteItemState,
   getTerminalWidth,
   getTerminalHeight,
   buildStatusLayout,
@@ -864,10 +866,16 @@ export function orchestratorItemsToStatusItems(
     const remoteSnapshot = remoteSnapshots?.get(item.id);
     const heartbeat = remoteSnapshot ? undefined : heartbeats?.get(item.id);
     const mappedState = mapDaemonItemState(item.state, { rebaseRequested: item.rebaseRequested });
-    const state = remoteSnapshot?.state ?? mappedState;
+    const state = remoteSnapshot ? normalizeRemoteItemState(remoteSnapshot.state) : mappedState;
     const remote = remoteSnapshot
       ? remoteSnapshot.ownerDaemonId !== null
       : (remoteIds?.has(item.id) ?? false);
+    const prContext = buildDisplayPrContext(
+      item.prNumber,
+      item.priorPrNumbers,
+      remoteSnapshot ? (remoteSnapshot.prNumber ?? null) : undefined,
+      remoteSnapshot?.priorPrNumbers,
+    );
 
     return {
       id: item.id,
@@ -876,9 +884,8 @@ export function orchestratorItemsToStatusItems(
         ? { descriptionSnippet: item.workItem.descriptionSnippet }
         : {}),
       state,
-      prNumber: remoteSnapshot
-        ? remoteSnapshot.prNumber ?? null
-        : item.prNumber ?? null,
+      prNumber: prContext.prNumber,
+      ...(prContext.priorPrNumbers ? { priorPrNumbers: prContext.priorPrNumbers } : {}),
       ageMs: now - new Date(item.lastTransition).getTime(),
       timeoutRemainingMs: item.timeoutDeadline
         ? Math.max(0, new Date(item.timeoutDeadline).getTime() - now)
@@ -1969,15 +1976,26 @@ export interface CompletionSummaryItem {
   state: string;
   startedAt?: string;
   endedAt?: string;
+  remoteSnapshot?: { state: string };
+}
+
+function completionSummaryState(item: CompletionSummaryItem): "done" | "stuck" | "queued" | "active" {
+  const state = item.remoteSnapshot?.state ?? item.state;
+
+  if (state === "done") return "done";
+  if (state === "stuck") return "stuck";
+  if (state === "queued" || state === "ready") return "queued";
+  return "active";
 }
 
 export function formatExitSummary(
   allItems: CompletionSummaryItem[],
   runStartTime: string,
 ): string {
-  const merged = allItems.filter((i) => i.state === "done").length;
-  const stuck = allItems.filter((i) => i.state === "stuck").length;
-  const queued = allItems.filter((i) => i.state === "queued" || i.state === "ready").length;
+  const merged = allItems.filter((i) => completionSummaryState(i) === "done").length;
+  const stuck = allItems.filter((i) => completionSummaryState(i) === "stuck").length;
+  const queued = allItems.filter((i) => completionSummaryState(i) === "queued").length;
+  const active = allItems.filter((i) => completionSummaryState(i) === "active").length;
 
   // Duration
   const elapsed = Math.max(0, Date.now() - new Date(runStartTime).getTime());
@@ -1985,11 +2003,13 @@ export function formatExitSummary(
   const seconds = Math.floor((elapsed % 60_000) / 1000);
   const durationStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 
-  let line = `ninthwave: ${merged} merged, ${stuck} stuck, ${queued} queued (${durationStr})`;
+  let line = active > 0
+    ? `ninthwave: ${merged} done, ${active} active, ${stuck} stuck, ${queued} queued (${durationStr})`
+    : `ninthwave: ${merged} merged, ${stuck} stuck, ${queued} queued (${durationStr})`;
 
   // Lead time (time from start to done for each completed item)
   const leadTimes = allItems
-    .filter((i) => i.state === "done" && i.startedAt && i.endedAt)
+    .filter((i) => completionSummaryState(i) === "done" && i.startedAt && i.endedAt)
     .map((i) => new Date(i.endedAt!).getTime() - new Date(i.startedAt!).getTime())
     .filter((ms) => ms > 0)
     .sort((a, b) => a - b);
@@ -2023,8 +2043,9 @@ export function formatCompletionBanner(
   allItems: CompletionSummaryItem[],
   runStartTime: string,
 ): string[] {
-  const merged = allItems.filter((i) => i.state === "done").length;
-  const stuck = allItems.filter((i) => i.state === "stuck").length;
+  const merged = allItems.filter((i) => completionSummaryState(i) === "done").length;
+  const stuck = allItems.filter((i) => completionSummaryState(i) === "stuck").length;
+  const active = allItems.filter((i) => completionSummaryState(i) === "active").length;
   const total = allItems.length;
 
   const elapsed = Math.max(0, Date.now() - new Date(runStartTime).getTime());
@@ -2034,10 +2055,14 @@ export function formatCompletionBanner(
 
   const lines: string[] = [];
   lines.push("");
-  lines.push(`  All ${total} items complete. ${merged} merged, ${stuck} stuck. (${durationStr})`);
+  lines.push(
+    active > 0
+      ? `  Work still in progress. ${merged} done, ${active} active, ${stuck} stuck. (${durationStr})`
+      : `  All ${total} items complete. ${merged} merged, ${stuck} stuck. (${durationStr})`,
+  );
 
   const leadTimes = allItems
-    .filter((i) => i.state === "done" && i.startedAt && i.endedAt)
+    .filter((i) => completionSummaryState(i) === "done" && i.startedAt && i.endedAt)
     .map((i) => new Date(i.endedAt!).getTime() - new Date(i.startedAt!).getTime())
     .filter((ms) => ms > 0)
     .sort((a, b) => a - b);
@@ -2518,6 +2543,10 @@ function buildCompletionReportMetadata(item: OrchestratorItem): Record<string, u
     ...(item.prNumber ? { prNumber: item.prNumber } : {}),
     ...(item.startedAt ? { durationMs: Date.now() - new Date(item.startedAt).getTime() } : {}),
   };
+}
+
+function isCrewCompletionState(item: OrchestratorItem, fixForwardEnabled: boolean): boolean {
+  return item.state === "done" || (item.state === "merged" && !fixForwardEnabled);
 }
 
 // ── Event loop ─────────────────────────────────────────────────────
@@ -3176,28 +3205,32 @@ export async function orchestrateLoop(
         interactiveTiming.timingsMs.actionExecution = elapsedMs(nowMs, actionExecutionStartMs);
       }
 
-    // Crew mode: notify broker of completed items (merge/done)
       if (deps.crewBroker) {
-      for (const action of actions) {
-        if (action.type === "merge" || action.type === "clean") {
-          const orchItem = orch.getItem(action.itemId);
-          if (orchItem && (orchItem.state === "done" || orchItem.state === "merged")) {
-            try {
-              const model = resolveCompletionModel(orchItem, ctx);
-              const tokenUsage = deps.readTokenUsage?.(orchItem, action, ctx)
-                ?? readLatestTokenUsage(ctx.projectRoot, orchItem.aiTool ?? ctx.aiTool ?? "unknown", {
-                  since: orchItem.startedAt,
-                });
-              deps.crewBroker.report("complete", action.itemId, buildCompletionReportMetadata(orchItem), {
-                model,
-                tokenUsage,
-              });
-              deps.crewBroker.complete(action.itemId);
-            } catch { /* best-effort */ }
+        for (const orchItem of orch.getAllItems()) {
+          const prevState = prevStates.get(orchItem.id);
+          if (!prevState || prevState === orchItem.state || !isCrewCompletionState(orchItem, orch.config.fixForward)) {
+            continue;
           }
+
+          try {
+            const model = resolveCompletionModel(orchItem, ctx);
+            const completionAction = actions.find((action) => action.itemId === orchItem.id)
+              ?? { type: "clean", itemId: orchItem.id };
+            const tokenUsage = deps.readTokenUsage?.(orchItem, completionAction, ctx)
+              ?? readLatestTokenUsage(ctx.projectRoot, orchItem.aiTool ?? ctx.aiTool ?? "unknown", {
+                since: orchItem.startedAt,
+              });
+            deps.crewBroker.report("complete", orchItem.id, buildCompletionReportMetadata(orchItem), {
+              model,
+              tokenUsage,
+            });
+          } catch { /* best-effort */ }
+
+          try {
+            deps.crewBroker.complete(orchItem.id);
+          } catch { /* best-effort */ }
         }
       }
-    }
 
     // Sync cmux sidebar display for active workers
       const displaySyncStartMs = interactiveTiming ? nowMs() : 0;
