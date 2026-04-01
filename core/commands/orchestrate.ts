@@ -463,6 +463,9 @@ export function renderTuiFrame(
   const statusItems = orchestratorItemsToStatusItems(items, remoteItems, maxTimeoutExtensions, heartbeats);
   const termWidth = getTerminalWidth();
   const termRows = getTerminalHeight();
+  const fullScreenViewOptions = termRows >= MIN_FULLSCREEN_ROWS
+    ? { ...(viewOptions ?? {}), inlineModeIndicatorOnTitle: true }
+    : viewOptions;
 
   write("\x1B[H");
 
@@ -472,7 +475,7 @@ export function renderTuiFrame(
     const content = helpLines.join("\n");
     write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
   } else if (termRows >= MIN_FULLSCREEN_ROWS) {
-    const layout = buildStatusLayout(statusItems, termWidth, wipLimit, false, viewOptions);
+    const layout = buildStatusLayout(statusItems, termWidth, wipLimit, false, fullScreenViewOptions);
     const clamped = clampScrollOffset(scrollOffset, layout.itemLines.length, Math.max(1, termRows - layout.headerLines.length - layout.footerLines.length));
     const frameLines = renderFullScreenFrame(layout, termRows, termWidth, clamped);
     const content = frameLines.join("\n");
@@ -502,6 +505,9 @@ export function renderTuiPanelFrame(
   const statusItems = orchestratorItemsToStatusItems(items, remoteItems, maxTimeoutExtensions, heartbeats);
   const termWidth = getTerminalWidth();
   const termRows = getTerminalHeight();
+  const fullScreenViewOptions = termRows >= MIN_FULLSCREEN_ROWS
+    ? { ...(tuiState.viewOptions ?? {}), inlineModeIndicatorOnTitle: true }
+    : tuiState.viewOptions;
 
   write("\x1B[H");
 
@@ -544,7 +550,7 @@ export function renderTuiPanelFrame(
       const filteredLogs = filterLogsByLevel(tuiState.logBuffer, tuiState.logLevelFilter);
       const panelLayout = buildPanelLayout(
         tuiState.panelMode, statusItems, filteredLogs, termWidth, termRows,
-        { wipLimit, viewOptions: tuiState.viewOptions, logScrollOffset: tuiState.logScrollOffset, statusScrollOffset: tuiState.scrollOffset, selectedIndex: tuiState.selectedIndex },
+        { wipLimit, viewOptions: fullScreenViewOptions, logScrollOffset: tuiState.logScrollOffset, statusScrollOffset: tuiState.scrollOffset, selectedIndex: tuiState.selectedIndex },
       );
       const frameLines = renderPanelFrame(panelLayout, termRows, termWidth, tuiState.scrollOffset);
       const content = frameLines.join("\n");
@@ -561,7 +567,7 @@ export function renderTuiPanelFrame(
       termRows,
       {
         wipLimit,
-        viewOptions: tuiState.viewOptions,
+        viewOptions: fullScreenViewOptions,
         logScrollOffset: tuiState.logScrollOffset,
         statusScrollOffset: tuiState.scrollOffset,
         selectedIndex: tuiState.selectedIndex,

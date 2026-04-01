@@ -82,6 +82,35 @@ function stripAnsi(s: string): string {
     .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");  // Strip CSI sequences (colors, etc.)
 }
 
+function withTerminalSize(columns: number, rows: number, fn: () => void): void {
+  const originalColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+  const originalRows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+
+  Object.defineProperty(process.stdout, "columns", {
+    value: columns,
+    configurable: true,
+  });
+  Object.defineProperty(process.stdout, "rows", {
+    value: rows,
+    configurable: true,
+  });
+
+  try {
+    fn();
+  } finally {
+    if (originalColumns) {
+      Object.defineProperty(process.stdout, "columns", originalColumns);
+    } else {
+      delete (process.stdout as unknown as Record<string, unknown>)["columns"];
+    }
+    if (originalRows) {
+      Object.defineProperty(process.stdout, "rows", originalRows);
+    } else {
+      delete (process.stdout as unknown as Record<string, unknown>)["rows"];
+    }
+  }
+}
+
 function makeStatusItem(overrides: Partial<StatusItem> = {}): StatusItem {
   return {
     id: "TEST-1",
@@ -1899,6 +1928,45 @@ describe("renderTuiFrame", () => {
     const full = stripAnsi(written.join(""));
     // The DORA-style metrics panel was removed -- only title-line metrics remain
     expect(full).not.toContain("Session Metrics");
+  });
+
+  it("inlines the mode indicator on the title line in fullscreen mode", () => {
+    withTerminalSize(120, MIN_FULLSCREEN_ROWS, () => {
+      const written: string[] = [];
+      const items = [makeOrchestratorItem("C-1-1")];
+
+      renderTuiFrame(items, 5, (s) => written.push(s), {
+        collaborationMode: "local",
+        reviewMode: "off",
+      });
+
+      const lines = stripAnsi(written.join(""))
+        .split("\n")
+        .map((line) => line.trimEnd());
+
+      expect(lines[0]).toContain("Ninthwave  local · reviews off");
+      expect(lines.slice(1).join("\n")).not.toContain("local · reviews off");
+    });
+  });
+
+  it("keeps non-fullscreen rendering out of the inline title treatment", () => {
+    withTerminalSize(120, MIN_FULLSCREEN_ROWS - 1, () => {
+      const written: string[] = [];
+      const items = [makeOrchestratorItem("C-1-1")];
+
+      renderTuiFrame(items, 5, (s) => written.push(s), {
+        collaborationMode: "local",
+        reviewMode: "off",
+      });
+
+      const lines = stripAnsi(written.join(""))
+        .split("\n")
+        .map((line) => line.trimEnd());
+
+      expect(lines[0]).toContain("Ninthwave");
+      expect(lines[0]).not.toContain("local · reviews off");
+      expect(lines.join("\n")).not.toContain("local · reviews off");
+    });
   });
 });
 
@@ -3993,6 +4061,26 @@ describe("buildStatusLayout mode indicator in header", () => {
       const headerText = layout.headerLines.map(stripAnsi).join("\n");
       expect(headerText).toContain(mode);
     }
+  });
+
+  it("keeps the separate mode line by default and only inlines when opted in", () => {
+    const items = [makeStatusItem({ state: "implementing" })];
+    const defaultLayout = buildStatusLayout(items, 100, 5, false, {
+      collaborationMode: "local",
+      reviewMode: "off",
+    });
+    const inlineLayout = buildStatusLayout(items, 100, 5, false, {
+      collaborationMode: "local",
+      reviewMode: "off",
+      inlineModeIndicatorOnTitle: true,
+    });
+
+    expect(stripAnsi(defaultLayout.headerLines[0]!)).toContain("Ninthwave");
+    expect(stripAnsi(defaultLayout.headerLines[0]!)).not.toContain("local · reviews off");
+    expect(stripAnsi(defaultLayout.headerLines[1]!)).toContain("local · reviews off");
+
+    expect(stripAnsi(inlineLayout.headerLines[0]!)).toContain("Ninthwave  local · reviews off");
+    expect(stripAnsi(inlineLayout.headerLines[1]!)).toBe("");
   });
 });
 
