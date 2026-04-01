@@ -16,6 +16,15 @@
 .claude/projects/
 .claude/worktrees/
 
+# Generated tool artifacts for this repo only
+# Canonical sources live in skills/, agents/, and CLAUDE.md.
+# Normal user repos can choose their own tracking policy.
+/.claude/agents/
+/.claude/skills/
+/.opencode/agents/
+/.github/agents/
+/.github/copilot-instructions.md
+
 # OpenCode local plans
 .opencode/plans/
 

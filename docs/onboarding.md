@@ -1,6 +1,6 @@
 # Onboarding Process
 
-How ninthwave initialises a project -- every entry point, decision, file, and symlink.
+How ninthwave initialises a project -- every entry point, decision, file, and generated managed copy.
 
 ## Entry Points
 
@@ -128,9 +128,9 @@ flowchart TD
     G --> H
 
     H --> H1["Create .ninthwave/ directories"]
-    H --> H2["Create skill symlinks<br/>.claude/skills/"]
-    H --> H3["Create agent symlinks<br/>.claude/agents/ etc."]
-    H --> H4["Update .gitignore"]
+    H --> H2["Create skill copies<br/>.claude/skills/"]
+    H --> H3["Create agent copies<br/>.claude/agents/ etc."]
+    H --> H4["Write .ninthwave/.gitignore"]
     H --> H5["Write version tracking"]
 
     H1 & H2 & H3 & H4 & H5 --> I["6. Create nw CLI alias<br/><code>createNwSymlink()</code>"]
@@ -159,7 +159,7 @@ flowchart TD
     D -->|Yes| E["Use detected tools<br/>(e.g., Claude Code, OpenCode)"]
     D -->|No| F["Fall back to ALL tool dirs"]
     E & F --> G["Checkbox: which agents?<br/>implementer ✓ reviewer ✓ forward-fixer ✓<br/><i>all pre-selected</i>"]
-    G --> H["Preview symlinks to create"]
+    G --> H["Preview managed files to create"]
     H --> I{Confirm?}
     I -->|Yes| J["AgentSelection returned"]
     I -->|No| K["Cancelled → no agents"]
@@ -171,7 +171,7 @@ flowchart TD
     N & O --> P["Auto-select ALL agents"]
     P --> J
 
-    J --> Q["buildSymlinkPlan() → executeSymlinkPlan()"]
+    J --> Q["buildCopyPlan() → executeCopyPlan()"]
 
     style G fill:#e3f2fd
     style Q fill:#e8f5e9
@@ -179,11 +179,11 @@ flowchart TD
 
 **Tool detection logic** (`core/commands/setup.ts:266-290`):
 
-| AI Tool | Detection | Target Directory | Symlink Suffix |
+| AI Tool | Detection | Target Directory | Filename Suffix |
 |---|---|---|---|
 | Claude Code | `.claude/` exists | `.claude/agents/` | `.md` |
 | OpenCode | `.opencode/` or `.opencode.json` exists | `.opencode/agents/` | `.md` |
-| GitHub Copilot | `.github/` exists | `.github/agents/` | `.agent.md` (prefixed `ninthwave-`) |
+| GitHub Copilot | `.github/copilot-instructions.md` or `.github/agents/` exists | `.github/agents/` | `.agent.md` (prefixed `ninthwave-`) |
 
 ---
 
@@ -196,7 +196,7 @@ flowchart TD
 | CI provider | `.github/workflows/*.{yml,yaml}` exists | `ci_provider` | `.ninthwave/config` |
 | Test command | `package.json` scripts: `test:ci` > `test` > first `test*` | `test_command` | `.ninthwave/config` |
 | Multiplexer | `which cmux` succeeds | `MUX` | `.ninthwave/config` |
-| AI tools | `.claude/`, `.opencode/`, `.github/copilot-instructions.md` | `AI_TOOLS` | `.ninthwave/config` |
+| AI tools | `.claude/`, `.opencode/`, `.github/copilot-instructions.md`, `.github/agents/` | `AI_TOOLS` | `.ninthwave/config` |
 | Repo type | `package.json` workspaces or `pnpm-workspace.yaml` | `REPO_TYPE` | `.ninthwave/config` |
 | Workspace config | Resolve workspace globs → packages list, detect turbo | *(structured)* | `.ninthwave/config.json` |
 | Observability | `SENTRY_AUTH_TOKEN`, `PAGERDUTY_API_TOKEN`, `LINEAR_API_KEY` env vars | *(informational)* | *(summary only)* |
@@ -224,27 +224,28 @@ Every file and directory created during onboarding:
 | `.ninthwave/schedules/` | Directory | Always | N/A | Yes | Scheduled task definitions |
 | `.ninthwave/schedules/ci--example-daily-audit.md` | File | Only on fresh init (dir is new) | **No** | Yes | Example disabled schedule |
 
-### Symlinks (tool integration)
+### Managed tool copies (tool integration)
 
 | Path | Type | When Created | Overwritten on Re-init? | Git-tracked? | Purpose |
 |---|---|---|---|---|---|
-| `.claude/skills/work` | Symlink | Always | Yes (recreated) | **No** (gitignored) | `/work` skill |
-| `.claude/skills/decompose` | Symlink | Always | Yes (recreated) | **No** (gitignored) | `/decompose` skill |
-| `.claude/agents/implementer.md` | Symlink | If Claude Code selected | Yes (recreated) | **No** (gitignored) | Implementation agent prompt |
-| `.claude/agents/reviewer.md` | Symlink | If Claude Code selected | Yes (recreated) | **No** (gitignored) | PR review agent prompt |
-| `.claude/agents/forward-fixer.md` | Symlink | If Claude Code selected | Yes (recreated) | **No** (gitignored) | CI fix-forward agent prompt |
-| `.opencode/agents/implementer.md` | Symlink | If OpenCode selected | Yes (recreated) | **No** (gitignored) | Implementation agent prompt |
-| `.opencode/agents/reviewer.md` | Symlink | If OpenCode selected | Yes (recreated) | **No** (gitignored) | PR review agent prompt |
-| `.opencode/agents/forward-fixer.md` | Symlink | If OpenCode selected | Yes (recreated) | **No** (gitignored) | CI fix-forward agent prompt |
-| `.github/agents/ninthwave-implementer.agent.md` | Symlink | If Copilot selected | Yes (recreated) | **No** (gitignored) | Implementation agent prompt |
-| `.github/agents/ninthwave-reviewer.agent.md` | Symlink | If Copilot selected | Yes (recreated) | **No** (gitignored) | PR review agent prompt |
-| `.github/agents/ninthwave-forward-fixer.agent.md` | Symlink | If Copilot selected | Yes (recreated) | **No** (gitignored) | CI fix-forward agent prompt |
+| `.claude/skills/work/` | Directory | Always | Yes (re-copied) | Repo policy | `/work` skill |
+| `.claude/skills/decompose/` | Directory | Always | Yes (re-copied) | Repo policy | `/decompose` skill |
+| `.claude/agents/implementer.md` | File | If Claude Code selected | Yes (refreshed) | Repo policy | Implementation agent prompt |
+| `.claude/agents/reviewer.md` | File | If Claude Code selected | Yes (refreshed) | Repo policy | PR review agent prompt |
+| `.claude/agents/forward-fixer.md` | File | If Claude Code selected | Yes (refreshed) | Repo policy | CI fix-forward agent prompt |
+| `.opencode/agents/implementer.md` | File | If OpenCode selected | Yes (refreshed) | Repo policy | Implementation agent prompt |
+| `.opencode/agents/reviewer.md` | File | If OpenCode selected | Yes (refreshed) | Repo policy | PR review agent prompt |
+| `.opencode/agents/forward-fixer.md` | File | If OpenCode selected | Yes (refreshed) | Repo policy | CI fix-forward agent prompt |
+| `.github/agents/ninthwave-implementer.agent.md` | File | If Copilot selected | Yes (refreshed) | Repo policy | Implementation agent prompt |
+| `.github/agents/ninthwave-reviewer.agent.md` | File | If Copilot selected | Yes (refreshed) | Repo policy | PR review agent prompt |
+| `.github/agents/ninthwave-forward-fixer.agent.md` | File | If Copilot selected | Yes (refreshed) | Repo policy | CI fix-forward agent prompt |
+| `.github/copilot-instructions.md` | File | If Copilot selected | Yes (refreshed from `CLAUDE.md`) | Repo policy | Copilot project instructions |
 
 ### Other project files
 
 | Path | Type | When Created | Overwritten on Re-init? | Git-tracked? | Purpose |
 |---|---|---|---|---|---|
-| `.gitignore` | File | Created if missing, appended if exists | Appended (deduped) | Yes | Excludes `.worktrees/` and symlink dirs |
+| `.ninthwave/.gitignore` | File | Always if missing | Preserved after first write | Yes | Deny-by-default rules for committed ninthwave state |
 
 ### User-level (`~/.ninthwave/`)
 
@@ -265,8 +266,8 @@ Slug formula: project root path with `/` replaced by `-` (e.g., `/Users/rob/code
 
 | Path | Type | Purpose |
 |---|---|---|
-| `~/.claude/skills/work` | Symlink | Global `/work` skill |
-| `~/.claude/skills/decompose` | Symlink | Global `/decompose` skill |
+| `~/.claude/skills/work/` | Directory | Global `/work` skill |
+| `~/.claude/skills/decompose/` | Directory | Global `/decompose` skill |
 
 No project-level files are created in global mode.
 
@@ -274,7 +275,7 @@ No project-level files are created in global mode.
 
 ## 7. Directory Tree
 
-Resulting project structure after `nw init` in a project with Claude Code and OpenCode detected:
+Resulting project structure after `nw init` in a project with Claude Code, OpenCode, and Copilot detected:
 
 ```
 project-root/
@@ -289,51 +290,70 @@ project-root/
 │   └── schedules/                       # scheduled tasks
 │       └── ci--example-daily-audit.md   # example (fresh init only)
 │
-├── .claude/                             # gitignored subdirs
-│   ├── agents/                          # ← symlinks, gitignored
-│   │   ├── implementer.md  → ../../ninthwave/agents/implementer.md
-│   │   ├── reviewer.md     → ../../ninthwave/agents/reviewer.md
-│   │   └── forward-fixer.md     → ../../ninthwave/agents/forward-fixer.md
-│   └── skills/                          # ← symlinks, gitignored
-│       ├── work             → ../../ninthwave/skills/work
-│       ├── decompose        → ../../ninthwave/skills/decompose
+├── .claude/
+│   ├── agents/                          # ← managed copies
+│   │   ├── implementer.md
+│   │   ├── reviewer.md
+│   │   └── forward-fixer.md
+│   └── skills/                          # ← managed copies
+│       ├── work/
+│       │   └── SKILL.md
+│       └── decompose/
+│           └── SKILL.md
 │
-├── .opencode/                           # gitignored subdirs (if detected)
-│   └── agents/                          # ← symlinks, gitignored
-│       ├── implementer.md  → ../../ninthwave/agents/implementer.md
-│       ├── reviewer.md     → ../../ninthwave/agents/reviewer.md
-│       └── forward-fixer.md     → ../../ninthwave/agents/forward-fixer.md
+├── .opencode/                           # managed copies (if detected)
+│   └── agents/
+│       ├── implementer.md
+│       ├── reviewer.md
+│       └── forward-fixer.md
 │
-├── .github/                             # gitignored agents/ subdir (if detected)
-│   └── agents/                          # ← symlinks, gitignored
-│       ├── ninthwave-implementer.agent.md → ...
-│       ├── ninthwave-reviewer.agent.md    → ...
-│       └── ninthwave-forward-fixer.agent.md    → ...
+├── .github/                             # regular repo metadata + managed copies
+│   ├── agents/
+│   │   ├── ninthwave-implementer.agent.md
+│   │   ├── ninthwave-reviewer.agent.md
+│   │   └── ninthwave-forward-fixer.agent.md
+│   └── copilot-instructions.md          # managed copy of CLAUDE.md
 │
-├── .gitignore                           # appended with ninthwave entries
+├── .gitignore                           # repo-local policy (optional)
 └── .worktrees/                          # created later by orchestrator, gitignored
 ```
 
-Symlink targets are relative paths (e.g., `../../../path/to/ninthwave/agents/implementer.md`) computed from each link's parent directory back to the ninthwave bundle. This ensures portability across directory moves and Homebrew prefix changes.
+By default, `nw init` writes portable managed copies into the project. In the ninthwave repo itself, those generated copies are ignored so only the canonical sources in `skills/`, `agents/`, and `CLAUDE.md` stay tracked.
 
 ---
 
-## 8. `.gitignore` Entries
+## 8. Ignore Files and Tracking Policy
 
-Init adds these entries (deduped, appended if `.gitignore` exists, created if not):
+Init always creates `.ninthwave/.gitignore` with deny-by-default rules for ninthwave's own committed state:
 
 ```gitignore
-# ninthwave worktrees
-.worktrees/
+# Deny by default -- only explicitly allowed files are committed
+*
 
-# ninthwave symlinks (developer-local, re-created by ninthwave init)
-.claude/agents/
-.claude/skills/
-.opencode/agents/
-.github/agents/
+# Committed project files
+!.gitignore
+!config.json
+!work/
+!work/**
+!schedules/
+!schedules/**
+!friction/
+!friction/**
 ```
 
-**Self-hosting exception:** When `projectDir === bundleDir` (ninthwave developing itself), the symlink entries are **not** added since those directories contain source files, not symlinks.
+`nw init` does **not** modify the repo root `.gitignore`.
+
+If a project wants generated tool copies to stay untracked, add repo-local root ignore rules manually. The ninthwave repo does this because it tracks only the canonical sources and regenerates tool copies locally:
+
+```gitignore
+/.claude/agents/
+/.claude/skills/
+/.opencode/agents/
+/.github/agents/
+/.github/copilot-instructions.md
+```
+
+That root-level ignore policy is specific to the ninthwave repo itself, not a universal rule for user repositories.
 
 **Source:** `core/commands/init.ts:756-796`, `core/commands/setup.ts:206-219`
 
@@ -348,7 +368,7 @@ Standard project init. Interactive by default (prompts for agent selection). Run
 Non-interactive. Skips agent selection prompt -- auto-selects all discovered agents into all detected tool directories (or all tool directories if none detected).
 
 ### `nw init --global`
-Global-only mode. Creates `~/.claude/skills/` symlinks and returns. No `.ninthwave/` directory, no agent symlinks, no `.gitignore` changes, no project setup.
+Global-only mode. Creates `~/.claude/skills/` managed copies and returns. No `.ninthwave/` directory, no project agent files, no repo `.gitignore` changes, no project setup.
 
 ### `nw` (no args, first run)
 Interactive guided onboarding. Detects multiplexer and AI tool, runs `initProject()`, then launches a session in the multiplexer with a welcome message. Only triggers when `.ninthwave/` does not exist.
@@ -374,9 +394,10 @@ Running `nw init` multiple times is safe:
 | `.ninthwave/domains.conf` | Preserved (user configuration) |
 | `.ninthwave/work/`, `friction/`, `schedules/` | Directories ensured, contents preserved |
 | Schedule example file | Only created if `schedules/` dir is new |
-| Skill symlinks | Removed and recreated (always current) |
-| Agent symlinks | Recreated; existing correct symlinks reported as "already set up" |
-| `.gitignore` | Appended only if entries missing (deduped) |
+| Skill managed copies | Re-copied from the canonical bundle |
+| Agent managed copies | Refreshed when stale, left alone when already current |
+| `.github/copilot-instructions.md` | Refreshed from the project's `CLAUDE.md` when Copilot is targeted |
+| `.ninthwave/.gitignore` | Written once if missing, then preserved |
 | `nw` CLI alias | Skipped if already in PATH |
 
 ---

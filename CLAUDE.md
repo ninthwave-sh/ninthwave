@@ -23,7 +23,7 @@ No build step -- Bun executes TypeScript directly. Changes take effect immediate
 - `core/status-render.ts` -- shared status table rendering for `ninthwave status --watch` and the daemon TUI
 - `skills/` -- SKILL.md files for AI tool integration (/work, /decompose, etc.)
 - `agents/implementer.md` -- implementation agent prompt (copied to all tool directories by init)
-- `core/commands/init.ts` -- project setup command (seeds config, symlinks, agents)
+- `core/commands/init.ts` -- project setup command (seeds config and managed tool copies)
 
 ## Conventions
 
@@ -54,6 +54,8 @@ This repo uses ninthwave to develop ninthwave. When working here, log friction a
 2. **WIP limit ≤ 5.** Each worker session (Claude Code + language server + worktree) consumes ~2-3GB RAM. On a 16GB Mac, WIP limit of 5 is the default; reduce if memory pressure is observed.
 
 3. **Always use worktree isolation for parallel agents.** When spawning agents that work on branches in the same repo, use `isolation: "worktree"` so each gets its own working copy. Never have two agents share a checkout.
+
+4. **Edit canonical sources, not generated mirrors.** In this repo, `skills/`, `agents/`, and the root `CLAUDE.md` are the tracked sources of truth. Regenerated copies under `.claude/`, `.opencode/`, and `.github/` are ignored here.
 
 ## Skill routing
 

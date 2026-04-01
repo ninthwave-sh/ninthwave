@@ -235,6 +235,15 @@ describe("detectAITools", () => {
     expect(result).toContain("copilot");
   });
 
+  it("detects Copilot from .github/agents/ without copilot-instructions.md", () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".github", "agents"), { recursive: true });
+
+    const result = detectAITools(projectDir);
+
+    expect(result).toContain("copilot");
+  });
+
   it("detects multiple AI tools", () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".claude"), { recursive: true });
@@ -792,7 +801,7 @@ describe("initProject", () => {
   });
 });
 
-// --- initProject symlink gitignore entries ---
+// --- initProject .ninthwave/.gitignore ---
 
 describe("initProject -- .ninthwave/.gitignore", () => {
   it("creates deny-by-default .gitignore inside .ninthwave/", () => {
@@ -813,7 +822,7 @@ describe("initProject -- .ninthwave/.gitignore", () => {
     expect(content).toContain("!schedules/");
   });
 
-  it("does NOT add symlink directories when projectDir equals bundleDir (self-hosting)", () => {
+  it("does not create a root .gitignore when projectDir equals bundleDir", () => {
     const projectDir = setupTempRepo();
 
     // Set up bundle structure inside projectDir to simulate self-hosting

@@ -3,7 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { join } from "path";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, lstatSync, rmSync, symlinkSync } from "fs";
 import { tmpdir } from "os";
 import type { SeedAgentFilesDeps } from "../core/agent-files.ts";
 import { readAgentFileContent, seedAgentFiles, syncCopilotInstructionsFromClaude } from "../core/agent-files.ts";
@@ -167,6 +167,24 @@ describe("syncCopilotInstructionsFromClaude", () => {
     const written = syncCopilotInstructionsFromClaude(projectRoot);
 
     expect(written).toBe(join(".github", "copilot-instructions.md"));
+    expect(readFileSync(join(projectRoot, ".github", "copilot-instructions.md"), "utf-8")).toBe(
+      "# Project instructions\n",
+    );
+
+    rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it("replaces a legacy copilot-instructions symlink with a managed copy", () => {
+    const projectRoot = makeTmpDir();
+
+    writeFileSync(join(projectRoot, "CLAUDE.md"), "# Project instructions\n");
+    mkdirSync(join(projectRoot, ".github"), { recursive: true });
+    symlinkSync("../CLAUDE.md", join(projectRoot, ".github", "copilot-instructions.md"));
+
+    const written = syncCopilotInstructionsFromClaude(projectRoot);
+
+    expect(written).toBe(join(".github", "copilot-instructions.md"));
+    expect(lstatSync(join(projectRoot, ".github", "copilot-instructions.md")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(projectRoot, ".github", "copilot-instructions.md"), "utf-8")).toBe(
       "# Project instructions\n",
     );

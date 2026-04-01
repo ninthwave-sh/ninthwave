@@ -16,16 +16,14 @@ git clone git@github.com:ninthwave-sh/ninthwave.git ~/code/ninthwave
 
 ### Dogfooding (developing ninthwave with ninthwave)
 
-ninthwave dogfoods itself. The repo IS the bundle -- a symlink at `.claude/skills/ninthwave` points back to the repo root so skills are discoverable during development:
+ninthwave dogfoods itself. The repo IS the bundle, so the tracked sources of truth are `skills/`, `agents/`, and the root `CLAUDE.md`. Re-run init to regenerate the managed copies used by local tools:
 
 ```bash
 cd ~/code/ninthwave
-mkdir -p .claude/skills
-ln -s ../.. .claude/skills/ninthwave
-bun run core/cli.ts setup
+bun run core/cli.ts init --yes
 ```
 
-After this, `/work` and `/decompose` are available in the ninthwave repo itself.
+That refreshes `.claude/`, `.opencode/`, and `.github/` from the canonical sources. This repo keeps those generated copies untracked via repo-local `.gitignore` rules so only the canonical sources are committed here; normal user repos can choose their own tracking policy.
 
 ### Testing in another project
 
@@ -65,7 +63,7 @@ ninthwave/                          # The repo IS the installable bundle
 
 - **Self-contained bundle.** The repo itself is the installable unit. Brew installs the compiled binary + resource files. Dev mode runs TypeScript directly via Bun.
 - **Project-specific context lives in the project**, not in ninthwave. The worker reads the project's instruction file (`CLAUDE.md`, `AGENTS.md`, etc.) for coding conventions, test commands, and architecture docs.
-- **Skills are discovered via symlinks** -- `ninthwave setup` creates `.claude/skills/work -> ninthwave/skills/work` etc. so AI tools find the skills without scattering files across the project.
+- **Skills are installed as managed copies** -- `ninthwave init` copies `skills/` into `.claude/skills/` so tools can discover them without depending on a fixed bundle path.
 - **Agents are copied to all tool directories** -- `.claude/agents/`, `.opencode/agents/`, `.github/agents/`. Any team member works regardless of tool.
 - **Expected skills are soft dependencies** -- `/review`, `/qa`, etc. are used if available, with built-in fallbacks when they're not.
 
@@ -74,7 +72,7 @@ ninthwave/                          # The repo IS the installable bundle
 | File | What it does |
 |------|-------------|
 | `core/cli.ts` | The CLI entry point. Routes commands to `core/commands/` which handle worktrees/partitions, AI session launches, PR monitoring, and version bumps. TypeScript + Bun. |
-| `core/commands/setup.ts` | The `ninthwave setup` command. Creates project-level config: `.ninthwave/` dir, skill symlinks, agent copies. |
+| `core/commands/setup.ts` | Shared setup helpers for prerequisite checks plus managed skill/agent copy installation. |
 | `skills/work/SKILL.md` | The orchestration skill. Drives the 5-phase workflow (select, launch, monitor, merge, finalize). |
 | `skills/decompose/SKILL.md` | Breaks feature specs into PR-sized work items with dependency batches. |
 | `agents/implementer.md` | The implementation agent prompt. Each AI session follows this: read the work item, read project conventions, implement, test, review, PR, wait for orchestrator. |
