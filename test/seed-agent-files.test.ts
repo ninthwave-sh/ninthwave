@@ -259,17 +259,10 @@ describe("seedAgentFiles", () => {
     rmSync(worktree, { recursive: true, force: true });
   });
 
-  it("preserves checkpointed inbox instructions in seeded implementer prompt", () => {
+  it("seeds explicit inbox and rebase instructions in implementer artifacts", () => {
     const hubRoot = makeTmpDir();
     const worktree = makeTmpDir();
-    const localContent = [
-      "# Implementer agent",
-      "## 0. Inbox Contract",
-      "nw inbox --check YOUR_TODO_ID",
-      "nw inbox --wait YOUR_TODO_ID",
-      "set the timeout to the longest practical value available",
-      "immediately run the same wait command again",
-    ].join("\n");
+    const localContent = readFileSync(join(import.meta.dirname, "..", "agents", "implementer.md"), "utf-8");
 
     mkdirSync(join(hubRoot, "agents"), { recursive: true });
     writeFileSync(join(hubRoot, "agents", "implementer.md"), localContent);
@@ -285,10 +278,24 @@ describe("seedAgentFiles", () => {
     seedAgentFiles(worktree, hubRoot, deps);
 
     const claudeAgent = join(worktree, ".claude/agents/implementer.md");
-    expect(readFileSync(claudeAgent, "utf-8")).toContain("nw inbox --check YOUR_TODO_ID");
-    expect(readFileSync(claudeAgent, "utf-8")).toContain("nw inbox --wait YOUR_TODO_ID");
-    expect(readFileSync(claudeAgent, "utf-8")).toContain("set the timeout to the longest practical value available");
-    expect(readFileSync(claudeAgent, "utf-8")).toContain("immediately run the same wait command again");
+    const githubAgent = join(worktree, ".github/agents/ninthwave-implementer.agent.md");
+    const claudePrompt = readFileSync(claudeAgent, "utf-8");
+    const githubPrompt = readFileSync(githubAgent, "utf-8");
+
+    expect(claudePrompt).toContain("nw inbox --check YOUR_TODO_ID");
+    expect(claudePrompt).toContain("nw inbox --wait YOUR_TODO_ID");
+    expect(claudePrompt).toContain("set the timeout to the longest practical value available");
+    expect(claudePrompt).toContain("immediately run the same wait command again");
+    expect(claudePrompt).toContain("The daemon owns that lifecycle automation");
+    expect(claudePrompt).toContain("Do not assume the daemon will perform the rebase for you.");
+    expect(claudePrompt).toContain("Some daemon nudges may be plain-language inbox messages");
+    expect(claudePrompt).toContain("if you receive one in either structured or plain-language form, you are required to act on it.");
+    expect(claudePrompt).toContain("If `BASE_BRANCH` is set in your prompt: `git fetch origin $BASE_BRANCH --quiet && git rebase origin/$BASE_BRANCH`");
+    expect(claudePrompt).toContain("If `BASE_BRANCH` is not set: `git fetch origin main --quiet && git rebase origin/main`");
+    expect(claudePrompt).toContain("Do **not** `git rebase --abort` just because conflicts appeared");
+    expect(claudePrompt).toContain("Required outcome: do not go back to idle until the branch is either successfully rebased and force-pushed, or you have posted the blocker comment for a genuinely non-trivial conflict");
+    expect(githubPrompt).toContain("Do not assume the daemon will perform the rebase for you.");
+    expect(githubPrompt).toContain("Some daemon nudges may be plain-language inbox messages");
 
     rmSync(hubRoot, { recursive: true, force: true });
     rmSync(worktree, { recursive: true, force: true });
