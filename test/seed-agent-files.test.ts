@@ -6,7 +6,7 @@ import { join } from "path";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import type { SeedAgentFilesDeps } from "../core/agent-files.ts";
-import { readAgentFileContent, seedAgentFiles } from "../core/agent-files.ts";
+import { readAgentFileContent, seedAgentFiles, syncCopilotInstructionsFromClaude } from "../core/agent-files.ts";
 import type { RunResult } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -155,6 +155,23 @@ describe("readAgentFileContent", () => {
     expect(result).toBe(remoteContent);
 
     rmSync(hubRoot, { recursive: true, force: true });
+  });
+});
+
+describe("syncCopilotInstructionsFromClaude", () => {
+  it("copies CLAUDE.md into .github/copilot-instructions.md", () => {
+    const projectRoot = makeTmpDir();
+
+    writeFileSync(join(projectRoot, "CLAUDE.md"), "# Project instructions\n");
+
+    const written = syncCopilotInstructionsFromClaude(projectRoot);
+
+    expect(written).toBe(join(".github", "copilot-instructions.md"));
+    expect(readFileSync(join(projectRoot, ".github", "copilot-instructions.md"), "utf-8")).toBe(
+      "# Project instructions\n",
+    );
+
+    rmSync(projectRoot, { recursive: true, force: true });
   });
 });
 
@@ -376,6 +393,30 @@ describe("seedAgentFiles", () => {
     const ghAgent = join(worktree, ".github/agents/ninthwave-implementer.agent.md");
     expect(existsSync(ghAgent)).toBe(true);
     expect(readFileSync(ghAgent, "utf-8")).toBe(remoteContent);
+
+    rmSync(hubRoot, { recursive: true, force: true });
+    rmSync(worktree, { recursive: true, force: true });
+  });
+
+  it("seeds Copilot instructions from the worktree CLAUDE.md", () => {
+    const hubRoot = makeTmpDir();
+    const worktree = makeTmpDir();
+
+    writeAgentFile(hubRoot, "implementer.md");
+    writeFileSync(join(worktree, "CLAUDE.md"), "# Worktree instructions\n");
+
+    const deps = createDeps({
+      run: mockRun({
+        "origin/main:agents/implementer.md": { stdout: "# Remote implementer\n", stderr: "", exitCode: 0 },
+      }) as any,
+    });
+
+    const seeded = seedAgentFiles(worktree, hubRoot, deps);
+
+    expect(seeded).toContain(join(".github", "copilot-instructions.md"));
+    expect(readFileSync(join(worktree, ".github", "copilot-instructions.md"), "utf-8")).toBe(
+      "# Worktree instructions\n",
+    );
 
     rmSync(hubRoot, { recursive: true, force: true });
     rmSync(worktree, { recursive: true, force: true });

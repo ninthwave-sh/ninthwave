@@ -6,7 +6,8 @@ import { writeFileSync, mkdirSync, readFileSync } from "fs";
 import { spawnSync } from "child_process";
 import { setupTempRepo, cleanupTempRepos, captureOutputAsync } from "./helpers.ts";
 import type { Multiplexer } from "../core/mux.ts";
-import { type LaunchGitDeps, launchSingleItem, launchAiSession, launchReviewWorker, sanitizeTitle, extractItemText } from "../core/commands/launch.ts";
+import { runtimeAgentNameForTool } from "../core/ai-tools.ts";
+import { type LaunchGitDeps, launchSingleItem, launchAiSession, launchReviewWorker, launchRebaserWorker, sanitizeTitle, extractItemText } from "../core/commands/launch.ts";
 import { cmdStart, cmdRunItems, WORK_ITEM_ID_CLI_PATTERN } from "../core/commands/run-items.ts";
 import { cleanStaleBranchForReuse } from "../core/branch-cleanup.ts";
 import { parseWorkItems } from "../core/parser.ts";
@@ -233,7 +234,7 @@ describe("cmdStart", () => {
     );
 
     // Tool should be used for launching (opencode uses inline command)
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("exec opencode");
@@ -1193,7 +1194,7 @@ describe("launchAiSession agentName", () => {
 
     launchAiSession("claude", repo, "T-1", "Test", promptFile, mockMux);
 
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("claude -p \"Start\"");
@@ -1210,7 +1211,7 @@ describe("launchAiSession agentName", () => {
 
       launchAiSession("claude", repo, "T-1", "Test", promptFile, mockMux);
 
-      const launchCall = mockMux.launchWorkspace.mock.calls[0];
+      const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
       expect(launchCall).toBeDefined();
       const cmd = launchCall[1] as string;
       expect(cmd).toContain("--name 'T-1 Test'");
@@ -1227,7 +1228,7 @@ describe("launchAiSession agentName", () => {
 
     launchAiSession("claude", repo, "T-1", "Test", promptFile, mockMux);
 
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("--agent ninthwave-implementer");
@@ -1243,7 +1244,7 @@ describe("launchAiSession agentName", () => {
       agentName: "ninthwave-reviewer",
     });
 
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("--agent ninthwave-reviewer");
@@ -1260,7 +1261,7 @@ describe("launchAiSession agentName", () => {
       agentName: "ninthwave-reviewer",
     });
 
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
     // cmd is an inline shell command (no .sh script)
@@ -1273,16 +1274,17 @@ describe("launchAiSession agentName", () => {
     const repo = setupTempRepo();
     const promptFile = join(repo, "prompt.txt");
     writeFileSync(promptFile, "test prompt");
+    const expectedAgent = runtimeAgentNameForTool("copilot", "ninthwave-reviewer");
 
     launchAiSession("copilot", repo, "T-1", "Test", promptFile, mockMux, {
       agentName: "ninthwave-reviewer",
     });
 
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
     // cmd is an inline shell command (no .sh script)
-    expect(cmd).toContain("--agent=ninthwave-reviewer");
+    expect(cmd).toContain(`--agent=${expectedAgent}`);
     expect(cmd).toContain("--allow-all");
     expect(cmd).toContain("-i ");
   });
@@ -1299,7 +1301,7 @@ describe("launchAiSession agentName", () => {
     // No message should be sent after launch -- prompt is embedded in -i
     expect(mockMux.sendMessage.mock.calls.length).toBe(0);
     // Inline command should reference the prompt data file
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("exec copilot");
   });
@@ -1314,7 +1316,7 @@ describe("launchAiSession agentName", () => {
 
     expect(wsRef).not.toBeNull();
     // Command should include -- Start as positional argument
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("-- Start");
     // No message should be sent after launch -- prompt is embedded as positional arg
@@ -1333,7 +1335,7 @@ describe("launchAiSession agentName", () => {
     // No message should be sent after launch -- prompt is embedded via --prompt
     expect(mockMux.sendMessage.mock.calls.length).toBe(0);
     // Inline command should contain --prompt and OPENCODE_PERMISSION
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("--prompt");
     expect(cmd).toContain("OPENCODE_PERMISSION");
@@ -1373,7 +1375,7 @@ describe("launchSingleItem agentName default", () => {
       launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux);
     });
 
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("--agent ninthwave-implementer");
@@ -1406,7 +1408,7 @@ describe("launchReviewWorker", () => {
     // Should NOT call fetchOrigin (no branch to fetch)
     expect(deps.fetchOrigin).not.toHaveBeenCalled();
     // Should launch with ninthwave-reviewer agent
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("--agent ninthwave-reviewer");
     // Info message should mention off mode
@@ -1533,7 +1535,7 @@ describe("launchReviewWorker", () => {
         launchReviewWorker(42, "H-RVW-1", mode, repo, "claude", mockMux, {}, deps);
       });
 
-      const launchCall = mockMux.launchWorkspace.mock.calls[0];
+      const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
       expect(launchCall).toBeDefined();
       const cmd = launchCall[1] as string;
       expect(cmd).toContain("--agent ninthwave-reviewer");
@@ -1610,7 +1612,7 @@ describe("launchReviewWorker", () => {
     const { existsSync } = require("fs");
     expect(existsSync(join(repo, ".ninthwave", ".worktrees", "review-H-RVW-1"))).toBe(false);
     // The launch should have been called with the implementer's worktree as workDir
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall[0]).toBe(implWorktree);
   });
 
@@ -1626,8 +1628,31 @@ describe("launchReviewWorker", () => {
     });
 
     // Should have launched from the review-{id} directory (fallback behavior)
-    const launchCall = mockMux.launchWorkspace.mock.calls[0];
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall[0]).toContain("review-H-RVW-1");
+  });
+});
+
+describe("launchRebaserWorker", () => {
+  afterEach(() => {
+    cleanupTempRepos();
+  });
+
+  it("launches Copilot with the runtime agent id exposed by the rebaser artifact", async () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const worktreePath = join(repo, ".ninthwave", ".worktrees", "ninthwave-H-RB-1");
+    mkdirSync(worktreePath, { recursive: true });
+
+    await captureOutput(() => {
+      const result = launchRebaserWorker(17, "H-RB-1", repo, "copilot", mockMux);
+      expect(result).not.toBeNull();
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain(`--agent=${runtimeAgentNameForTool("copilot", "ninthwave-rebaser")}`);
+    expect(cmd).toContain("exec copilot");
   });
 });
 

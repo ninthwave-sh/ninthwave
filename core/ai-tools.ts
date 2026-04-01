@@ -29,7 +29,7 @@ export interface LaunchDeps {
 export interface LaunchOpts {
   /** Workspace name shown in the multiplexer tab title. */
   wsName: string;
-  /** Agent persona to load (e.g. "ninthwave-implementer"). */
+  /** Logical agent name to load (e.g. "ninthwave-implementer"). */
   agentName: string;
   /** Absolute path to the .prompt file containing the system prompt. */
   promptFile: string;
@@ -106,6 +106,37 @@ export interface AiToolProfile {
    * Headless commands must embed the prompt in cmd and return initialPrompt: "".
    */
   buildHeadlessCmd: (opts: LaunchOpts, deps: LaunchDeps) => LaunchCmdResult;
+}
+
+/** Standard orchestrator agent source files keyed by logical agent name. */
+export const STANDARD_AGENT_SOURCES_BY_NAME: Record<string, string> = {
+  "ninthwave-implementer": "implementer.md",
+  "ninthwave-reviewer": "reviewer.md",
+  "ninthwave-rebaser": "rebaser.md",
+  "ninthwave-forward-fixer": "forward-fixer.md",
+};
+
+/** Build the target filename for one agent source and tool target. */
+export function agentTargetFilename(source: string, target: Pick<AgentTarget, "suffix">): string {
+  const baseName = source.replace(/\.md$/, "");
+  return target.suffix === ".agent.md" ? `ninthwave-${baseName}.agent.md` : source;
+}
+
+/** Extract the runtime agent identifier from a generated target filename. */
+export function runtimeAgentIdFromFilename(filename: string, suffix: string): string {
+  return filename.endsWith(suffix) ? filename.slice(0, -suffix.length) : filename;
+}
+
+/** Resolve the actual --agent= value for a given tool. */
+export function runtimeAgentNameForTool(toolId: AiToolId, agentName: string): string {
+  if (toolId !== "copilot") return agentName;
+
+  const source = STANDARD_AGENT_SOURCES_BY_NAME[agentName];
+  if (!source) return agentName;
+
+  const copilotProfile = getToolProfile("copilot");
+  const filename = agentTargetFilename(source, copilotProfile);
+  return runtimeAgentIdFromFilename(filename, copilotProfile.suffix);
 }
 
 function writePromptDataFile(opts: LaunchOpts, deps: LaunchDeps): string {
@@ -199,18 +230,20 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       // construct a shell command that reads it, cleans up, and execs the tool.
       // Avoids creating executable .sh scripts (which trigger EDR alerts).
       const promptDataFile = writePromptDataFile(opts, deps);
+      const runtimeAgentName = runtimeAgentNameForTool("copilot", opts.agentName);
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
-        ` && exec copilot --agent=${opts.agentName} --allow-all -i "$PROMPT"`;
+        ` && exec copilot --agent=${runtimeAgentName} --allow-all -i "$PROMPT"`;
       return { cmd, initialPrompt: "" };
     },
     buildHeadlessCmd(opts, deps): LaunchCmdResult {
       const promptDataFile = writePromptDataFile(opts, deps);
+      const runtimeAgentName = runtimeAgentNameForTool("copilot", opts.agentName);
       const cmd =
         `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
-        ` && exec copilot -p "$PROMPT" --agent=${opts.agentName} --allow-all --no-ask-user`;
+        ` && exec copilot -p "$PROMPT" --agent=${runtimeAgentName} --allow-all --no-ask-user`;
       return { cmd, initialPrompt: "" };
     },
   },

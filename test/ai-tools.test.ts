@@ -8,6 +8,9 @@ import {
   isAiToolId,
   agentTargetDirs,
   agentFileTargets,
+  agentTargetFilename,
+  runtimeAgentIdFromFilename,
+  runtimeAgentNameForTool,
   type LaunchDeps,
   type LaunchOpts,
 } from "../core/ai-tools.ts";
@@ -175,6 +178,35 @@ describe("agentFileTargets", () => {
 
   it("returns empty array for empty sources", () => {
     expect(agentFileTargets([])).toEqual([]);
+  });
+});
+
+// ── agentTargetFilename / runtime agent IDs ──────────────────────────────────
+
+describe("Copilot agent artifact alignment helpers", () => {
+  it("builds ninthwave-prefixed Copilot filenames from source files", () => {
+    expect(agentTargetFilename("implementer.md", { suffix: ".agent.md" })).toBe(
+      "ninthwave-implementer.agent.md",
+    );
+  });
+
+  it("keeps Claude/OpenCode filenames equal to the source filename", () => {
+    expect(agentTargetFilename("implementer.md", { suffix: ".md" })).toBe("implementer.md");
+  });
+
+  it("derives the runtime Copilot agent id from the generated filename", () => {
+    expect(runtimeAgentIdFromFilename("ninthwave-reviewer.agent.md", ".agent.md")).toBe(
+      "ninthwave-reviewer",
+    );
+  });
+
+  it("resolves the Copilot runtime id from the generated rebaser artifact", () => {
+    expect(runtimeAgentNameForTool("copilot", "ninthwave-rebaser")).toBe("ninthwave-rebaser");
+  });
+
+  it("leaves non-Copilot launch agent names unchanged", () => {
+    expect(runtimeAgentNameForTool("claude", "ninthwave-reviewer")).toBe("ninthwave-reviewer");
+    expect(runtimeAgentNameForTool("opencode", "ninthwave-reviewer")).toBe("ninthwave-reviewer");
   });
 });
 

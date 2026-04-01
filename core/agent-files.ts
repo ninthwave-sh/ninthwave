@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { run, GIT_TIMEOUT } from "./shell.ts";
 import { info as defaultInfo } from "./output.ts";
-import { agentFileTargets } from "./ai-tools.ts";
+import { agentFileTargets, agentTargetFilename } from "./ai-tools.ts";
 import { discoverAgentSources, detectManagedCopyStatus, writeManagedCopy } from "./commands/setup.ts";
 
 /** Parse the configured LLM model from YAML frontmatter. */
@@ -79,6 +79,23 @@ export function readAgentFileContent(
 }
 
 /**
+ * Keep Copilot project instructions in sync with the repo's root CLAUDE.md.
+ * Returns the relative path when the file was created or refreshed.
+ */
+export function syncCopilotInstructionsFromClaude(projectRoot: string): string | null {
+  const sourcePath = join(projectRoot, "CLAUDE.md");
+  if (!existsSync(sourcePath)) return null;
+
+  const sourceContent = readFileSync(sourcePath, "utf-8");
+  const destPath = join(projectRoot, ".github", "copilot-instructions.md");
+  const status = detectManagedCopyStatus(destPath, sourceContent);
+  if (status === "up-to-date") return null;
+
+  writeManagedCopy(destPath, sourceContent);
+  return join(".github", "copilot-instructions.md");
+}
+
+/**
  * Seed agent files into a worktree as managed copies.
  * Reads agent content from origin/main for consistency with remote state,
  * falling back to the hub repo's local agents/ directory. Returns the list
@@ -90,15 +107,16 @@ export function seedAgentFiles(
   deps: SeedAgentFilesDeps = defaultSeedDeps,
 ): string[] {
   const seeded: string[] = [];
+  const copilotInstructionsPath = syncCopilotInstructionsFromClaude(worktreePath);
+  if (copilotInstructionsPath) seeded.push(copilotInstructionsPath);
   const agentFiles = agentFileTargets(discoverAgentSources(hubRoot));
 
   for (const agent of agentFiles) {
     const sourceContent = readAgentFileContent(hubRoot, agent.source, deps);
     if (!sourceContent) continue;
-    const baseName = agent.source.replace(/\.md$/, "");
 
     for (const target of agent.targets) {
-      const filename = target.suffix === ".agent.md" ? `ninthwave-${baseName}.agent.md` : agent.source;
+      const filename = agentTargetFilename(agent.source, target);
       const destPath = join(worktreePath, target.dir, filename);
 
       const status = detectManagedCopyStatus(destPath, sourceContent);
