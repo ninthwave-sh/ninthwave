@@ -763,8 +763,8 @@ function buildEmptyStateLines(viewOptions?: ViewOptions): string[] {
     `  ${DIM}No active items${RESET}`,
     "",
     `  ${DIM}To get started:${RESET}`,
-    `    ${DIM}ninthwave list --ready${RESET}     ${DIM}Show available TODOs${RESET}`,
-    `    ${DIM}ninthwave start <ID>${RESET}       ${DIM}Start working on an item${RESET}`,
+    `    ${DIM}ninthwave list --ready${RESET}     ${DIM}Show available work items${RESET}`,
+    `    ${DIM}ninthwave start <ID>${RESET}       ${DIM}Start a work item${RESET}`,
   ];
 }
 

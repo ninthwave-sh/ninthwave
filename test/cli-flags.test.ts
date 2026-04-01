@@ -53,6 +53,7 @@ describe("CLI flags", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain("Usage:");
       expect(result.stdout).toContain("Workflow:");
+      expect(result.stdout).toContain("queued work items");
     });
 
     it("prints help with -h flag", () => {
@@ -80,6 +81,7 @@ describe("CLI flags", () => {
       expect(result.stdout).toContain("list");
       expect(result.stdout).toContain("doctor");
       expect(result.stdout).toContain("nw [options]");
+      expect(result.stdout).toContain("waits for queued work items if none exist");
     });
   });
 

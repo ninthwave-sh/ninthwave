@@ -1027,6 +1027,8 @@ describe("formatStatusTable", () => {
     const table = stripAnsi(formatStatusTable([], 80));
     expect(table).toContain("No active items");
     expect(table).toContain("ninthwave list --ready");
+    expect(table).toContain("Show available work items");
+    expect(table).toContain("Start a work item");
   });
 
   it("renders armed watch empty state for future-only startup", () => {
