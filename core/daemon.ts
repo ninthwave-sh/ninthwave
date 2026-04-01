@@ -16,6 +16,7 @@ import {
 import { dirname, join } from "path";
 import { spawn as nodeSpawn } from "node:child_process";
 import type { OrchestratorItem } from "./orchestrator.ts";
+import type { CrewRemoteItemSnapshot } from "./crew.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -73,6 +74,25 @@ export interface DaemonStateItem {
   resolvedRepoRoot?: string;
   /** AI tool used for this item's implementation worker. */
   aiTool?: string;
+  /** Broker-derived remote truth for this item, when another crew view overrides local state. */
+  remoteSnapshot?: DaemonRemoteItemSnapshot;
+}
+
+export interface DaemonRemoteItemSnapshot {
+  state: CrewRemoteItemSnapshot["state"];
+  ownerDaemonId: string | null;
+  ownerName: string | null;
+  title?: string;
+  prNumber?: number | null;
+}
+
+export interface DaemonCrewStatus {
+  crewCode: string;
+  daemonCount: number;
+  availableCount: number;
+  claimedCount: number;
+  completedCount: number;
+  connected: boolean;
 }
 
 export interface DaemonState {
@@ -85,6 +105,8 @@ export interface DaemonState {
   emptyState?: "watch-armed";
   /** Operator identity (git email of the human running this daemon). */
   operatorId?: string;
+  /** Persisted crew summary for non-live status views. */
+  crewStatus?: DaemonCrewStatus;
   items: DaemonStateItem[];
 }
 
@@ -549,47 +571,72 @@ export function serializeOrchestratorState(
   items: OrchestratorItem[],
   pid: number,
   startedAt: string,
-  extras?: { statusPaneRef?: string | null; wipLimit?: number; operatorId?: string; emptyState?: "watch-armed" },
+  extras?: {
+    statusPaneRef?: string | null;
+    wipLimit?: number;
+    operatorId?: string;
+    emptyState?: "watch-armed";
+    crewStatus?: DaemonCrewStatus;
+    remoteItemSnapshots?: ReadonlyMap<string, CrewRemoteItemSnapshot>;
+  },
 ): DaemonState {
   return {
     pid,
     startedAt,
     updatedAt: new Date().toISOString(),
-    ...extras,
-    items: items.map((item) => ({
-      id: item.id,
-      state: item.state,
-      prNumber: item.prNumber ?? null,
-      title: item.workItem.title,
-      ...(item.workItem.descriptionSnippet
-        ? { descriptionSnippet: item.workItem.descriptionSnippet }
-        : {}),
-      lastTransition: item.lastTransition,
-      ciFailCount: item.ciFailCount,
-      retryCount: item.retryCount,
-      ...(item.reviewWorkspaceRef ? { reviewWorkspaceRef: item.reviewWorkspaceRef } : {}),
-      ...(item.reviewCompleted ? { reviewCompleted: item.reviewCompleted } : {}),
-      ...(item.reviewRound ? { reviewRound: item.reviewRound } : {}),
-      ...(item.failureReason ? { failureReason: item.failureReason } : {}),
-      ...(item.workItem.dependencies.length > 0 ? { dependencies: item.workItem.dependencies } : {}),
-      ...(item.startedAt ? { startedAt: item.startedAt } : {}),
-      ...(item.endedAt ? { endedAt: item.endedAt } : {}),
-      ...(item.exitCode != null ? { exitCode: item.exitCode } : {}),
-      ...(item.stderrTail ? { stderrTail: item.stderrTail } : {}),
-      ...(item.lastCommentCheck ? { lastCommentCheck: item.lastCommentCheck } : {}),
-      ...(item.rebaseRequested ? { rebaseRequested: item.rebaseRequested } : {}),
-      ...(item.ciFailureNotified ? { ciFailureNotified: item.ciFailureNotified } : {}),
-      ...(item.ciFailureNotifiedAt ? { ciFailureNotifiedAt: item.ciFailureNotifiedAt } : {}),
-      ...(item.rebaserWorkspaceRef ? { rebaserWorkspaceRef: item.rebaserWorkspaceRef } : {}),
-      ...(item.mergeCommitSha ? { mergeCommitSha: item.mergeCommitSha } : {}),
-      ...(item.fixForwardFailCount ? { fixForwardFailCount: item.fixForwardFailCount } : {}),
-      ...(item.fixForwardWorkspaceRef ? { fixForwardWorkspaceRef: item.fixForwardWorkspaceRef } : {}),
-      ...(item.worktreePath ? { worktreePath: item.worktreePath } : {}),
-      ...(item.workspaceRef ? { workspaceRef: item.workspaceRef } : {}),
-      ...(item.partition != null ? { partition: item.partition } : {}),
-      ...(item.resolvedRepoRoot ? { resolvedRepoRoot: item.resolvedRepoRoot } : {}),
-      ...(item.aiTool ? { aiTool: item.aiTool } : {}),
-    })),
+    ...(extras?.statusPaneRef !== undefined ? { statusPaneRef: extras.statusPaneRef } : {}),
+    ...(extras?.wipLimit !== undefined ? { wipLimit: extras.wipLimit } : {}),
+    ...(extras?.emptyState ? { emptyState: extras.emptyState } : {}),
+    ...(extras?.operatorId !== undefined ? { operatorId: extras.operatorId } : {}),
+    ...(extras?.crewStatus ? { crewStatus: extras.crewStatus } : {}),
+    items: items.map((item) => {
+      const remoteSnapshot = extras?.remoteItemSnapshots?.get(item.id);
+      return {
+        id: item.id,
+        state: item.state,
+        prNumber: item.prNumber ?? null,
+        title: item.workItem.title,
+        ...(item.workItem.descriptionSnippet
+          ? { descriptionSnippet: item.workItem.descriptionSnippet }
+          : {}),
+        lastTransition: item.lastTransition,
+        ciFailCount: item.ciFailCount,
+        retryCount: item.retryCount,
+        ...(item.reviewWorkspaceRef ? { reviewWorkspaceRef: item.reviewWorkspaceRef } : {}),
+        ...(item.reviewCompleted ? { reviewCompleted: item.reviewCompleted } : {}),
+        ...(item.reviewRound ? { reviewRound: item.reviewRound } : {}),
+        ...(item.failureReason ? { failureReason: item.failureReason } : {}),
+        ...(item.workItem.dependencies.length > 0 ? { dependencies: item.workItem.dependencies } : {}),
+        ...(item.startedAt ? { startedAt: item.startedAt } : {}),
+        ...(item.endedAt ? { endedAt: item.endedAt } : {}),
+        ...(item.exitCode != null ? { exitCode: item.exitCode } : {}),
+        ...(item.stderrTail ? { stderrTail: item.stderrTail } : {}),
+        ...(item.lastCommentCheck ? { lastCommentCheck: item.lastCommentCheck } : {}),
+        ...(item.rebaseRequested ? { rebaseRequested: item.rebaseRequested } : {}),
+        ...(item.ciFailureNotified ? { ciFailureNotified: item.ciFailureNotified } : {}),
+        ...(item.ciFailureNotifiedAt ? { ciFailureNotifiedAt: item.ciFailureNotifiedAt } : {}),
+        ...(item.rebaserWorkspaceRef ? { rebaserWorkspaceRef: item.rebaserWorkspaceRef } : {}),
+        ...(item.mergeCommitSha ? { mergeCommitSha: item.mergeCommitSha } : {}),
+        ...(item.fixForwardFailCount ? { fixForwardFailCount: item.fixForwardFailCount } : {}),
+        ...(item.fixForwardWorkspaceRef ? { fixForwardWorkspaceRef: item.fixForwardWorkspaceRef } : {}),
+        ...(item.worktreePath ? { worktreePath: item.worktreePath } : {}),
+        ...(item.workspaceRef ? { workspaceRef: item.workspaceRef } : {}),
+        ...(item.partition != null ? { partition: item.partition } : {}),
+        ...(item.resolvedRepoRoot ? { resolvedRepoRoot: item.resolvedRepoRoot } : {}),
+        ...(item.aiTool ? { aiTool: item.aiTool } : {}),
+        ...(remoteSnapshot
+          ? {
+              remoteSnapshot: {
+                state: remoteSnapshot.state,
+                ownerDaemonId: remoteSnapshot.ownerDaemonId,
+                ownerName: remoteSnapshot.ownerName,
+                ...(remoteSnapshot.title ? { title: remoteSnapshot.title } : {}),
+                ...(remoteSnapshot.prNumber !== undefined ? { prNumber: remoteSnapshot.prNumber } : {}),
+              },
+            }
+          : {}),
+      };
+    }),
   };
 }
 

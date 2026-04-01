@@ -54,8 +54,19 @@ import {
 } from "../core/orchestrator.ts";
 import type { WorkItem } from "../core/types.ts";
 import type { Multiplexer } from "../core/mux.ts";
-import { pidFilePath, logFilePath, readLayoutPreference, writeLayoutPreference, preferencesFilePath, userStateDir, type DaemonState } from "../core/daemon.ts";
-import type { CrewBroker, CrewStatus } from "../core/crew.ts";
+import {
+  pidFilePath,
+  logFilePath,
+  readLayoutPreference,
+  writeLayoutPreference,
+  preferencesFilePath,
+  userStateDir,
+  readStateFile,
+  serializeOrchestratorState,
+  writeStateFile,
+  type DaemonState,
+} from "../core/daemon.ts";
+import type { CrewBroker, CrewRemoteItemSnapshot, CrewStatus } from "../core/crew.ts";
 import { readCrewCode, crewCodePath } from "../core/crew.ts";
 import { shouldEnterInteractive } from "../core/interactive.ts";
 
@@ -1563,6 +1574,94 @@ describe("serializeOrchestratorState includes rebaseRequested", () => {
 
     const state = serializeOrchestratorState([item], 9999, "2026-01-01T00:00:00Z");
     expect(state.items[0].rebaseRequested).toBeUndefined();
+  });
+});
+
+describe("serializeOrchestratorState persists crew remote truth", () => {
+  it("serializes broker-derived remote snapshots and crew ownership metadata", () => {
+    const item: OrchestratorItem = {
+      id: "REM-1",
+      workItem: makeWorkItem("REM-1"),
+      state: "queued",
+      prNumber: undefined,
+      lastTransition: "2026-04-01T10:00:00Z",
+      ciFailCount: 0,
+      retryCount: 0,
+    };
+    const remoteSnapshots = new Map<string, CrewRemoteItemSnapshot>([
+      ["REM-1", {
+        id: "REM-1",
+        state: "review",
+        ownerDaemonId: "daemon-2",
+        ownerName: "remote-host",
+        title: "Reviewing remotely",
+        prNumber: 88,
+      }],
+    ]);
+
+    const state = serializeOrchestratorState([item], 9999, "2026-04-01T00:00:00Z", {
+      crewStatus: {
+        crewCode: "ABCD-EFGH-IJKL-MNOP",
+        daemonCount: 2,
+        availableCount: 5,
+        claimedCount: 1,
+        completedCount: 3,
+        connected: true,
+      },
+      remoteItemSnapshots: remoteSnapshots,
+    });
+
+    expect(state.crewStatus).toEqual({
+      crewCode: "ABCD-EFGH-IJKL-MNOP",
+      daemonCount: 2,
+      availableCount: 5,
+      claimedCount: 1,
+      completedCount: 3,
+      connected: true,
+    });
+    expect(state.items[0]!.remoteSnapshot).toEqual({
+      state: "review",
+      ownerDaemonId: "daemon-2",
+      ownerName: "remote-host",
+      title: "Reviewing remotely",
+      prNumber: 88,
+    });
+  });
+
+  it("clears stale remote snapshots on the next state write", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "nw-remote-snapshot-clear-"));
+    const item: OrchestratorItem = {
+      id: "REM-2",
+      workItem: makeWorkItem("REM-2"),
+      state: "queued",
+      prNumber: undefined,
+      lastTransition: "2026-04-01T10:00:00Z",
+      ciFailCount: 0,
+      retryCount: 0,
+    };
+
+    try {
+      writeStateFile(tmpDir, serializeOrchestratorState([item], 9999, "2026-04-01T00:00:00Z", {
+        remoteItemSnapshots: new Map<string, CrewRemoteItemSnapshot>([
+          ["REM-2", {
+            id: "REM-2",
+            state: "implementing",
+            ownerDaemonId: "daemon-2",
+            ownerName: "remote-host",
+            title: "Implementing remotely",
+          }],
+        ]),
+      }));
+
+      writeStateFile(tmpDir, serializeOrchestratorState([item], 9999, "2026-04-01T00:00:00Z"));
+
+      const restored = readStateFile(tmpDir);
+      expect(restored).not.toBeNull();
+      expect(restored!.items[0]!.remoteSnapshot).toBeUndefined();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+      rmSync(userStateDir(tmpDir), { recursive: true, force: true });
+    }
   });
 });
 

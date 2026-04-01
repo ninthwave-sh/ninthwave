@@ -474,7 +474,7 @@ describe("getTerminalWidth", () => {
       if (original) {
         Object.defineProperty(process.stdout, "columns", original);
       } else {
-        delete (process.stdout as Record<string, unknown>)["columns"];
+        delete (process.stdout as unknown as Record<string, unknown>)["columns"];
       }
     }
   });
@@ -494,7 +494,7 @@ describe("getTerminalWidth", () => {
       if (original) {
         Object.defineProperty(process.stdout, "columns", original);
       } else {
-        delete (process.stdout as Record<string, unknown>)["columns"];
+        delete (process.stdout as unknown as Record<string, unknown>)["columns"];
       }
     }
   });
@@ -514,7 +514,7 @@ describe("getTerminalWidth", () => {
       if (original) {
         Object.defineProperty(process.stdout, "columns", original);
       } else {
-        delete (process.stdout as Record<string, unknown>)["columns"];
+        delete (process.stdout as unknown as Record<string, unknown>)["columns"];
       }
     }
   });
@@ -797,6 +797,87 @@ describe("daemonStateToStatusItems", () => {
     expect(items[1]!.id).toBe("T-1-2");
     expect(items[1]!.state).toBe("review"); // ci-passed maps to review
     expect(items[1]!.prNumber).toBe(42);
+  });
+
+  it("prefers persisted remote broker snapshots for queued, implementing, and review rows", () => {
+    const now = Date.now();
+    const state: DaemonState = {
+      pid: 123,
+      startedAt: "2026-03-24T10:00:00.000Z",
+      updatedAt: "2026-03-24T10:05:00.000Z",
+      items: [
+        {
+          id: "R-QUEUE",
+          state: "implementing",
+          prNumber: 71,
+          title: "Local queued title",
+          lastTransition: new Date(now - 60000).toISOString(),
+          ciFailCount: 0,
+          retryCount: 0,
+          remoteSnapshot: {
+            state: "queued",
+            ownerDaemonId: null,
+            ownerName: null,
+            title: "Queued remotely",
+          },
+        },
+        {
+          id: "R-IMPL",
+          state: "queued",
+          prNumber: null,
+          title: "Local implementing title",
+          lastTransition: new Date(now - 120000).toISOString(),
+          ciFailCount: 0,
+          retryCount: 0,
+          remoteSnapshot: {
+            state: "implementing",
+            ownerDaemonId: "daemon-2",
+            ownerName: "remote-host",
+            title: "Implementing remotely",
+          },
+        },
+        {
+          id: "R-REVIEW",
+          state: "queued",
+          prNumber: null,
+          title: "Local review title",
+          lastTransition: new Date(now - 180000).toISOString(),
+          ciFailCount: 0,
+          retryCount: 0,
+          remoteSnapshot: {
+            state: "review",
+            ownerDaemonId: "daemon-3",
+            ownerName: "review-host",
+            title: "Reviewing remotely",
+            prNumber: 88,
+          },
+        },
+      ],
+    };
+
+    const items = daemonStateToStatusItems(state);
+
+    expect(items[0]).toMatchObject({
+      id: "R-QUEUE",
+      state: "queued",
+      remote: false,
+      title: "Queued remotely",
+      prNumber: null,
+    });
+    expect(items[1]).toMatchObject({
+      id: "R-IMPL",
+      state: "implementing",
+      remote: true,
+      title: "Implementing remotely",
+      prNumber: null,
+    });
+    expect(items[2]).toMatchObject({
+      id: "R-REVIEW",
+      state: "review",
+      remote: true,
+      title: "Reviewing remotely",
+      prNumber: 88,
+    });
   });
 
   it("handles empty items list", () => {
@@ -1515,6 +1596,94 @@ describe("renderStatus with ViewOptions", () => {
   it("backward compatible: calling without viewOptions still works", () => {
     const output = stripAnsi(renderStatus("/nonexistent", "/nonexistent"));
     expect(output).toContain("Ninthwave");
+  });
+
+  it("renders persisted remote broker truth and crew metadata from daemon state", () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "nw-status-remote-state-"));
+    const worktreeDir = join(tmpDir, ".ninthwave", ".worktrees");
+    const statePath = stateFilePath(tmpDir);
+    const now = new Date().toISOString();
+
+    mkdirSync(worktreeDir, { recursive: true });
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify({
+      pid: 123,
+      startedAt: now,
+      updatedAt: now,
+      wipLimit: 4,
+      crewStatus: {
+        crewCode: "ABCD-EFGH-IJKL-MNOP",
+        daemonCount: 2,
+        availableCount: 5,
+        claimedCount: 2,
+        completedCount: 1,
+        connected: true,
+      },
+      items: [
+        {
+          id: "R-QUEUE",
+          state: "implementing",
+          prNumber: 71,
+          title: "Local queued title",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          remoteSnapshot: {
+            state: "queued",
+            ownerDaemonId: null,
+            ownerName: null,
+            title: "Queued remotely",
+          },
+        },
+        {
+          id: "R-IMPL",
+          state: "queued",
+          prNumber: null,
+          title: "Local implementing title",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          remoteSnapshot: {
+            state: "implementing",
+            ownerDaemonId: "daemon-2",
+            ownerName: "remote-host",
+            title: "Implementing remotely",
+          },
+        },
+        {
+          id: "R-REVIEW",
+          state: "queued",
+          prNumber: null,
+          title: "Local review title",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          remoteSnapshot: {
+            state: "review",
+            ownerDaemonId: "daemon-3",
+            ownerName: "review-host",
+            title: "Reviewing remotely",
+            prNumber: 88,
+          },
+        },
+      ],
+    } satisfies DaemonState));
+
+    try {
+      const output = stripAnsi(renderStatus(worktreeDir, tmpDir));
+      expect(output).toContain("Queued remotely");
+      expect(output).toContain("Implementing remotely");
+      expect(output).toContain("Reviewing remotely");
+      expect(output).toContain("Queued");
+      expect(output).toContain("Implementing");
+      expect(output).toContain("In Review (#88)");
+      expect(output).toContain("2 online");
+      expect(output).not.toContain("Implementing (#71)");
+      expect(output).not.toContain("Local review title");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+      rmSync(userStateDir(tmpDir), { recursive: true, force: true });
+    }
   });
 });
 
