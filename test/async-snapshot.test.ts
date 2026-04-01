@@ -98,6 +98,36 @@ describe("checkPrStatusAsync", () => {
 
     expect(result).toBe("");
   });
+
+  it("preserves open PR state when prView fails after PR discovery", async () => {
+    prListAsyncSpy.mockImplementation(async (_root: string, _branch: string, state: string) => {
+      if (state === "open") return { ok: true, data: [{ number: 10, title: "Fix" }] };
+      return { ok: true, data: [] };
+    });
+    prViewAsyncSpy.mockResolvedValue({ ok: false, error: "server error" });
+
+    const result = await checkPrStatusAsync("T-1-2", "/repo");
+
+    expect(result).toBe("T-1-2\t10\topen\t\t");
+  });
+
+  it("preserves open PR state when prChecks fails after PR discovery", async () => {
+    prListAsyncSpy.mockImplementation(async (_root: string, _branch: string, state: string) => {
+      if (state === "open") return { ok: true, data: [{ number: 10, title: "Fix" }] };
+      return { ok: true, data: [] };
+    });
+    prViewAsyncSpy.mockResolvedValue({ ok: true, data: {
+      reviewDecision: "",
+      mergeable: "UNKNOWN",
+      updatedAt: "2026-01-01T00:00:00Z",
+      createdAt: "2025-12-31T23:00:00Z",
+    } });
+    prChecksAsyncSpy.mockResolvedValue({ ok: false, error: "network error" });
+
+    const result = await checkPrStatusAsync("T-1-3", "/repo");
+
+    expect(result).toBe("T-1-3\t10\topen\tUNKNOWN\t2026-01-01T00:00:00Z");
+  });
 });
 
 // ── buildSnapshotAsync ──────────────────────────────────────────────
@@ -157,6 +187,29 @@ describe("buildSnapshotAsync", () => {
     expect(snapshot.items[0]!.prNumber).toBe(10);
     expect(snapshot.items[0]!.ciStatus).toBe("pass");
     expect(snapshot.items[0]!.isMergeable).toBe(true);
+  });
+
+  it("preserves partial open PR knowledge when async checkPr has no CI details", async () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("BA-OPEN-1"));
+    orch.getItem("BA-OPEN-1")!.reviewCompleted = true;
+    orch.hydrateState("BA-OPEN-1", "implementing");
+
+    const asyncCheckPr = async () => "BA-OPEN-1\t10\topen\t\t";
+
+    const snapshot = await buildSnapshotAsync(
+      orch,
+      "/project",
+      "/project/.ninthwave/.worktrees",
+      fakeMux,
+      () => null,
+      asyncCheckPr,
+    );
+
+    expect(snapshot.items).toHaveLength(1);
+    expect(snapshot.items[0]!.prNumber).toBe(10);
+    expect(snapshot.items[0]!.prState).toBe("open");
+    expect(snapshot.items[0]!.ciStatus).toBeUndefined();
   });
 
   it("skips terminal states", async () => {

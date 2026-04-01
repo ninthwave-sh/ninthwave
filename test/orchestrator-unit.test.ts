@@ -612,6 +612,24 @@ describe("handleImplementing", () => {
     expect(orch.getItem("H-1-1")!.prNumber).toBe(42);
   });
 
+  it("transitions to ci-pending when only partial open PR knowledge is available", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-OPEN-1"));
+    orch.getItem("H-OPEN-1")!.reviewCompleted = true;
+    orch.hydrateState("H-OPEN-1", "implementing");
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-OPEN-1", prNumber: 42, prState: "open", workerAlive: true }]),
+      NOW,
+    );
+
+    expect(orch.getItem("H-OPEN-1")!.state).toBe("ci-pending");
+    expect(orch.getItem("H-OPEN-1")!.prNumber).toBe(42);
+    expect(actions.some((a) => a.type === "merge")).toBe(false);
+    expect(actions.some((a) => a.type === "launch-review")).toBe(false);
+    expect(actions.some((a) => a.type === "daemon-rebase")).toBe(false);
+  });
+
   it("transitions to merged when PR auto-merges between polls", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-1-1"));

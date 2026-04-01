@@ -267,6 +267,15 @@ function derivePrStatus(ciStatus: string, isMergeable: string, reviewDecision: s
   return "pending";
 }
 
+function formatOpenPrStatus(
+  id: string,
+  prNumber: number,
+  isMergeable = "",
+  eventTime = "",
+): string {
+  return `${id}\t${prNumber}\topen\t${isMergeable}\t${eventTime}`;
+}
+
 export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps = defaultPrMonitorDeps): string {
   const branch = `ninthwave/${id}`;
 
@@ -292,7 +301,7 @@ export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps 
 
   // Check CI and review status (include updatedAt for detection latency, createdAt for CI grace period)
   const prViewResult = deps.prView(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt", "createdAt"]);
-  if (!prViewResult.ok) return ""; // API error: hold state
+  if (!prViewResult.ok) return formatOpenPrStatus(id, prNumber);
   const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
   const isMergeable = (prData.mergeable as string) ?? "";
@@ -300,7 +309,7 @@ export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps 
   const prCreatedAt = (prData.createdAt as string) ?? "";
 
   const checksResult = deps.prChecks(repoRoot, prNumber);
-  if (!checksResult.ok) return ""; // API error: hold state
+  if (!checksResult.ok) return formatOpenPrStatus(id, prNumber, isMergeable || "UNKNOWN", prUpdatedAt);
 
   const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data, prCreatedAt);
   const status = derivePrStatus(ciStatus, isMergeable, reviewDecision);
@@ -338,7 +347,7 @@ export async function checkPrStatusAsync(id: string, repoRoot: string, deps: PrM
   const prNumber = openPrs[0]!.number;
 
   const prViewResult = await deps.prViewAsync(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt", "createdAt"]);
-  if (!prViewResult.ok) return ""; // API error: hold state
+  if (!prViewResult.ok) return formatOpenPrStatus(id, prNumber);
   const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
   const isMergeable = (prData.mergeable as string) ?? "";
@@ -346,7 +355,7 @@ export async function checkPrStatusAsync(id: string, repoRoot: string, deps: PrM
   const prCreatedAt = (prData.createdAt as string) ?? "";
 
   const checksResult = await deps.prChecksAsync(repoRoot, prNumber);
-  if (!checksResult.ok) return ""; // API error: hold state
+  if (!checksResult.ok) return formatOpenPrStatus(id, prNumber, isMergeable || "UNKNOWN", prUpdatedAt);
 
   const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data, prCreatedAt);
   const status = derivePrStatus(ciStatus, isMergeable, reviewDecision);

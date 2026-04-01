@@ -430,7 +430,7 @@ describe("checkPrStatus format contract", () => {
       expect(result).toBe("");
     });
 
-    it("returns empty string when prView fails for an open PR", () => {
+    it("preserves open PR state when prView fails for an open PR", () => {
       prListSpy.mockImplementation(
         (_root: string, _branch: string, state: string) => {
           if (state === "open") return OPEN_PR;
@@ -439,11 +439,15 @@ describe("checkPrStatus format contract", () => {
       );
       prViewSpy.mockReturnValue({ ok: false, error: "server error" });
 
-      const result = checkPrStatus("T-ERR-3", "/repo");
-      expect(result).toBe("");
+      const parsed = parseFields(checkPrStatus("T-ERR-3", "/repo"));
+      expect(parsed.fieldCount).toBe(5);
+      expect(parsed.prNumber).toBe("123");
+      expect(parsed.status).toBe("open");
+      expect(parsed.mergeable).toBe("");
+      expect(parsed.eventTime).toBe("");
     });
 
-    it("returns empty string when prChecks fails for an open PR", () => {
+    it("preserves open PR state when prChecks fails for an open PR", () => {
       prListSpy.mockImplementation(
         (_root: string, _branch: string, state: string) => {
           if (state === "open") return OPEN_PR;
@@ -453,8 +457,12 @@ describe("checkPrStatus format contract", () => {
       prViewSpy.mockReturnValue(VIEW_PENDING);
       prChecksSpy.mockReturnValue({ ok: false, error: "network error" });
 
-      const result = checkPrStatus("T-ERR-4", "/repo");
-      expect(result).toBe("");
+      const parsed = parseFields(checkPrStatus("T-ERR-4", "/repo"));
+      expect(parsed.fieldCount).toBe(5);
+      expect(parsed.prNumber).toBe("123");
+      expect(parsed.status).toBe("open");
+      expect(parsed.mergeable).toBe("UNKNOWN");
+      expect(parsed.eventTime).toBe("2026-03-29T10:30:00Z");
     });
   });
 });

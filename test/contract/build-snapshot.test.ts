@@ -317,6 +317,22 @@ describe("buildSnapshot contract", () => {
       expect(item!.prState).toBe("merged");
     });
 
+    it("preserves partial open PR knowledge when CI details are unavailable", () => {
+      orch.addItem(makeWorkItem("D-OPEN-1"));
+      orch.hydrateState("D-OPEN-1", "implementing");
+
+      const result = snap(orch, {
+        checkPr: () => "D-OPEN-1\t42\topen\t\t",
+      });
+
+      const item = findItem(result.items, "D-OPEN-1");
+      expect(item).toBeDefined();
+      expect(item!.prNumber).toBe(42);
+      expect(item!.prState).toBe("open");
+      expect(item!.ciStatus).toBeUndefined();
+      expect(item!.isMergeable).toBeUndefined();
+    });
+
     it("isMergeable false for conflicting PRs", () => {
       orch.addItem(makeWorkItem("D-5"));
       orch.hydrateState("D-5", "ci-passed");

@@ -156,6 +156,7 @@ export function reconstructState(
         orch.hydrateState(item.id, "ci-failed");
         recoverWorkspaceRef(orch, item.id, workspaceList);
         break;
+      case "open":
       case "pending":
         orch.hydrateState(item.id, "ci-pending");
         recoverWorkspaceRef(orch, item.id, workspaceList);

@@ -152,6 +152,9 @@ export function buildSnapshot(
           // else: title mismatch -- stale merged PR from a previous cycle, ignore it
           break;
         }
+        case "open":
+          snap.prState = "open";
+          break;
         case "ready":
           snap.ciStatus = "pass";
           snap.prState = "open";
@@ -349,6 +352,9 @@ export async function buildSnapshotAsync(
           }
           break;
         }
+        case "open":
+          snap.prState = "open";
+          break;
         case "ready":
           snap.ciStatus = "pass";
           snap.prState = "open";
