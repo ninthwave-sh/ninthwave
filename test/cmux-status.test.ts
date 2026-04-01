@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { setStatusImpl, setProgressImpl } from "../core/cmux-status.ts";
+import { statusDisplayForState } from "../core/orchestrator-types.ts";
 import type { RunResult } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -100,5 +101,28 @@ describe("setProgressImpl", () => {
     const result = setProgressImpl("workspace:3", 1, "Done", runner);
 
     expect(result).toBe(false);
+  });
+});
+
+describe("statusDisplayForState", () => {
+  it("keeps underlying CI status when rebase is only requested", () => {
+    expect(statusDisplayForState("ci-pending", { rebaseRequested: true })).toMatchObject({
+      text: "CI Pending",
+      icon: "clock.fill",
+      color: "#06b6d4",
+    });
+    expect(statusDisplayForState("ci-failed", { rebaseRequested: true })).toMatchObject({
+      text: "CI Failed",
+      icon: "xmark.circle",
+      color: "#ef4444",
+    });
+  });
+
+  it("still renders actual rebasing state as Rebasing", () => {
+    expect(statusDisplayForState("rebasing")).toMatchObject({
+      text: "Rebasing",
+      icon: "arrow.triangle.branch",
+      color: "#f59e0b",
+    });
   });
 });

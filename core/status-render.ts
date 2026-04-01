@@ -1219,10 +1219,6 @@ export function formatStatusTable(
  * Orchestrator uses finer-grained states; status display groups them.
  */
 export function mapDaemonItemState(orchState: string, flags?: { rebaseRequested?: boolean }): ItemState {
-  // Composite display state: rebase is a transient operation overlaid on ci-pending/ci-failed
-  if (flags?.rebaseRequested && (orchState === "ci-pending" || orchState === "ci-failed")) {
-    return "rebasing";
-  }
   switch (orchState) {
     case "merged":
     case "forward-fix-pending":

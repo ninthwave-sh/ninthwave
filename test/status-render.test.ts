@@ -1417,12 +1417,12 @@ describe("mapDaemonItemState", () => {
     expect(mapDaemonItemState("unknown-state")).toBe("in-progress");
   });
 
-  it("returns rebasing when rebaseRequested is true and state is ci-pending", () => {
-    expect(mapDaemonItemState("ci-pending", { rebaseRequested: true })).toBe("rebasing");
+  it("keeps ci-pending when rebaseRequested is true and state is ci-pending", () => {
+    expect(mapDaemonItemState("ci-pending", { rebaseRequested: true })).toBe("ci-pending");
   });
 
-  it("returns rebasing when rebaseRequested is true and state is ci-failed", () => {
-    expect(mapDaemonItemState("ci-failed", { rebaseRequested: true })).toBe("rebasing");
+  it("keeps ci-failed when rebaseRequested is true and state is ci-failed", () => {
+    expect(mapDaemonItemState("ci-failed", { rebaseRequested: true })).toBe("ci-failed");
   });
 
   it("returns ci-pending when rebaseRequested is false", () => {
@@ -1436,6 +1436,10 @@ describe("mapDaemonItemState", () => {
   it("ignores rebaseRequested for non ci-pending/ci-failed states", () => {
     expect(mapDaemonItemState("implementing", { rebaseRequested: true })).toBe("implementing");
     expect(mapDaemonItemState("merged", { rebaseRequested: true })).toBe("verifying");
+  });
+
+  it("returns rebasing for the actual rebasing orchestrator state", () => {
+    expect(mapDaemonItemState("rebasing", { rebaseRequested: true })).toBe("rebasing");
   });
 });
 
@@ -1531,7 +1535,7 @@ describe("daemonStateToStatusItems", () => {
     expect(items[1]!.descriptionSnippet).toBeUndefined();
   });
 
-  it("maps rebaseRequested flag to rebasing display state", () => {
+  it("keeps ci-pending display state when rebaseRequested is true", () => {
     const now = new Date().toISOString();
     const state: DaemonState = {
       pid: 1,
@@ -1547,6 +1551,51 @@ describe("daemonStateToStatusItems", () => {
           ciFailCount: 0,
           retryCount: 0,
           rebaseRequested: true,
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.state).toBe("ci-pending");
+  });
+
+  it("keeps ci-failed display state when rebaseRequested is true", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "C-1-3B",
+          state: "ci-failed",
+          prNumber: 10,
+          title: "Rebase requested failed item",
+          lastTransition: now,
+          ciFailCount: 1,
+          retryCount: 0,
+          rebaseRequested: true,
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.state).toBe("ci-failed");
+  });
+
+  it("maps actual rebasing state to rebasing display state", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "C-1-3C",
+          state: "rebasing",
+          prNumber: 10,
+          title: "Actually rebasing item",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
         },
       ],
     };

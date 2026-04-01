@@ -519,19 +519,14 @@ export interface StatusDisplay {
 /**
  * Map an orchestrator item state to cmux status pill properties (text, icon, color).
  * Matches the status table rendering in core/status-render.ts.
- *
- * When flags.rebaseRequested is true and state is ci-pending or ci-failed,
- * returns a "Rebasing" display instead of the normal state display.
  */
 export function statusDisplayForState(state: OrchestratorItemState, flags?: { rebaseRequested?: boolean; reviewRound?: number }): StatusDisplay {
-  // Composite display state: rebase is a transient operation overlaid on ci-pending/ci-failed
-  if (flags?.rebaseRequested && (state === "ci-pending" || state === "ci-failed")) {
-    return { text: "Rebasing", icon: "arrow.triangle.branch", color: "#f59e0b" };
-  }
   switch (state) {
     case "implementing":
     case "launching":
       return { text: "Implementing", icon: "hammer.fill", color: "#b45309" };
+    case "rebasing":
+      return { text: "Rebasing", icon: "arrow.triangle.branch", color: "#f59e0b" };
     case "ci-pending":
       return { text: "CI Pending", icon: "clock.fill", color: "#06b6d4" };
     case "ci-failed":

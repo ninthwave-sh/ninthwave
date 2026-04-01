@@ -3039,15 +3039,22 @@ describe("statusDisplayForState", () => {
     expect(d.color).toBe("#06b6d4");
   });
 
-  it("returns Rebasing display when rebaseRequested is true and state is ci-pending", () => {
+  it("keeps CI Pending display when rebaseRequested is true and state is ci-pending", () => {
     const d = statusDisplayForState("ci-pending", { rebaseRequested: true });
-    expect(d.text).toBe("Rebasing");
-    expect(d.icon).toBe("arrow.triangle.branch");
-    expect(d.color).toBe("#f59e0b");
+    expect(d.text).toBe("CI Pending");
+    expect(d.icon).toBe("clock.fill");
+    expect(d.color).toBe("#06b6d4");
   });
 
-  it("returns Rebasing display when rebaseRequested is true and state is ci-failed", () => {
+  it("keeps CI Failed display when rebaseRequested is true and state is ci-failed", () => {
     const d = statusDisplayForState("ci-failed", { rebaseRequested: true });
+    expect(d.text).toBe("CI Failed");
+    expect(d.icon).toBe("xmark.circle");
+    expect(d.color).toBe("#ef4444");
+  });
+
+  it("returns Rebasing display for the actual rebasing state", () => {
+    const d = statusDisplayForState("rebasing", { rebaseRequested: true });
     expect(d.text).toBe("Rebasing");
     expect(d.icon).toBe("arrow.triangle.branch");
     expect(d.color).toBe("#f59e0b");
