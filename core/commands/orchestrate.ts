@@ -69,6 +69,7 @@ import {
   type DaemonState,
   type DaemonCrewStatus,
   type ExternalReviewItem,
+  type WorkerProgress,
 } from "../daemon.ts";
 import type { TokenUsage } from "../crew.ts";
 import {
@@ -258,16 +259,31 @@ export function filterCrewRemoteWriteActions(
   return actions.filter((action) => !(WRITE_ACTIONS.has(action.type) && remoteIds.has(action.itemId)));
 }
 
+function snapshotToHeartbeatMap(
+  snapshot: PollSnapshot | undefined,
+): Map<string, WorkerProgress> {
+  const heartbeats = new Map<string, WorkerProgress>();
+  if (!snapshot) return heartbeats;
+  for (const item of snapshot.items) {
+    if (item.lastHeartbeat) {
+      heartbeats.set(item.id, item.lastHeartbeat);
+    }
+  }
+  return heartbeats;
+}
+
 export function orchestratorItemsToStatusItems(
   items: OrchestratorItem[],
   remoteItems?: RemoteItemRenderState,
   maxTimeoutExtensions: number = DEFAULT_CONFIG.maxTimeoutExtensions,
+  heartbeats?: ReadonlyMap<string, WorkerProgress>,
 ): StatusItem[] {
   const now = Date.now();
   const remoteSnapshots = remoteItems instanceof Map ? remoteItems : undefined;
   const remoteIds = remoteItems instanceof Set ? remoteItems : undefined;
   return items.map((item) => {
     const remoteSnapshot = remoteSnapshots?.get(item.id);
+    const heartbeat = remoteSnapshot ? undefined : heartbeats?.get(item.id);
     const mappedState = mapDaemonItemState(item.state, { rebaseRequested: item.rebaseRequested });
     const state = remoteSnapshot?.state ?? mappedState;
     const remote = remoteSnapshot
@@ -300,6 +316,9 @@ export function orchestratorItemsToStatusItems(
       stderrTail: item.stderrTail,
       remote,
       workspaceRef: item.workspaceRef,
+      progress: heartbeat?.progress,
+      progressLabel: heartbeat?.label,
+      progressTs: heartbeat?.ts,
     };
   });
 }
@@ -322,8 +341,9 @@ export function renderTuiFrame(
   remoteItems?: RemoteItemRenderState,
   sessionCode?: string,
   maxTimeoutExtensions: number = DEFAULT_CONFIG.maxTimeoutExtensions,
+  heartbeats?: ReadonlyMap<string, WorkerProgress>,
 ): void {
-  const statusItems = orchestratorItemsToStatusItems(items, remoteItems, maxTimeoutExtensions);
+  const statusItems = orchestratorItemsToStatusItems(items, remoteItems, maxTimeoutExtensions, heartbeats);
   const termWidth = getTerminalWidth();
   const termRows = getTerminalHeight();
 
@@ -360,8 +380,9 @@ export function renderTuiPanelFrame(
   write: (s: string) => void = (s) => process.stdout.write(s),
   remoteItems?: RemoteItemRenderState,
   maxTimeoutExtensions: number = DEFAULT_CONFIG.maxTimeoutExtensions,
+  heartbeats?: ReadonlyMap<string, WorkerProgress>,
 ): void {
-  const statusItems = orchestratorItemsToStatusItems(items, remoteItems, maxTimeoutExtensions);
+  const statusItems = orchestratorItemsToStatusItems(items, remoteItems, maxTimeoutExtensions, heartbeats);
   const termWidth = getTerminalWidth();
   const termRows = getTerminalHeight();
 
@@ -1397,7 +1418,7 @@ export interface OrchestrateLoopDeps {
   /** Read screen content from a worker workspace for telemetry capture. */
   readScreen?: (ref: string, lines?: number) => string;
   /** Called after each poll cycle with current items. Used for daemon state persistence and TUI countdown. */
-  onPollComplete?: (items: OrchestratorItem[], pollIntervalMs?: number) => void;
+  onPollComplete?: (items: OrchestratorItem[], snapshot: PollSnapshot, pollIntervalMs?: number) => void;
   /** Sync cmux sidebar display for active workers after each poll cycle. */
   syncDisplay?: (orch: Orchestrator, snapshot: PollSnapshot) => void;
   /** Dependencies for external PR review processing. When present and reviewExternal is enabled, external PRs are scanned and reviewed. */
@@ -2036,7 +2057,7 @@ export async function orchestrateLoop(
 
     // Persist state for daemon mode (or any caller that wants snapshots)
     // Pass interval so TUI can set countdown target
-    deps.onPollComplete?.(orch.getAllItems(), interval);
+    deps.onPollComplete?.(orch.getAllItems(), snapshot, interval);
 
     await deps.sleep(interval);
   }
@@ -2602,6 +2623,7 @@ export async function cmdOrchestrate(
   const savedPanelMode = tuiMode ? readLayoutPreference(projectRoot) : "split";
 
   let lastTuiItems: OrchestratorItem[] = orch.getAllItems();
+  let lastTuiHeartbeats = new Map<string, WorkerProgress>();
   const tuiState: TuiState = {
     scrollOffset: 0,
     viewOptions: {
@@ -2630,12 +2652,12 @@ export async function cmdOrchestrate(
     detailContentLines: 0,
     savedLogScrollOffset: 0,
     getSelectedItemId: (index: number) => {
-      const items = orchestratorItemsToStatusItems(lastTuiItems, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions);
+      const items = orchestratorItemsToStatusItems(lastTuiItems, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
       const nonQueued = items.filter((i) => i.state !== "queued");
       return nonQueued[index]?.id;
     },
     getItemCount: () => {
-      const items = orchestratorItemsToStatusItems(lastTuiItems, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions);
+      const items = orchestratorItemsToStatusItems(lastTuiItems, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
       return items.filter((i) => i.state !== "queued").length;
     },
     onExtendTimeout: (itemId) => orch.extendTimeout(itemId),
@@ -2691,7 +2713,7 @@ export async function cmdOrchestrate(
     onUpdate: () => {
       if (tuiMode) {
         try {
-          renderTuiPanelFrame(lastTuiItems, wipLimit, tuiState, undefined, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions);
+          renderTuiPanelFrame(lastTuiItems, wipLimit, tuiState, undefined, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
         } catch {
           // Non-fatal
         }
@@ -2701,8 +2723,9 @@ export async function cmdOrchestrate(
     tmuxSessionName: tmuxOutsideSession ? tmuxSessionName : undefined,
   };
 
-  const onPollComplete = (items: OrchestratorItem[], _pollIntervalMs?: number) => {
+  const onPollComplete = (items: OrchestratorItem[], snapshot: PollSnapshot, _pollIntervalMs?: number) => {
     lastTuiItems = items;
+    lastTuiHeartbeats = snapshotToHeartbeatMap(snapshot);
     // Update crew status from broker
     if (crewBroker && crewCode) {
       const cs = crewBroker.getCrewStatus();
@@ -2722,6 +2745,7 @@ export async function cmdOrchestrate(
         wipLimit,
         operatorId,
         remoteItemSnapshots: crewStatusToRemoteItemSnapshots(crewStatus),
+        heartbeats: lastTuiHeartbeats,
         crewStatus: crewStatusToDaemonCrewStatus(crewStatus, crewCode, crewBroker?.isConnected() ?? false),
         ...(tuiState.viewOptions.emptyState ? { emptyState: tuiState.viewOptions.emptyState } : {}),
       });
@@ -2744,7 +2768,7 @@ export async function cmdOrchestrate(
         }
       }
       try {
-        renderTuiPanelFrame(items, wipLimit, tuiState, undefined, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions);
+        renderTuiPanelFrame(items, wipLimit, tuiState, undefined, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
       } catch {
         // Non-fatal -- TUI render failure shouldn't block the orchestrator
       }
@@ -2849,7 +2873,7 @@ export async function cmdOrchestrate(
         const write = (s: string) => process.stdout.write(s);
         write("\x1B[H"); // cursor home
         // Re-render the current TUI frame first (to show final state)
-        renderTuiPanelFrame(allItems, wipLimit, tuiState, write, getRemoteItemSnapshots());
+        renderTuiPanelFrame(allItems, wipLimit, tuiState, write, getRemoteItemSnapshots(), orch.config.maxTimeoutExtensions, lastTuiHeartbeats);
         // Overlay the banner at the bottom
         const termRows = getTerminalHeight();
         const startRow = Math.max(1, termRows - bannerLines.length);

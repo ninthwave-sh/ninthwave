@@ -68,6 +68,12 @@ export interface DaemonStateItem {
   worktreePath?: string;
   /** cmux workspace reference for the implementation worker session. */
   workspaceRef?: string;
+  /** Latest worker heartbeat progress from 0.0 to 1.0. */
+  progress?: number;
+  /** Latest worker heartbeat label. */
+  progressLabel?: string;
+  /** ISO timestamp of the latest worker heartbeat. */
+  progressTs?: string;
   /** Test partition number assigned to this worker. */
   partition?: number;
   /** Absolute path to the repo where the PR lives (for cross-repo items). */
@@ -578,6 +584,7 @@ export function serializeOrchestratorState(
     emptyState?: "watch-armed";
     crewStatus?: DaemonCrewStatus;
     remoteItemSnapshots?: ReadonlyMap<string, CrewRemoteItemSnapshot>;
+    heartbeats?: ReadonlyMap<string, WorkerProgress | null | undefined>;
   },
 ): DaemonState {
   return {
@@ -591,6 +598,7 @@ export function serializeOrchestratorState(
     ...(extras?.crewStatus ? { crewStatus: extras.crewStatus } : {}),
     items: items.map((item) => {
       const remoteSnapshot = extras?.remoteItemSnapshots?.get(item.id);
+      const heartbeat = extras?.heartbeats?.get(item.id) ?? undefined;
       return {
         id: item.id,
         state: item.state,
@@ -621,6 +629,13 @@ export function serializeOrchestratorState(
         ...(item.fixForwardWorkspaceRef ? { fixForwardWorkspaceRef: item.fixForwardWorkspaceRef } : {}),
         ...(item.worktreePath ? { worktreePath: item.worktreePath } : {}),
         ...(item.workspaceRef ? { workspaceRef: item.workspaceRef } : {}),
+        ...(heartbeat
+          ? {
+              progress: heartbeat.progress,
+              progressLabel: heartbeat.label,
+              progressTs: heartbeat.ts,
+            }
+          : {}),
         ...(item.partition != null ? { partition: item.partition } : {}),
         ...(item.resolvedRepoRoot ? { resolvedRepoRoot: item.resolvedRepoRoot } : {}),
         ...(item.aiTool ? { aiTool: item.aiTool } : {}),

@@ -63,6 +63,9 @@ function makeItem(overrides: Partial<StatusItem> = {}): StatusItem {
     endedAt: overrides.endedAt,
     exitCode: overrides.exitCode,
     stderrTail: overrides.stderrTail,
+    progress: overrides.progress,
+    progressLabel: overrides.progressLabel,
+    progressTs: overrides.progressTs,
     daemonName: overrides.daemonName,
     worktreePath: overrides.worktreePath,
   };
@@ -100,6 +103,8 @@ const MIXED_STATE: StatusItem[] = [
     state: "implementing",
     prNumber: null,
     ageMs: 7 * 60_000,
+    progress: 0.4,
+    progressLabel: "Writing tests",
   }),
   makeItem({
     id: "M-FE-1",

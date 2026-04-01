@@ -2,7 +2,7 @@ Ninthwave                                                                       
 
     ID          STATE            DURATION TITLE
   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  ▸ H-CA-2      Implementing     7m       Database migration for users table
+  ▸ H-CA-2      Implementing     7m       Database migration for users table [####------] 40% Writing tests
   ◌ M-FE-1      CI Pending (#43) 2m       Login form component
   ✗ M-FE-2      CI Failed (#44)  4m       Dashboard layout refactor (lint errors)
   ● L-BF-1      In Review (#45)  1m       Fix tooltip positioning on narrow screens

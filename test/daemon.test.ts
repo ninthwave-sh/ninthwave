@@ -565,6 +565,29 @@ describe("serializeOrchestratorState", () => {
     );
     expect(state.items[1]!.descriptionSnippet).toBeUndefined();
   });
+
+  it("serializes latest heartbeat progress when provided", () => {
+    const item = makeOrchestratorItem("P-1-1", "implementing");
+    const heartbeats = new Map([
+      ["P-1-1", {
+        id: "P-1-1",
+        progress: 0.6,
+        label: "Updating tests",
+        ts: "2026-04-01T12:00:00.000Z",
+      }],
+    ]);
+
+    const state = serializeOrchestratorState(
+      [item],
+      42,
+      "2026-03-27T00:00:00.000Z",
+      { heartbeats },
+    );
+
+    expect(state.items[0]!.progress).toBe(0.6);
+    expect(state.items[0]!.progressLabel).toBe("Updating tests");
+    expect(state.items[0]!.progressTs).toBe("2026-04-01T12:00:00.000Z");
+  });
 });
 
 // ── migrateRuntimeState ─────────────────────────────────────────────

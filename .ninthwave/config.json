@@ -2,6 +2,7 @@
   "review_external": false,
   "schedule_enabled": false,
   "ai_tools": [
-    "opencode"
+    "opencode",
+    "copilot"
   ]
 }

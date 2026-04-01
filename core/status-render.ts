@@ -137,6 +137,12 @@ export interface StatusItem {
   worktreePath?: string;
   /** Multiplexer workspace reference (e.g., "nw-myproject:nw_H-TM-1" for tmux). */
   workspaceRef?: string;
+  /** Latest worker heartbeat progress from 0.0 to 1.0. */
+  progress?: number;
+  /** Latest worker heartbeat label. */
+  progressLabel?: string;
+  /** ISO timestamp of the latest worker heartbeat. */
+  progressTs?: string;
 }
 
 // ─── Dependency tree types ────────────────────────────────────────────────────
@@ -308,6 +314,53 @@ export function formatBlockerSubline(
     content = idList.slice(0, available - 3) + "...";
   }
   return `${DIM}${prefix}${content}${RESET}`;
+}
+
+function clampProgress(progress: number): number {
+  if (!Number.isFinite(progress)) return 0;
+  return Math.max(0, Math.min(1, progress));
+}
+
+function progressPercentText(progress: number): string {
+  return `${Math.round(clampProgress(progress) * 100)}%`;
+}
+
+function shouldShowItemProgress(item: StatusItem): boolean {
+  return item.progress !== undefined
+    && (item.state === "implementing" || item.state === "rebasing" || item.state === "ci-failed");
+}
+
+/**
+ * Format a compact single-line progress string for row/detail rendering.
+ * Falls back from bar+label to bar+percent to percent-only as space shrinks.
+ */
+export function formatInlineProgress(
+  progress: number,
+  label: string | undefined,
+  maxWidth: number,
+): string {
+  if (maxWidth <= 0) return "";
+
+  const percentText = progressPercentText(progress);
+  if (maxWidth <= percentText.length) return percentText;
+  if (maxWidth < 8) return percentText;
+
+  const barWidth = maxWidth >= 26 ? 10 : maxWidth >= 20 ? 8 : maxWidth >= 14 ? 6 : 4;
+  const filled = Math.round(clampProgress(progress) * barWidth);
+  const bar = `[${"#".repeat(filled)}${"-".repeat(barWidth - filled)}]`;
+  let text = `${bar} ${percentText}`;
+
+  if (label) {
+    const remaining = maxWidth - text.length - 1;
+    if (remaining >= 4) {
+      const labelText = label.length <= remaining
+        ? label
+        : label.slice(0, remaining - 3) + "...";
+      text += ` ${labelText}`;
+    }
+  }
+
+  return text.length <= maxWidth ? text : text.slice(0, maxWidth);
 }
 
 /** Format milliseconds into a human-readable age string (e.g., "2h 15m", "3d 1h"). */
@@ -523,7 +576,15 @@ export function formatItemRow(
     ? ` ${DIM}(${item.timeoutExtensions})${RESET}`
     : "";
   const depCol = depIndicator ?? "";
-  const title = truncateTitle(item.title || item.id, titleWidth);
+  const progressText = shouldShowItemProgress(item)
+    ? formatInlineProgress(
+        item.progress!,
+        item.progressLabel,
+        Math.min(32, Math.max(4, Math.floor(titleWidth * 0.45))),
+      )
+    : "";
+  const progressWidth = progressText ? stripAnsiForWidth(progressText).length + 1 : 0;
+  const title = truncateTitle(item.title || item.id, Math.max(4, titleWidth - progressWidth));
   const repo = item.repoLabel ? ` ${DIM}[${item.repoLabel}]${RESET}` : "";
   const reason = item.failureReason ? ` ${DIM}(${item.failureReason})${RESET}` : "";
   const telemetry = formatTelemetrySuffix(item);
@@ -531,7 +592,9 @@ export function formatItemRow(
   // Selection highlight: replace leading 2-space indent with bold ">" prefix
   const prefix = isSelected ? `${BOLD}>${RESET} ` : "  ";
 
-  return `${prefix}${iconColor}${icon}${RESET} ${id}${color}${stateCell}${RESET}${remoteDot} ${durationCell}${timeoutExtensions} ${depCol}${title}${repo}${reason}${telemetry}`;
+  const progressSuffix = progressText ? ` ${DIM}${progressText}${RESET}` : "";
+
+  return `${prefix}${iconColor}${icon}${RESET} ${id}${color}${stateCell}${RESET}${remoteDot} ${durationCell}${timeoutExtensions} ${depCol}${title}${progressSuffix}${repo}${reason}${telemetry}`;
 }
 
 /**
@@ -1104,6 +1167,9 @@ export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
     stderrTail: item.stderrTail,
     worktreePath: item.worktreePath,
     workspaceRef: item.workspaceRef,
+    progress: item.progress,
+    progressLabel: item.progressLabel,
+    progressTs: item.progressTs,
     remote: item.remoteSnapshot ? item.remoteSnapshot.ownerDaemonId !== null : false,
   }));
 }
@@ -2131,7 +2197,12 @@ export function formatItemDetail(
   }
 
   // Progress label
-  if (opts?.progressLabel) {
+  const progressText = shouldShowItemProgress(item)
+    ? formatInlineProgress(item.progress!, item.progressLabel ?? opts?.progressLabel, 48)
+    : undefined;
+  if (progressText) {
+    lines.push(`  ${DIM}Progress:${RESET}  ${progressText}`);
+  } else if (opts?.progressLabel) {
     lines.push(`  ${DIM}Progress:${RESET}  ${opts.progressLabel}`);
   }
 

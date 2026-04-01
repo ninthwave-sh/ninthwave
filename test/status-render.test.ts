@@ -38,6 +38,7 @@ import {
   formatTitleMetrics,
   blockingIcon,
   formatBlockerSubline,
+  formatInlineProgress,
   MIN_FULLSCREEN_ROWS,
   MIN_SPLIT_ROWS,
   buildPanelLayout,
@@ -516,6 +517,43 @@ describe("formatItemRow", () => {
     expect(text).toContain("4m 30s");
     expect(text).toContain("(1/3)");
     expect(row).toContain(`${RED}4m 30s`);
+  });
+
+  it("shows inline progress for active items when heartbeat data is present", () => {
+    const item = makeStatusItem({
+      state: "implementing",
+      progress: 0.4,
+      progressLabel: "Writing tests",
+    });
+    const row = stripAnsi(formatItemRow(item, 40));
+    expect(row).toContain("40%");
+    expect(row).toContain("[");
+    expect(row).toContain("Wr...");
+  });
+
+  it("does not show inline progress for queued items", () => {
+    const item = makeStatusItem({
+      state: "queued",
+      progress: 0.4,
+      progressLabel: "Writing tests",
+    });
+    const row = stripAnsi(formatItemRow(item, 40));
+    expect(row).not.toContain("40%");
+    expect(row).not.toContain("Writing tests");
+  });
+});
+
+describe("formatInlineProgress", () => {
+  it("renders percent-only in very narrow space", () => {
+    expect(formatInlineProgress(0.42, "Writing tests", 6)).toBe("42%");
+  });
+
+  it("renders a bar and percent in medium space", () => {
+    expect(formatInlineProgress(0.5, undefined, 16)).toBe("[###---] 50%");
+  });
+
+  it("renders a bar, percent, and truncated label in wide space", () => {
+    expect(formatInlineProgress(0.4, "Writing tests and docs", 24)).toBe("[###-----] 40% Writin...");
   });
 });
 
@@ -1375,6 +1413,33 @@ describe("daemonStateToStatusItems", () => {
     const items = daemonStateToStatusItems(state);
     expect(items[0]!.state).toBe("ci-pending");
   });
+
+  it("maps persisted progress fields when present", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "C-1-7",
+          state: "implementing",
+          prNumber: null,
+          title: "Progress item",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          progress: 0.6,
+          progressLabel: "Updating tests",
+          progressTs: now,
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.progress).toBe(0.6);
+    expect(items[0]!.progressLabel).toBe("Updating tests");
+    expect(items[0]!.progressTs).toBe(now);
+  });
 });
 
 // ── TUI mode detection ────────────────────────────────────────────────────────
@@ -1513,6 +1578,23 @@ describe("orchestratorItemsToStatusItems", () => {
     // Non-remote item keeps its own state
     expect(result[2]!.state).toBe("implementing");
     expect(result[2]!.remote).toBe(false);
+  });
+
+  it("maps snapshot heartbeat data into status items", () => {
+    const item = makeOrchestratorItem("C-1-9", "implementing");
+    const heartbeats = new Map([
+      ["C-1-9", {
+        id: "C-1-9",
+        progress: 0.75,
+        label: "Running tests",
+        ts: "2026-04-01T12:00:00Z",
+      }],
+    ]);
+
+    const [result] = orchestratorItemsToStatusItems([item], undefined, 3, heartbeats);
+    expect(result!.progress).toBe(0.75);
+    expect(result!.progressLabel).toBe("Running tests");
+    expect(result!.progressTs).toBe("2026-04-01T12:00:00Z");
   });
 
   it("uses broker snapshots for queued, implementing, and review rows", () => {
@@ -3250,10 +3332,11 @@ describe("formatItemDetail", () => {
       state: "implementing",
       prNumber: 42,
       startedAt: new Date(Date.now() - 300_000).toISOString(),
+      progress: 0.4,
+      progressLabel: "Writing tests",
     });
     const lines = formatItemDetail(item, {
       repoUrl: "https://github.com/org/repo",
-      progressLabel: "Writing tests",
       tokensIn: 45000,
       tokensOut: 12000,
     });
