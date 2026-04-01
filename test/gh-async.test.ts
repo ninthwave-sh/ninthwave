@@ -36,13 +36,17 @@ describe("prListAsync", () => {
     runAsyncSpy.mockReturnValue(fail("api error"));
     const result = await prListAsync("/repo", "ninthwave/T-1-1", "open");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("api error");
+    if (!result.ok) {
+      expect(result.error).toContain("api error");
+      expect(result.kind).toBe("unknown");
+    }
   });
 
   it("returns ok:false on invalid JSON", async () => {
     runAsyncSpy.mockReturnValue(ok("not json"));
     const result = await prListAsync("/repo", "ninthwave/T-1-1", "open");
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.kind).toBe("parse");
   });
 
   it("returns ok:true with empty array on empty stdout", async () => {
@@ -68,16 +72,20 @@ describe("prViewAsync", () => {
   });
 
   it("returns ok:false on gh failure", async () => {
-    runAsyncSpy.mockReturnValue(fail("not found"));
+    runAsyncSpy.mockReturnValue(fail("repository not found"));
     const result = await prViewAsync("/repo", 42, ["state"]);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("not found");
+    if (!result.ok) {
+      expect(result.error).toContain("not found");
+      expect(result.kind).toBe("repo-access");
+    }
   });
 
   it("returns ok:false on invalid JSON", async () => {
     runAsyncSpy.mockReturnValue(ok("bad json"));
     const result = await prViewAsync("/repo", 42, ["state"]);
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.kind).toBe("parse");
   });
 });
 
@@ -98,16 +106,20 @@ describe("prChecksAsync", () => {
   });
 
   it("returns ok:false on gh failure", async () => {
-    runAsyncSpy.mockReturnValue(fail("timeout"));
+    runAsyncSpy.mockReturnValue(fail("network timeout"));
     const result = await prChecksAsync("/repo", 42);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain("timeout");
+    if (!result.ok) {
+      expect(result.error).toContain("timeout");
+      expect(result.kind).toBe("network");
+    }
   });
 
   it("returns ok:false on invalid JSON", async () => {
     runAsyncSpy.mockReturnValue(ok("invalid"));
     const result = await prChecksAsync("/repo", 42);
     expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.kind).toBe("parse");
   });
 
   it("returns ok:true with empty array on empty stdout", async () => {

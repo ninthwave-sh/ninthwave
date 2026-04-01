@@ -197,6 +197,12 @@ export interface PollSnapshot {
   readyIds: string[];
   /** Count of items where GitHub API returned errors (hold-state applied). */
   apiErrorCount?: number;
+  /** Compact summary of PR polling failures shown in logs/TUI. */
+  apiErrorSummary?: {
+    total: number;
+    byKind: Partial<Record<GhFailureKind, number>>;
+    primaryKind: GhFailureKind;
+  };
 }
 
 // ── Actions ──────────────────────────────────────────────────────────
@@ -554,3 +560,4 @@ export interface OrchestratorHandle {
   getAllItems(): OrchestratorItem[];
   buildStackChain(itemId: string): Array<{ id: string; prNumber: number; title: string }>;
 }
+import type { GhFailureKind } from "./gh.ts";

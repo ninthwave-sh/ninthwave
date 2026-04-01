@@ -2266,14 +2266,19 @@ describe("buildStatusLayout", () => {
     expect(footerText).toContain("3 items");
   });
 
-  it("footer shows GitHub API warning when apiErrorCount > 0", () => {
+  it("footer shows cause-aware GitHub API warning when summary is present", () => {
     const items = [makeStatusItem({ id: "A-1", state: "implementing" })];
     const layout = buildStatusLayout(items, 100, undefined, false, {
       mergeStrategy: "auto",
       apiErrorCount: 2,
+      apiErrorSummary: {
+        total: 2,
+        byKind: { auth: 2 },
+        primaryKind: "auth",
+      },
     });
     const footerText = layout.footerLines.map(stripAnsi).join("\n");
-    expect(footerText).toContain("GitHub API unreachable");
+    expect(footerText).toContain("GitHub auth error (2)");
   });
 
   it("footer does not show GitHub API warning when apiErrorCount is 0", () => {
@@ -2284,6 +2289,22 @@ describe("buildStatusLayout", () => {
     });
     const footerText = layout.footerLines.map(stripAnsi).join("\n");
     expect(footerText).not.toContain("GitHub API unreachable");
+  });
+
+  it("moves GitHub API warning onto its own footer line when it will not fit safely", () => {
+    const items = [makeStatusItem({ id: "A-1", state: "implementing" })];
+    const layout = buildStatusLayout(items, 60, undefined, false, {
+      mergeStrategy: "auto",
+      apiErrorCount: 3,
+      apiErrorSummary: {
+        total: 3,
+        byKind: { auth: 2, network: 1 },
+        primaryKind: "auth",
+      },
+    });
+    const footerText = layout.footerLines.map(stripAnsi);
+    expect(footerText[2]).toContain("shift+tab to cycle");
+    expect(footerText[3]).toContain("GitHub errors: auth 2, network 1");
   });
 
   it("title line shows right-aligned Lead/Thru when metrics available", () => {

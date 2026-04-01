@@ -10,9 +10,32 @@ import {
   type OrchestratorItem,
 } from "./orchestrator.ts";
 import { readHeartbeat, readVerdictFile } from "./daemon.ts";
-import { checkPrStatus, checkPrStatusAsync } from "./commands/pr-monitor.ts";
+import {
+  checkPrStatusDetailed,
+  checkPrStatusDetailedAsync,
+  type PrStatusPollResult,
+} from "./commands/pr-monitor.ts";
 import { prTitleMatchesWorkItem } from "./work-item-files.ts";
 import type { PrComment } from "./gh.ts";
+
+function normalizePrStatusResult(result: string | null | PrStatusPollResult): PrStatusPollResult {
+  if (typeof result === "string" || result == null) {
+    return result ? { statusLine: result } : { statusLine: "", failure: { kind: "unknown", stage: "availability", error: "Unknown GitHub polling failure" } };
+  }
+  return result;
+}
+
+function summarizeApiErrors(byKind: Record<string, number>): PollSnapshot["apiErrorSummary"] {
+  const entries = Object.entries(byKind)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return undefined;
+  return {
+    total: entries.reduce((sum, [, count]) => sum + count, 0),
+    byKind,
+    primaryKind: entries[0]![0] as NonNullable<PollSnapshot["apiErrorSummary"]>["primaryKind"],
+  };
+}
 
 // ── Worktree commit tracking ──────────────────────────────────────
 
@@ -71,7 +94,7 @@ export function buildSnapshot(
   _worktreeDir: string,
   mux: Multiplexer = getMux(),
   getLastCommitTime: (projectRoot: string, branchName: string) => string | null = getWorktreeLastCommitTime,
-  checkPr: (id: string, projectRoot: string) => string | null = checkPrStatus,
+  checkPr: (id: string, projectRoot: string) => string | null | PrStatusPollResult = checkPrStatusDetailed,
   fetchComments?: (repoRoot: string, prNumber: number, since: string) => Array<{ body: string; author: string; createdAt: string }>,
   checkCommitCI?: (repoRoot: string, sha: string) => "pass" | "fail" | "pending",
 ): PollSnapshot {
@@ -79,6 +102,7 @@ export function buildSnapshot(
   const readyIds: string[] = [];
   const heartbeatStates = new Set(["launching", "implementing", "ci-failed", "ci-pending", "ci-passed", "review-pending", "merging"]);
   let apiErrorCount = 0;
+  const apiErrorByKind: Record<string, number> = {};
   /** States that require PR polling -- used to count API errors only for items that actually poll GitHub. */
   const prPollStates = new Set(["implementing", "ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing", "rebasing", "merging", "launching"]);
 
@@ -121,10 +145,11 @@ export function buildSnapshot(
 
     // Check PR status via gh -- use the item's resolved repo root for cross-repo items
     const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
-    const statusLine = checkPr(orchItem.id, repoRoot);
-    // Empty string from checkPr means API error -- hold state for this item
-    if (!statusLine && prPollStates.has(orchItem.state)) {
+    const prResult = normalizePrStatusResult(checkPr(orchItem.id, repoRoot));
+    const statusLine = prResult.statusLine;
+    if (prResult.failure && prPollStates.has(orchItem.state)) {
       apiErrorCount++;
+      apiErrorByKind[prResult.failure.kind] = (apiErrorByKind[prResult.failure.kind] ?? 0) + 1;
     }
     if (statusLine) {
       const parts = statusLine.split("\t");
@@ -260,7 +285,12 @@ export function buildSnapshot(
     items.push(snap);
   }
 
-  return { items, readyIds, apiErrorCount: apiErrorCount > 0 ? apiErrorCount : undefined };
+  return {
+    items,
+    readyIds,
+    apiErrorCount: apiErrorCount > 0 ? apiErrorCount : undefined,
+    apiErrorSummary: summarizeApiErrors(apiErrorByKind),
+  };
 }
 
 /**
@@ -278,7 +308,7 @@ export async function buildSnapshotAsync(
   _worktreeDir: string,
   mux: Multiplexer = getMux(),
   getLastCommitTime: (projectRoot: string, branchName: string) => string | null | Promise<string | null> = getWorktreeLastCommitTimeAsync,
-  checkPr: (id: string, projectRoot: string) => Promise<string | null> = checkPrStatusAsync,
+  checkPr: (id: string, projectRoot: string) => Promise<string | null | PrStatusPollResult> = checkPrStatusDetailedAsync,
   fetchComments?: (repoRoot: string, prNumber: number, since: string) => PrComment[] | Promise<PrComment[]>,
   checkCommitCI?: (repoRoot: string, sha: string) => "pass" | "fail" | "pending" | Promise<"pass" | "fail" | "pending">,
 ): Promise<PollSnapshot> {
@@ -286,6 +316,7 @@ export async function buildSnapshotAsync(
   const readyIds: string[] = [];
   const heartbeatStates = new Set(["launching", "implementing", "ci-failed", "ci-pending", "ci-passed", "review-pending", "merging"]);
   let apiErrorCount = 0;
+  const apiErrorByKind: Record<string, number> = {};
   const prPollStates = new Set(["implementing", "ci-pending", "ci-passed", "ci-failed", "review-pending", "reviewing", "rebasing", "merging", "launching"]);
 
   // Cache workspace listing once for all isWorkerAlive checks in this snapshot
@@ -326,10 +357,11 @@ export async function buildSnapshotAsync(
 
     // Check PR status via async gh -- yields to event loop per call
     const repoRoot = orchItem.resolvedRepoRoot ?? projectRoot;
-    const statusLine = await checkPr(orchItem.id, repoRoot);
-    // Empty string from checkPr means API error -- hold state for this item
-    if (!statusLine && prPollStates.has(orchItem.state)) {
+    const prResult = normalizePrStatusResult(await checkPr(orchItem.id, repoRoot));
+    const statusLine = prResult.statusLine;
+    if (prResult.failure && prPollStates.has(orchItem.state)) {
       apiErrorCount++;
+      apiErrorByKind[prResult.failure.kind] = (apiErrorByKind[prResult.failure.kind] ?? 0) + 1;
     }
     if (statusLine) {
       const parts = statusLine.split("\t");
@@ -455,7 +487,12 @@ export async function buildSnapshotAsync(
     items.push(snap);
   }
 
-  return { items, readyIds, apiErrorCount: apiErrorCount > 0 ? apiErrorCount : undefined };
+  return {
+    items,
+    readyIds,
+    apiErrorCount: apiErrorCount > 0 ? apiErrorCount : undefined,
+    apiErrorSummary: summarizeApiErrors(apiErrorByKind),
+  };
 }
 
 /**

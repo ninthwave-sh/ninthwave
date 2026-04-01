@@ -3,8 +3,101 @@ import type { RunResult } from "./types.ts";
 
 // ── Result type ─────────────────────────────────────────────────────
 
+export type GhFailureKind =
+  | "missing-cli"
+  | "auth"
+  | "rate-limit"
+  | "network"
+  | "repo-access"
+  | "parse"
+  | "unknown";
+
 /** Discriminated union: success with data vs API failure with error message. */
-export type GhResult<T> = { ok: true; data: T } | { ok: false; error: string };
+export type GhResult<T> = { ok: true; data: T } | { ok: false; error: string; kind: GhFailureKind };
+
+function classifyGhFailure(error: string, fallback: GhFailureKind = "unknown"): GhFailureKind {
+  const text = error.toLowerCase();
+  if (
+    text.includes("command not found")
+    || text.includes("executable file not found")
+    || text.includes("no such file or directory")
+    || text.includes("spawn gh enoent")
+    || text.includes("gh not installed")
+  ) {
+    return "missing-cli";
+  }
+  if (
+    text.includes("rate limit")
+    || text.includes("secondary rate limit")
+    || text.includes("too many requests")
+    || text.includes("api rate limit exceeded")
+    || text.includes("http 429")
+  ) {
+    return "rate-limit";
+  }
+  if (
+    text.includes("authentication")
+    || text.includes("gh auth login")
+    || text.includes("not logged into")
+    || text.includes("requires authentication")
+    || text.includes("http 401")
+    || text.includes("bad credentials")
+  ) {
+    return "auth";
+  }
+  if (
+    text.includes("repository not found")
+    || text.includes("resource not accessible")
+    || text.includes("http 403")
+    || text.includes("not found")
+    || text.includes("forbidden")
+    || text.includes("could not resolve to a repository")
+  ) {
+    return "repo-access";
+  }
+  if (
+    text.includes("timeout")
+    || text.includes("timed out")
+    || text.includes("connection reset")
+    || text.includes("connection refused")
+    || text.includes("temporary failure")
+    || text.includes("network")
+    || text.includes("tls")
+    || text.includes("dial tcp")
+    || text.includes("econn")
+    || text.includes("resolve host")
+  ) {
+    return "network";
+  }
+  return fallback;
+}
+
+function ghFailure(error: string): { ok: false; error: string; kind: GhFailureKind } {
+  return { ok: false, error, kind: classifyGhFailure(error) };
+}
+
+function ghParseFailure(message: string): { ok: false; error: string; kind: GhFailureKind } {
+  return { ok: false, error: message, kind: "parse" };
+}
+
+export function ghFailureKindLabel(kind: GhFailureKind): string {
+  switch (kind) {
+    case "missing-cli":
+      return "CLI unavailable";
+    case "auth":
+      return "auth";
+    case "rate-limit":
+      return "rate limit";
+    case "network":
+      return "network";
+    case "repo-access":
+      return "repo access";
+    case "parse":
+      return "response parse";
+    case "unknown":
+      return "unknown";
+  }
+}
 
 // ── Branding constants ──────────────────────────────────────────────
 /** Markdown footer appended to PR comments. */
@@ -43,12 +136,12 @@ export function prList(
     "--limit",
     "100",
   ]);
-  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr list exited with code ${result.exitCode}` };
+  if (result.exitCode !== 0) return ghFailure(result.stderr || `gh pr list exited with code ${result.exitCode}`);
   if (!result.stdout) return { ok: true, data: [] };
   try {
     return { ok: true, data: JSON.parse(result.stdout) as Array<{ number: number; title: string }> };
   } catch {
-    return { ok: false, error: "Failed to parse gh pr list output" };
+    return ghParseFailure("Failed to parse gh pr list output");
   }
 }
 
@@ -65,12 +158,12 @@ export function prView(
     "--json",
     fields.join(","),
   ]);
-  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr view exited with code ${result.exitCode}` };
+  if (result.exitCode !== 0) return ghFailure(result.stderr || `gh pr view exited with code ${result.exitCode}`);
   if (!result.stdout) return { ok: true, data: {} };
   try {
     return { ok: true, data: JSON.parse(result.stdout) as Record<string, unknown> };
   } catch {
-    return { ok: false, error: "Failed to parse gh pr view output" };
+    return ghParseFailure("Failed to parse gh pr view output");
   }
 }
 
@@ -86,7 +179,7 @@ export function prChecks(
     "--json",
     "state,name,link,completedAt",
   ]);
-  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr checks exited with code ${result.exitCode}` };
+  if (result.exitCode !== 0) return ghFailure(result.stderr || `gh pr checks exited with code ${result.exitCode}`);
   if (!result.stdout) return { ok: true, data: [] };
   try {
     const raw = JSON.parse(result.stdout) as Array<{
@@ -105,7 +198,7 @@ export function prChecks(
       })),
     };
   } catch {
-    return { ok: false, error: "Failed to parse gh pr checks output" };
+    return ghParseFailure("Failed to parse gh pr checks output");
   }
 }
 
@@ -137,12 +230,12 @@ export async function prListAsync(
     "--limit",
     "100",
   ]);
-  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr list exited with code ${result.exitCode}` };
+  if (result.exitCode !== 0) return ghFailure(result.stderr || `gh pr list exited with code ${result.exitCode}`);
   if (!result.stdout) return { ok: true, data: [] };
   try {
     return { ok: true, data: JSON.parse(result.stdout) as Array<{ number: number; title: string }> };
   } catch {
-    return { ok: false, error: "Failed to parse gh pr list output" };
+    return ghParseFailure("Failed to parse gh pr list output");
   }
 }
 
@@ -159,12 +252,12 @@ export async function prViewAsync(
     "--json",
     fields.join(","),
   ]);
-  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr view exited with code ${result.exitCode}` };
+  if (result.exitCode !== 0) return ghFailure(result.stderr || `gh pr view exited with code ${result.exitCode}`);
   if (!result.stdout) return { ok: true, data: {} };
   try {
     return { ok: true, data: JSON.parse(result.stdout) as Record<string, unknown> };
   } catch {
-    return { ok: false, error: "Failed to parse gh pr view output" };
+    return ghParseFailure("Failed to parse gh pr view output");
   }
 }
 
@@ -180,7 +273,7 @@ export async function prChecksAsync(
     "--json",
     "state,name,link,completedAt",
   ]);
-  if (result.exitCode !== 0) return { ok: false, error: result.stderr || `gh pr checks exited with code ${result.exitCode}` };
+  if (result.exitCode !== 0) return ghFailure(result.stderr || `gh pr checks exited with code ${result.exitCode}`);
   if (!result.stdout) return { ok: true, data: [] };
   try {
     const raw = JSON.parse(result.stdout) as Array<{
@@ -199,7 +292,7 @@ export async function prChecksAsync(
       })),
     };
   } catch {
-    return { ok: false, error: "Failed to parse gh pr checks output" };
+    return ghParseFailure("Failed to parse gh pr checks output");
   }
 }
 

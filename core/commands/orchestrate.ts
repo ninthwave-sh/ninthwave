@@ -30,7 +30,7 @@ import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import { selectAiTools, detectInstalledAITools } from "../tool-select.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { writeInbox } from "./inbox.ts";
-import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, ensureDomainLabels, listPrComments, updatePrComment } from "../gh.ts";
+import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, ensureDomainLabels, listPrComments, updatePrComment, ghFailureKindLabel } from "../gh.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush, daemonRebase } from "../git.ts";
 import { run } from "../shell.ts";
 import { type Multiplexer, getMux } from "../mux.ts";
@@ -1912,12 +1912,16 @@ export async function orchestrateLoop(
 
     // Log warning when GitHub API is unreachable for all polled items
     if (snapshot.apiErrorCount && snapshot.apiErrorCount > 0) {
+      const primaryKind = snapshot.apiErrorSummary?.primaryKind;
       log({
         ts: new Date().toISOString(),
         level: "warn",
         event: "github_api_errors",
         apiErrorCount: snapshot.apiErrorCount,
-        message: "GitHub API unreachable, holding state",
+        apiErrorSummary: snapshot.apiErrorSummary,
+        message: primaryKind
+          ? `GitHub ${ghFailureKindLabel(primaryKind)} errors, holding state`
+          : "GitHub API unreachable, holding state",
       });
     }
 
@@ -2916,6 +2920,7 @@ export async function cmdOrchestrate(
     syncDisplay: (o, snap) => {
       syncWorkerDisplay(o, snap, mux);
       tuiState.viewOptions.apiErrorCount = snap.apiErrorCount ?? 0;
+      tuiState.viewOptions.apiErrorSummary = snap.apiErrorSummary;
     },
     externalReviewDeps,
     ...(watchMode ? { scanWorkItems: () => {

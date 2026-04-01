@@ -14,6 +14,7 @@ import {
   apiGet as defaultApiGet,
   isAvailable as defaultIsAvailable,
   ghInRepo,
+  type GhFailureKind,
 } from "../gh.ts";
 import * as ghModule from "../gh.ts";
 import type { WatchResult, Transition } from "../types.ts";
@@ -34,6 +35,24 @@ export interface PrMonitorAsyncDeps {
   prViewAsync: typeof defaultPrViewAsync;
   prChecksAsync: typeof defaultPrChecksAsync;
   isAvailable: typeof defaultIsAvailable;
+}
+
+export type PrPollFailureStage =
+  | "availability"
+  | "prList-open"
+  | "prList-merged"
+  | "prView"
+  | "prChecks";
+
+export interface PrPollFailure {
+  kind: GhFailureKind;
+  stage: PrPollFailureStage;
+  error: string;
+}
+
+export interface PrStatusPollResult {
+  statusLine: string;
+  failure?: PrPollFailure;
 }
 
 // Defaults read from the module namespace so vi.spyOn in tests works.
@@ -276,32 +295,40 @@ function formatOpenPrStatus(
   return `${id}\t${prNumber}\topen\t${isMergeable}\t${eventTime}`;
 }
 
-export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps = defaultPrMonitorDeps): string {
+function pollFailure(stage: PrPollFailureStage, kind: GhFailureKind, error: string, statusLine = ""): PrStatusPollResult {
+  return { statusLine, failure: { kind, stage, error } };
+}
+
+export function checkPrStatusDetailed(
+  id: string,
+  repoRoot: string,
+  deps: PrMonitorDeps = defaultPrMonitorDeps,
+): PrStatusPollResult {
   const branch = `ninthwave/${id}`;
 
-  if (!deps.isAvailable()) return "";
+  if (!deps.isAvailable()) return pollFailure("availability", "missing-cli", "gh CLI unavailable");
 
   // Check for open PR -- distinguish API error from "no PRs"
   const openResult = deps.prList(repoRoot, branch, "open");
-  if (!openResult.ok) return ""; // API error: hold state (return empty to signal no data)
+  if (!openResult.ok) return pollFailure("prList-open", openResult.kind, openResult.error);
   const openPrs = openResult.data;
   if (openPrs.length === 0) {
     // Check if merged
     const mergedResult = deps.prList(repoRoot, branch, "merged");
-    if (!mergedResult.ok) return ""; // API error: hold state
+    if (!mergedResult.ok) return pollFailure("prList-merged", mergedResult.kind, mergedResult.error);
     const mergedPrs = mergedResult.data;
     if (mergedPrs.length > 0) {
       const prTitle = mergedPrs[0]!.title ?? "";
-      return `${id}\t${mergedPrs[0]!.number}\tmerged\t\t\t${prTitle}`;
+      return { statusLine: `${id}\t${mergedPrs[0]!.number}\tmerged\t\t\t${prTitle}` };
     }
-    return `${id}\t\tno-pr`;
+    return { statusLine: `${id}\t\tno-pr` };
   }
 
   const prNumber = openPrs[0]!.number;
 
   // Check CI and review status (include updatedAt for detection latency, createdAt for CI grace period)
   const prViewResult = deps.prView(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt", "createdAt"]);
-  if (!prViewResult.ok) return formatOpenPrStatus(id, prNumber);
+  if (!prViewResult.ok) return pollFailure("prView", prViewResult.kind, prViewResult.error, formatOpenPrStatus(id, prNumber));
   const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
   const isMergeable = (prData.mergeable as string) ?? "";
@@ -309,14 +336,25 @@ export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps 
   const prCreatedAt = (prData.createdAt as string) ?? "";
 
   const checksResult = deps.prChecks(repoRoot, prNumber);
-  if (!checksResult.ok) return formatOpenPrStatus(id, prNumber, isMergeable || "UNKNOWN", prUpdatedAt);
+  if (!checksResult.ok) {
+    return pollFailure(
+      "prChecks",
+      checksResult.kind,
+      checksResult.error,
+      formatOpenPrStatus(id, prNumber, isMergeable || "UNKNOWN", prUpdatedAt),
+    );
+  }
 
   const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data, prCreatedAt);
   const status = derivePrStatus(ciStatus, isMergeable, reviewDecision);
   const eventTime = ciEventTime ?? prUpdatedAt;
 
   // Fields: ID, PR number, status, mergeable, eventTime (5th field for detection latency)
-  return `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`;
+  return { statusLine: `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}` };
+}
+
+export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps = defaultPrMonitorDeps): string {
+  return checkPrStatusDetailed(id, repoRoot, deps).statusLine;
 }
 
 /**
@@ -325,29 +363,37 @@ export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps 
  * Returns the same tab-separated string format as the sync version.
  */
 export async function checkPrStatusAsync(id: string, repoRoot: string, deps: PrMonitorAsyncDeps = defaultPrMonitorAsyncDeps): Promise<string> {
+  return (await checkPrStatusDetailedAsync(id, repoRoot, deps)).statusLine;
+}
+
+export async function checkPrStatusDetailedAsync(
+  id: string,
+  repoRoot: string,
+  deps: PrMonitorAsyncDeps = defaultPrMonitorAsyncDeps,
+): Promise<PrStatusPollResult> {
   const branch = `ninthwave/${id}`;
 
-  if (!deps.isAvailable()) return "";
+  if (!deps.isAvailable()) return pollFailure("availability", "missing-cli", "gh CLI unavailable");
 
   // Check for open PR -- distinguish API error from "no PRs"
   const openResult = await deps.prListAsync(repoRoot, branch, "open");
-  if (!openResult.ok) return ""; // API error: hold state
+  if (!openResult.ok) return pollFailure("prList-open", openResult.kind, openResult.error);
   const openPrs = openResult.data;
   if (openPrs.length === 0) {
     const mergedResult = await deps.prListAsync(repoRoot, branch, "merged");
-    if (!mergedResult.ok) return ""; // API error: hold state
+    if (!mergedResult.ok) return pollFailure("prList-merged", mergedResult.kind, mergedResult.error);
     const mergedPrs = mergedResult.data;
     if (mergedPrs.length > 0) {
       const prTitle = mergedPrs[0]!.title ?? "";
-      return `${id}\t${mergedPrs[0]!.number}\tmerged\t\t\t${prTitle}`;
+      return { statusLine: `${id}\t${mergedPrs[0]!.number}\tmerged\t\t\t${prTitle}` };
     }
-    return `${id}\t\tno-pr`;
+    return { statusLine: `${id}\t\tno-pr` };
   }
 
   const prNumber = openPrs[0]!.number;
 
   const prViewResult = await deps.prViewAsync(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt", "createdAt"]);
-  if (!prViewResult.ok) return formatOpenPrStatus(id, prNumber);
+  if (!prViewResult.ok) return pollFailure("prView", prViewResult.kind, prViewResult.error, formatOpenPrStatus(id, prNumber));
   const prData = prViewResult.data;
   const reviewDecision = (prData.reviewDecision as string) ?? "";
   const isMergeable = (prData.mergeable as string) ?? "";
@@ -355,13 +401,20 @@ export async function checkPrStatusAsync(id: string, repoRoot: string, deps: PrM
   const prCreatedAt = (prData.createdAt as string) ?? "";
 
   const checksResult = await deps.prChecksAsync(repoRoot, prNumber);
-  if (!checksResult.ok) return formatOpenPrStatus(id, prNumber, isMergeable || "UNKNOWN", prUpdatedAt);
+  if (!checksResult.ok) {
+    return pollFailure(
+      "prChecks",
+      checksResult.kind,
+      checksResult.error,
+      formatOpenPrStatus(id, prNumber, isMergeable || "UNKNOWN", prUpdatedAt),
+    );
+  }
 
   const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data, prCreatedAt);
   const status = derivePrStatus(ciStatus, isMergeable, reviewDecision);
   const eventTime = ciEventTime ?? prUpdatedAt;
 
-  return `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`;
+  return { statusLine: `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}` };
 }
 
 export function findTransitions(currentState: string, prevState: string): string {

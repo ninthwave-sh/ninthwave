@@ -92,7 +92,7 @@ describe("checkPrStatusAsync", () => {
   });
 
   it("returns empty string when API fails (hold state)", async () => {
-    prListAsyncSpy.mockResolvedValue({ ok: false, error: "API timeout" });
+    prListAsyncSpy.mockResolvedValue({ ok: false, error: "API timeout", kind: "network" });
 
     const result = await checkPrStatusAsync("T-1-1", "/repo");
 
@@ -104,7 +104,7 @@ describe("checkPrStatusAsync", () => {
       if (state === "open") return { ok: true, data: [{ number: 10, title: "Fix" }] };
       return { ok: true, data: [] };
     });
-    prViewAsyncSpy.mockResolvedValue({ ok: false, error: "server error" });
+    prViewAsyncSpy.mockResolvedValue({ ok: false, error: "server error", kind: "unknown" });
 
     const result = await checkPrStatusAsync("T-1-2", "/repo");
 
@@ -122,7 +122,7 @@ describe("checkPrStatusAsync", () => {
       updatedAt: "2026-01-01T00:00:00Z",
       createdAt: "2025-12-31T23:00:00Z",
     } });
-    prChecksAsyncSpy.mockResolvedValue({ ok: false, error: "network error" });
+    prChecksAsyncSpy.mockResolvedValue({ ok: false, error: "network error", kind: "network" });
 
     const result = await checkPrStatusAsync("T-1-3", "/repo");
 
@@ -156,11 +156,11 @@ const fakeMux: Multiplexer = {
   diagnoseUnavailable: () => "not available",
   launchWorkspace: () => null,
   splitPane: () => null,
-  sendMessage: () => true,
-  writeInbox: () => {},
   readScreen: () => "",
   listWorkspaces: () => "",
   closeWorkspace: () => true,
+  setStatus: () => true,
+  setProgress: () => true,
 };
 
 describe("buildSnapshotAsync", () => {
@@ -298,7 +298,7 @@ describe("buildSnapshotAsync", () => {
     expect(snapshot.items[0]!.prNumber).toBe(20);
   });
 
-  it("tracks apiErrorCount when checkPr returns empty string (API error)", async () => {
+  it("tracks apiErrorCount and apiErrorSummary when PR polling fails", async () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("BA-6-1"));
     orch.addItem(makeWorkItem("BA-6-2"));
@@ -307,8 +307,10 @@ describe("buildSnapshotAsync", () => {
     orch.hydrateState("BA-6-1", "ci-pending");
     orch.hydrateState("BA-6-2", "implementing");
 
-    // Both items return empty string (API error)
-    const asyncCheckPr = async () => "";
+    const asyncCheckPr = async () => ({
+      statusLine: "",
+      failure: { kind: "auth" as const, stage: "prList-open" as const, error: "bad credentials" },
+    });
 
     const snapshot = await buildSnapshotAsync(
       orch,
@@ -323,6 +325,11 @@ describe("buildSnapshotAsync", () => {
     expect(snapshot.items).toHaveLength(2);
     // apiErrorCount should count both failures
     expect(snapshot.apiErrorCount).toBe(2);
+    expect(snapshot.apiErrorSummary).toEqual({
+      total: 2,
+      byKind: { auth: 2 },
+      primaryKind: "auth",
+    });
     // PR data should be empty (hold state)
     for (const item of snapshot.items) {
       expect(item.prNumber).toBeUndefined();

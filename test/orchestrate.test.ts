@@ -134,6 +134,51 @@ const defaultCtx: ExecutionContext = {
 // ── Tests ────────────────────────────────────────────────────────────
 
 describe("orchestrateLoop", () => {
+  it("logs classified GitHub API warnings", async () => {
+    const orch = new Orchestrator({ wipLimit: 1, mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("T-ERR-1"));
+    orch.getItem("T-ERR-1")!.reviewCompleted = true;
+    orch.hydrateState("T-ERR-1", "implementing");
+
+    let cycle = 0;
+    const logs: LogEntry[] = [];
+
+    const buildSnapshot = (): PollSnapshot => {
+      cycle++;
+      if (cycle === 1) {
+        return {
+          items: [{ id: "T-ERR-1" }],
+          readyIds: [],
+          apiErrorCount: 2,
+          apiErrorSummary: {
+            total: 2,
+            byKind: { auth: 2 },
+            primaryKind: "auth",
+          },
+        };
+      }
+      return { items: [{ id: "T-ERR-1" }], readyIds: [] };
+    };
+
+    const deps: OrchestrateLoopDeps = {
+      buildSnapshot,
+      sleep: () => Promise.resolve(),
+      log: (entry) => logs.push(entry),
+      actionDeps: mockActionDeps(),
+    };
+
+    await orchestrateLoop(orch, defaultCtx, deps, { maxIterations: 2 });
+
+    const warnLog = logs.find((l) => l.event === "github_api_errors");
+    expect(warnLog).toBeDefined();
+    expect(warnLog!.message).toBe("GitHub auth errors, holding state");
+    expect(warnLog!.apiErrorSummary).toEqual({
+      total: 2,
+      byKind: { auth: 2 },
+      primaryKind: "auth",
+    });
+  });
+
   it("processes items through full lifecycle (single item, auto strategy)", async () => {
     const orch = new Orchestrator({ wipLimit: 2, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("T-1-1"));

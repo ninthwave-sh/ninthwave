@@ -12,7 +12,8 @@ import {
   RESET,
 } from "./output.ts";
 import type { DaemonState } from "./daemon.ts";
-import type { MergeStrategy } from "./orchestrator.ts";
+import type { MergeStrategy, PollSnapshot } from "./orchestrator.ts";
+import { ghFailureKindLabel } from "./gh.ts";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -65,6 +66,8 @@ export interface ViewOptions {
   scheduleWorkers?: ScheduleWorkerInfo[];
   /** Number of items where GitHub API returned errors. When > 0, a warning is shown in the footer. */
   apiErrorCount?: number;
+  /** Optional summary of GitHub PR polling failure causes for footer copy. */
+  apiErrorSummary?: PollSnapshot["apiErrorSummary"];
   /** Alternate empty-state copy for watch flows that are already armed. */
   emptyState?: EmptyStateMode;
 }
@@ -106,6 +109,30 @@ function formatStrategyFooterLine(
 ): string {
   const badge = strategyFooterIndicator(strategy, pendingStrategy);
   return `  ${badge} ${DIM}(shift+tab to cycle) · c controls · ? help${RESET}`;
+}
+
+function formatGitHubApiWarningText(
+  apiErrorCount?: number,
+  apiErrorSummary?: PollSnapshot["apiErrorSummary"],
+): string {
+  if ((apiErrorCount ?? 0) <= 0) return "";
+  if (!apiErrorSummary) return "⚠ GitHub API unreachable";
+
+  const entries = Object.entries(apiErrorSummary.byKind)
+    .filter(([, count]) => typeof count === "number" && count > 0)
+    .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0));
+  if (entries.length === 0) return `⚠ GitHub ${ghFailureKindLabel(apiErrorSummary.primaryKind)} error (${apiErrorSummary.total})`;
+  if (entries.length === 1) {
+    return `⚠ GitHub ${ghFailureKindLabel(apiErrorSummary.primaryKind)} error (${apiErrorSummary.total})`;
+  }
+  const parts = entries
+    .slice(0, 2)
+    .map(([kind, count]) => `${ghFailureKindLabel(kind as NonNullable<PollSnapshot["apiErrorSummary"]>["primaryKind"])} ${count}`);
+  return `⚠ GitHub errors: ${parts.join(", ")}`;
+}
+
+function renderGitHubApiWarning(text: string): string {
+  return text ? `${RED}${text}${RESET}` : "";
 }
 
 export interface SessionMetrics {
@@ -1612,9 +1639,9 @@ export function buildStatusLayout(
   footerLines.push(formatUnifiedProgress(items, termWidth));
 
   // Strategy indicator footer (or Ctrl+C confirmation)
-  const apiWarning = (viewOptions?.apiErrorCount ?? 0) > 0
-    ? `${RED}\u26A0 GitHub API unreachable${RESET}`
-    : "";
+  const apiWarningText = formatGitHubApiWarningText(viewOptions?.apiErrorCount, viewOptions?.apiErrorSummary);
+  const apiWarning = renderGitHubApiWarning(apiWarningText);
+  const safeWidth = Math.max(0, termWidth - 1);
   if (viewOptions?.ctrlCPending) {
     footerLines.push(`  ${YELLOW}Press Ctrl-C again to exit${RESET}`);
   } else if (viewOptions?.mergeStrategy) {
@@ -1622,8 +1649,15 @@ export function buildStatusLayout(
     if (apiWarning) {
       const leftLen = stripAnsiForWidth(left).length;
       const warnLen = stripAnsiForWidth(apiWarning).length;
-      const pad = Math.max(2, termWidth - leftLen - warnLen);
-      footerLines.push(`${left}${" ".repeat(pad)}${apiWarning}`);
+      if (leftLen + 2 + warnLen <= safeWidth) {
+        const pad = Math.max(2, safeWidth - leftLen - warnLen);
+        footerLines.push(`${left}${" ".repeat(pad)}${apiWarning}`);
+      } else {
+        footerLines.push(left);
+        const maxWarningWidth = Math.max(0, safeWidth - 2);
+        const warningLine = truncateTitle(apiWarningText, maxWarningWidth);
+        footerLines.push(`  ${renderGitHubApiWarning(warningLine)}`);
+      }
     } else {
       footerLines.push(left);
     }
