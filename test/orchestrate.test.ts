@@ -4709,6 +4709,7 @@ describe("resolveInteractiveStartupConfig", () => {
       { review_external: false, schedule_enabled: false, ai_tools: ["claude"] },
       {
         ai_tools: ["opencode", "copilot"],
+        backend_mode: "cmux",
         merge_strategy: "auto",
         review_mode: "all",
         collaboration_mode: "share",
@@ -4716,6 +4717,7 @@ describe("resolveInteractiveStartupConfig", () => {
     );
 
     expect(result.defaults).toEqual({
+      backendMode: "cmux",
       mergeStrategy: "auto",
       reviewMode: "all",
       collaborationMode: "share",
@@ -4731,6 +4733,7 @@ describe("resolveInteractiveStartupConfig", () => {
     );
 
     expect(result.defaults).toEqual({
+      backendMode: "auto",
       mergeStrategy: "manual",
       reviewMode: "off",
       collaborationMode: "local",
@@ -4746,6 +4749,7 @@ describe("resolveInteractiveStartupConfig", () => {
       "claude",
     );
 
+    expect(result.defaults.backendMode).toBe("auto");
     expect(result.defaults.reviewMode).toBe("mine");
     expect(result.skipToolStep).toBe(true);
   });
@@ -6208,6 +6212,11 @@ describe("parseWatchArgs", () => {
   it("parses --tool flag", () => {
     const result = parseWatchArgs(["--items", "H-FOO-1", "--tool", "opencode"]);
     expect(result.toolOverride).toBe("opencode");
+  });
+
+  it("parses --backend-mode flag", () => {
+    const result = parseWatchArgs(["--items", "H-FOO-1", "--backend-mode", "headless"]);
+    expect(result.backendModeOverride).toBe("headless");
   });
 
   it("defaults toolOverride to undefined when --tool not passed", () => {
