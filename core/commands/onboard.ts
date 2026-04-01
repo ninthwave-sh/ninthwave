@@ -22,14 +22,14 @@ import {
 import { run } from "../shell.ts";
 import { resolveCmuxBinary } from "../cmux-resolve.ts";
 import type { WorkItem } from "../types.ts";
-import type { ProjectConfig } from "../config.ts";
+import type { ProjectConfig, UserConfig } from "../config.ts";
 import { initProject } from "./init.ts";
 import { getBundleDir } from "../paths.ts";
 import { isDaemonRunning } from "../daemon.ts";
 import { parseWorkItems } from "../parser.ts";
 import { runInteractiveFlow } from "../interactive.ts";
 import type { InteractiveResult, InteractiveDeps } from "../interactive.ts";
-import { loadConfig, saveConfig } from "../config.ts";
+import { loadConfig, loadUserConfig, saveUserConfig } from "../config.ts";
 import { printHelp } from "../help.ts";
 import { AI_TOOL_PROFILES } from "../ai-tools.ts";
 import type { AiToolProfile } from "../ai-tools.ts";
@@ -78,6 +78,7 @@ export interface OnboardDeps {
   prompt?: PromptFn;
   getBundleDir?: () => string;
   widgetIO?: WidgetIO;
+  saveUserConfig?: (updates: Partial<UserConfig>) => void;
 }
 
 // ── No-args dependency injection ───────────────────────────────────
@@ -93,6 +94,7 @@ export interface NoArgsDeps extends OnboardDeps {
   runStatusWatch?: (worktreeDir: string, projectRoot: string) => Promise<void>;
   printHelp?: () => void;
   loadConfig?: (projectRoot: string) => ProjectConfig;
+  loadUserConfig?: () => UserConfig;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -166,6 +168,7 @@ export async function onboard(
 ): Promise<void> {
   const commandExists = deps.commandExists ?? defaultCommandExists;
   const prompt = deps.prompt ?? defaultPrompt;
+  const doSaveUserConfig = deps.saveUserConfig ?? saveUserConfig;
   let bundleDir: string;
   try {
     bundleDir = (deps.getBundleDir ?? getBundleDir)();
@@ -210,7 +213,7 @@ export async function onboard(
   if (installedTools.length === 1) {
     chosenTool = installedTools[0]!;
     console.log(`  ${GREEN}✓${RESET} Found ${BOLD}${chosenTool.displayName}${RESET}`);
-    saveConfig(projectDir, { ai_tools: [chosenTool.id] });
+    doSaveUserConfig({ ai_tools: [chosenTool.id] });
   } else {
     const stdin = process.stdin;
     const needsRawMode = !deps.widgetIO && stdin.isTTY && !!stdin.setRawMode;
@@ -242,7 +245,7 @@ export async function onboard(
     if (toolResult.cancelled) return;
     const selectedIds = toolResult.selectedIds;
     chosenTool = installedTools.find((t) => t.id === selectedIds[0]) ?? installedTools[0]!;
-    saveConfig(projectDir, { ai_tools: selectedIds });
+    doSaveUserConfig({ ai_tools: selectedIds });
   }
   console.log();
 
@@ -369,16 +372,18 @@ export async function cmdNoArgs(
 
   await doEnsureMux([]);
 
-  // Load project config to determine review default + saved tool state
+  // Load project config for repo-level defaults and user config for saved tools.
   const doLoadConfig = deps.loadConfig ?? loadConfig;
+  const doLoadUserConfig = deps.loadUserConfig ?? loadUserConfig;
   const projectConfig = doLoadConfig(projectRoot);
+  const userConfig = doLoadUserConfig();
   const defaultReviewMode = projectConfig.review_external ? "all" as const : "mine" as const;
   const installedTools = detectInstalledAITools();
   const doInteractive = deps.runInteractiveFlow ?? runInteractiveFlow;
   const result = await doInteractive(todos, 4, {
     defaultReviewMode,
     installedTools,
-    savedToolIds: projectConfig.ai_tools,
+    savedToolIds: userConfig.ai_tools,
   });
   if (!result) return; // User cancelled
 

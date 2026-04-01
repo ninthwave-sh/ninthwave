@@ -5,6 +5,7 @@ import { join } from "path";
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   writeFileSync,
 } from "fs";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
@@ -273,6 +274,24 @@ describe("onboard", () => {
     // Single tool should be auto-selected -- no "Choose" prompt for AI tool
     expect(output).not.toContain("Choose [1-");
     expect(output).toContain("You're all set!");
+  });
+
+  it("persists detected tools via user config instead of project config", async () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle");
+    const savedUpdates: Array<{ ai_tools?: string[] }> = [];
+
+    await onboard(projectDir, {
+      commandExists: (cmd) => cmd === "claude",
+      prompt: async () => "",
+      getBundleDir: () => bundleDir,
+      saveUserConfig: (updates) => savedUpdates.push(updates),
+    });
+
+    expect(savedUpdates).toEqual([{ ai_tools: ["claude"] }]);
+
+    const projectConfig = JSON.parse(readFileSync(join(projectDir, ".ninthwave", "config.json"), "utf8"));
+    expect(projectConfig).not.toHaveProperty("ai_tools");
   });
 });
 
@@ -736,5 +755,26 @@ describe("cmdNoArgs", () => {
     });
 
     expect(interactiveCalled).toBe(true);
+  });
+
+  it("reads saved tool IDs from user config while keeping review defaults in project config", async () => {
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ review_external: true, schedule_enabled: false, ai_tools: ["claude"] }),
+      loadUserConfig: () => ({ ai_tools: ["opencode", "copilot"] }),
+      runInteractiveFlow: async (_todos, _wip, deps) => {
+        expect(deps?.defaultReviewMode).toBe("all");
+        expect(deps?.savedToolIds).toEqual(["opencode", "copilot"]);
+        return null;
+      },
+      runWatch: async () => {
+        throw new Error("runWatch should not be called when interactive flow cancels");
+      },
+    });
   });
 });

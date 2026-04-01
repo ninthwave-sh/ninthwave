@@ -42,6 +42,7 @@ import { shouldEnterInteractive, runInteractiveFlow } from "../interactive.ts";
 import type { WorkItem, LogEntry } from "../types.ts";
 import { ID_IN_FILENAME, PRIORITY_NUM } from "../types.ts";
 import { loadConfig, saveConfig, loadUserConfig, saveUserConfig } from "../config.ts";
+import type { ProjectConfig, UserConfig } from "../config.ts";
 import { preflight } from "../preflight.ts";
 import {
   collectRunMetrics,
@@ -187,6 +188,24 @@ export function getTmuxStartupInfo(
     sessionName,
     outsideTmuxSession,
     attachHintLines,
+  };
+}
+
+export interface InteractiveStartupConfig {
+  defaultReviewMode: "all" | "mine";
+  savedToolIds?: string[];
+  skipToolStep: boolean;
+}
+
+export function resolveInteractiveStartupConfig(
+  projectConfig: ProjectConfig,
+  userConfig: UserConfig,
+  toolOverride?: string,
+): InteractiveStartupConfig {
+  return {
+    defaultReviewMode: projectConfig.review_external ? "all" : "mine",
+    savedToolIds: userConfig.ai_tools,
+    skipToolStep: !!toolOverride || (userConfig.ai_tools?.length ?? 0) > 0,
   };
 }
 
@@ -2262,14 +2281,13 @@ export async function cmdOrchestrate(
     // Pre-detect tools and config for TUI flow
     const installedTools = detectInstalledAITools();
     const preConfig = loadConfig(projectRoot);
-    const skipToolStep = !!toolOverride || (persistedUserCfg.ai_tools?.length ?? 0) > 0;
-    const defaultReviewMode = preConfig.review_external ? "all" as const : "mine" as const;
+    const interactiveStartupConfig = resolveInteractiveStartupConfig(preConfig, persistedUserCfg, toolOverride);
 
     const result = await runInteractiveFlow(workItems, wipLimit, {
-      defaultReviewMode,
+      defaultReviewMode: interactiveStartupConfig.defaultReviewMode,
       installedTools,
-      savedToolIds: preConfig.ai_tools,
-      skipToolStep,
+      savedToolIds: interactiveStartupConfig.savedToolIds,
+      skipToolStep: interactiveStartupConfig.skipToolStep,
     });
     if (!result) {
       process.exit(0);
