@@ -79,8 +79,9 @@ type RuntimeMuxResolver = () => Multiplexer;
 
 function resolveRuntimeLaunchMux(
   mux: Multiplexer,
-  resolveMux: RuntimeMuxResolver = () => getMux(),
+  resolveMux?: RuntimeMuxResolver,
 ): Multiplexer {
+  if (!resolveMux) return mux;
   const runtimeMux = resolveMux();
   return runtimeMux.type === mux.type ? mux : runtimeMux;
 }
