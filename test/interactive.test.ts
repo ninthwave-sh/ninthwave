@@ -10,6 +10,7 @@ import {
   promptReviewMode,
   promptConnectionMode,
   confirmSummary,
+  buildStartupPersistenceUpdates,
   runInteractiveFlow,
   displayItemsSummary,
   type PromptFn,
@@ -373,6 +374,66 @@ describe("confirmSummary", () => {
     }
     const output = logs.join("\n");
     expect(output).toContain("Local by default");
+  });
+});
+
+describe("buildStartupPersistenceUpdates", () => {
+  const baseResult: InteractiveResult = {
+    itemIds: ["A-1"],
+    backendMode: "auto",
+    mergeStrategy: "manual",
+    wipLimit: 3,
+    allSelected: false,
+    reviewMode: "mine",
+    connectionAction: null,
+  };
+
+  it("maps local collaboration mode from a null connection action", () => {
+    expect(buildStartupPersistenceUpdates(baseResult)).toMatchObject({
+      backend_mode: "auto",
+      merge_strategy: "manual",
+      review_mode: "mine",
+      wip_limit: 3,
+      collaboration_mode: "local",
+    });
+  });
+
+  it("maps share collaboration mode from a connect action", () => {
+    expect(buildStartupPersistenceUpdates({
+      ...baseResult,
+      connectionAction: { type: "connect" },
+    })).toMatchObject({ collaboration_mode: "share" });
+  });
+
+  it("maps join collaboration mode without persisting the join code", () => {
+    const updates = buildStartupPersistenceUpdates({
+      ...baseResult,
+      connectionAction: { type: "join", code: "K2F9-AB3X-7YPL-QM4N" },
+    });
+
+    expect(updates).toMatchObject({ collaboration_mode: "join" });
+    expect(updates).not.toHaveProperty("crewCode");
+    expect(updates).not.toHaveProperty("code");
+    expect(JSON.stringify(updates)).not.toContain("K2F9-AB3X-7YPL-QM4N");
+  });
+
+  it("persists multiple selected tools via ai_tools", () => {
+    expect(buildStartupPersistenceUpdates({
+      ...baseResult,
+      aiTool: "claude",
+      aiTools: ["claude", "codex"],
+    })).toMatchObject({ ai_tools: ["claude", "codex"] });
+  });
+
+  it("persists a single selected tool via ai_tools", () => {
+    expect(buildStartupPersistenceUpdates({
+      ...baseResult,
+      aiTool: "claude",
+    })).toMatchObject({ ai_tools: ["claude"] });
+  });
+
+  it("leaves ai_tools undefined when the tool step was skipped", () => {
+    expect(buildStartupPersistenceUpdates(baseResult).ai_tools).toBeUndefined();
   });
 });
 

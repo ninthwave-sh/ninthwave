@@ -42,7 +42,11 @@ import { resolveSessionName } from "../tmux.ts";
 import { reconcile, completeMergedWorkItemCleanup } from "./reconcile.ts";
 import { die, warn, info, ALT_SCREEN_ON, ALT_SCREEN_OFF, BOLD, RED, RESET, YELLOW } from "../output.ts";
 import { confirmPrompt } from "../prompt.ts";
-import { shouldEnterInteractive, runInteractiveFlow } from "../interactive.ts";
+import {
+  shouldEnterInteractive,
+  runInteractiveFlow,
+  buildStartupPersistenceUpdates,
+} from "../interactive.ts";
 import type { WorkItem, LogEntry } from "../types.ts";
 import { ID_IN_FILENAME, PRIORITY_NUM } from "../types.ts";
 import { loadConfig, saveConfig, loadUserConfig, saveUserConfig } from "../config.ts";
@@ -3870,12 +3874,10 @@ export async function cmdOrchestrate(
     interactiveReviewMode = result.reviewMode;
     interactiveSkipReview = result.reviewMode === "off";
     try {
-      saveUserConfig({
-        backend_mode: startupBackendMode,
-        merge_strategy: result.mergeStrategy === "auto" ? "auto" : "manual",
-        review_mode: result.reviewMode,
-        wip_limit: result.wipLimit,
-      });
+      saveUserConfig(buildStartupPersistenceUpdates({
+        ...result,
+        backendMode: startupBackendMode,
+      }));
     } catch {
       // best-effort persistence only
     }

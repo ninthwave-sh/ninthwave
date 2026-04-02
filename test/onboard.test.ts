@@ -958,7 +958,7 @@ describe("cmdNoArgs", () => {
     });
   });
 
-  it("persists confirmed backend mode before launching watch", async () => {
+  it("persists durable startup selections before launching watch", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
 
@@ -982,6 +982,14 @@ describe("cmdNoArgs", () => {
       runWatch: async () => {},
     });
 
-    expect(savedUpdates).toContainEqual({ backend_mode: "headless" });
+    expect(savedUpdates).toHaveLength(1);
+    expect(savedUpdates[0]).toMatchObject({
+      backend_mode: "headless",
+      merge_strategy: "auto",
+      review_mode: "mine",
+      wip_limit: 4,
+      collaboration_mode: "local",
+    });
+    expect(savedUpdates[0]?.ai_tools).toBeUndefined();
   });
 });

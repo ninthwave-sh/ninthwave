@@ -26,7 +26,10 @@ import type { ProjectConfig, UserConfig } from "../config.ts";
 import { initProject } from "./init.ts";
 import { getBundleDir } from "../paths.ts";
 import { isDaemonRunning } from "../daemon.ts";
-import { runInteractiveFlow } from "../interactive.ts";
+import {
+  runInteractiveFlow,
+  buildStartupPersistenceUpdates,
+} from "../interactive.ts";
 import type { InteractiveResult, InteractiveDeps } from "../interactive.ts";
 import { loadConfig, loadUserConfig, saveUserConfig } from "../config.ts";
 import { printHelp } from "../help.ts";
@@ -421,12 +424,10 @@ export async function cmdNoArgs(
   });
   if (!result) return; // User cancelled
 
-  if (result.backendMode) {
-    try {
-      doSaveUserConfig({ backend_mode: result.backendMode });
-    } catch {
-      // best-effort persistence only
-    }
+  try {
+    doSaveUserConfig(buildStartupPersistenceUpdates(result));
+  } catch {
+    // best-effort persistence only
   }
 
   // Build watch args from interactive result
