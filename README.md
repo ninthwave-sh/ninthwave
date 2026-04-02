@@ -43,7 +43,7 @@ I keep planning at a high level. When a chunk of work is clear enough, I use `/d
 2. Run `nw` to launch parallel native sessions of your AI tool.
 3. Review small PRs while the orchestrator keeps the queue moving through review, CI, and merge.
 
-Ninthwave's orchestrator is deterministic TypeScript with no LLM calls in the core pipeline. The intelligence lives in the worker sessions.
+Ninthwave's orchestrator is deterministic.
 
 For the transition states, flow diagrams, and deeper internals, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
