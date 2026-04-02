@@ -6,6 +6,7 @@
 
 import { createInterface } from "readline";
 import { BOLD, DIM, GREEN, YELLOW, CYAN, RESET } from "./output.ts";
+import type { UserConfig } from "./config.ts";
 import type { WorkItem } from "./types.ts";
 import { PRIORITY_NUM } from "./types.ts";
 import type { MergeStrategy } from "./orchestrator.ts";
@@ -444,6 +445,29 @@ export async function confirmSummary(
     `${BOLD}Start orchestration? [Y/n]:${RESET} `,
   );
   return answer.toLowerCase() !== "n" && answer.toLowerCase() !== "no";
+}
+
+export function buildStartupPersistenceUpdates(
+  result: InteractiveResult,
+): Partial<UserConfig> {
+  const aiTools = result.aiTools && result.aiTools.length > 0
+    ? [...result.aiTools]
+    : result.aiTool
+    ? [result.aiTool]
+    : undefined;
+
+  return {
+    ...(result.backendMode ? { backend_mode: result.backendMode } : {}),
+    merge_strategy: result.mergeStrategy === "auto" ? "auto" : "manual",
+    review_mode: result.reviewMode,
+    wip_limit: result.wipLimit,
+    collaboration_mode: result.connectionAction?.type === "connect"
+      ? "share"
+      : result.connectionAction?.type === "join"
+      ? "join"
+      : "local",
+    ...(aiTools ? { ai_tools: aiTools } : {}),
+  };
 }
 
 // ── TUI widget flow ─────────────────────────────────────────────────
