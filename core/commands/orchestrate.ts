@@ -2621,6 +2621,8 @@ export interface OrchestrateLoopDeps {
   sleep: (ms: number) => Promise<void>;
   log: (entry: LogEntry) => void;
   actionDeps: OrchestratorDeps;
+  /** Returns whether runtime controls have paused orchestration side effects. */
+  isPaused?: () => boolean;
   /** Get available free memory in bytes. Defaults to os.freemem(). Injectable for testing. */
   getFreeMem?: () => number;
   /** Reconcile work item files with GitHub state after merge actions. */
@@ -2705,6 +2707,7 @@ export async function orchestrateLoop(
 ): Promise<OrchestrateLoopResult> {
   const { log } = deps;
   const nowMs = deps.nowMs ?? Date.now;
+  const isPaused = () => deps.isPaused?.() ?? false;
   const lagSampler = config.tuiMode
     ? createEventLoopLagSampler({
         now: nowMs,
@@ -2847,14 +2850,71 @@ export async function orchestrateLoop(
   const watchIntervalMs = config.watchIntervalMs ?? 30_000;
   let lastWatchScanMs = Date.now();
   const loopStartMs = Date.now();
+  const bufferedWatchItems = new Map<string, WorkItem>();
 
-  const scanForNewWatchItems = (): WorkItem[] => {
-    if (!config.watch || !deps.scanWorkItems) return [];
+  const flushBufferedWatchItems = (): WorkItem[] => {
+    if (bufferedWatchItems.size === 0 || isPaused() || !deps.scanWorkItems) return [];
+
+    const latestItems = deps.scanWorkItems();
+    const latestById = new Map(latestItems.map((item) => [item.id, item]));
+    const enrolledItems: WorkItem[] = [];
+    const droppedIds: string[] = [];
+
+    for (const id of bufferedWatchItems.keys()) {
+      const latest = latestById.get(id);
+      if (latest) {
+        enrolledItems.push(latest);
+      } else {
+        droppedIds.push(id);
+      }
+    }
+
+    bufferedWatchItems.clear();
+
+    for (const item of enrolledItems) {
+      orch.addItem(item);
+    }
+
+    if (enrolledItems.length > 0 || droppedIds.length > 0) {
+      log({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "watch_buffer_flushed",
+        newIds: enrolledItems.map((item) => item.id),
+        count: enrolledItems.length,
+        ...(droppedIds.length > 0 ? { droppedIds } : {}),
+      });
+    }
+
+    return enrolledItems;
+  };
+
+  const scanForNewWatchItems = (): { enrolled: WorkItem[]; buffered: WorkItem[] } => {
+    if (!config.watch || !deps.scanWorkItems) return { enrolled: [], buffered: [] };
 
     const freshItems = deps.scanWorkItems();
-    const existingIds = new Set(orch.getAllItems().map((i) => i.id));
+    const existingIds = new Set([
+      ...orch.getAllItems().map((i) => i.id),
+      ...bufferedWatchItems.keys(),
+    ]);
     const newItems = freshItems.filter((item) => !existingIds.has(item.id));
-    if (newItems.length === 0) return [];
+    if (newItems.length === 0) return { enrolled: [], buffered: [] };
+
+    if (isPaused()) {
+      for (const item of newItems) {
+        bufferedWatchItems.set(item.id, item);
+      }
+
+      log({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "watch_new_items_buffered",
+        newIds: newItems.map((item) => item.id),
+        count: newItems.length,
+      });
+
+      return { enrolled: [], buffered: newItems };
+    }
 
     for (const item of newItems) {
       orch.addItem(item);
@@ -2868,7 +2928,7 @@ export async function orchestrateLoop(
       count: newItems.length,
     });
 
-    return newItems;
+    return { enrolled: newItems, buffered: [] };
   };
 
   try {
@@ -2910,6 +2970,8 @@ export async function orchestrateLoop(
         break;
       }
 
+      flushBufferedWatchItems();
+
     // Check if all items are in terminal state
     const allItems = orch.getAllItems();
     const allTerminal = allItems.every((i) => i.state === "done" || i.state === "stuck");
@@ -2944,7 +3006,11 @@ export async function orchestrateLoop(
           }
 
           lastWatchScanMs = Date.now();
-          if (scanForNewWatchItems().length > 0) {
+          if (flushBufferedWatchItems().length > 0) {
+            foundNew = true;
+            continue;
+          }
+          if (scanForNewWatchItems().enrolled.length > 0) {
             foundNew = true;
           }
         }
@@ -2993,7 +3059,7 @@ export async function orchestrateLoop(
       break;
     }
 
-      if (config.watch && deps.scanWorkItems) {
+    if (config.watch && deps.scanWorkItems) {
         const nowWatchScanMs = Date.now();
         if (nowWatchScanMs - lastWatchScanMs >= watchIntervalMs) {
           lastWatchScanMs = nowWatchScanMs;
@@ -3026,7 +3092,7 @@ export async function orchestrateLoop(
     // Crew mode: sync active items to broker (fire-and-forget, before snapshot)
     // Clear author cache each cycle to avoid stale data across syncs.
     authorCache.clear();
-    if (deps.crewBroker) {
+    if (deps.crewBroker && !isPaused()) {
       try {
         const activeItems = orch.getAllItems()
           .filter((i) => i.state !== "done" && i.state !== "stuck");
@@ -3049,7 +3115,7 @@ export async function orchestrateLoop(
 
     // ── Scheduled task processing ─────────────────────────────────
     // Gated by 30s interval check to avoid excessive filesystem reads.
-      if (deps.scheduleDeps) {
+      if (deps.scheduleDeps && !isPaused()) {
       const SCHEDULE_CHECK_INTERVAL_MS = 30_000;
       const nowMs = Date.now();
       if (nowMs - lastScheduleCheckMs >= SCHEDULE_CHECK_INTERVAL_MS) {
@@ -3084,7 +3150,7 @@ export async function orchestrateLoop(
 
       const MAIN_REFRESH_INTERVAL_MS = 60_000;
       const nowRefreshMs = Date.now();
-      if (nowRefreshMs - lastMainRefreshMs >= MAIN_REFRESH_INTERVAL_MS) {
+      if (!isPaused() && nowRefreshMs - lastMainRefreshMs >= MAIN_REFRESH_INTERVAL_MS) {
         const mainRefreshStartMs = interactiveTiming ? nowMs() : 0;
         lastMainRefreshMs = nowRefreshMs;
         const reposToRefresh = new Set<string>([ctx.projectRoot]);
@@ -3109,6 +3175,27 @@ export async function orchestrateLoop(
         interactiveTiming.timingsMs.poll = elapsedMs(nowMs, pollStartMs);
       }
       __lastSnapshot = snapshot;
+
+      if (isPaused()) {
+        __lastActions = [];
+
+        const displaySyncStartMs = interactiveTiming ? nowMs() : 0;
+        try {
+          deps.syncDisplay?.(orch, snapshot);
+        } catch { /* best-effort -- display sync failure shouldn't block the orchestrator */ }
+        if (interactiveTiming) {
+          interactiveTiming.timingsMs.displaySync = elapsedMs(nowMs, displaySyncStartMs);
+        }
+
+        const interval = config.pollIntervalMs ?? adaptivePollInterval(orch);
+        deps.onPollComplete?.(orch.getAllItems(), snapshot, interval, interactiveTiming);
+        if (interactiveTiming) {
+          pendingInteractiveTiming = interactiveTiming;
+        }
+
+        await deps.sleep(interval);
+        continue;
+      }
 
     // Log warning when GitHub API is unreachable for all polled items
     if (snapshot.apiErrorCount && snapshot.apiErrorCount > 0) {

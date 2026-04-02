@@ -398,6 +398,166 @@ describe("orchestrateLoop", () => {
     expect(items[0]).toEqual({ id: "T-1-1", state: "done", prUrl: null });
   });
 
+  it("keeps polling while paused without firing orchestrator side effects", async () => {
+    const orch = new Orchestrator({ wipLimit: 4, mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("PAUSE-LAUNCH"));
+
+    orch.addItem(makeWorkItem("PAUSE-MERGE"));
+    orch.hydrateState("PAUSE-MERGE", "ci-passed");
+    orch.getItem("PAUSE-MERGE")!.reviewCompleted = true;
+    orch.getItem("PAUSE-MERGE")!.prNumber = 11;
+
+    orch.addItem(makeWorkItem("PAUSE-REVIEW"));
+    orch.hydrateState("PAUSE-REVIEW", "ci-passed");
+    orch.getItem("PAUSE-REVIEW")!.prNumber = 12;
+
+    orch.addItem(makeWorkItem("PAUSE-REBASE"));
+    orch.hydrateState("PAUSE-REBASE", "ci-pending");
+    orch.getItem("PAUSE-REBASE")!.prNumber = 13;
+
+    const actionDeps = mockActionDeps();
+    const scheduleList = vi.fn(() => []);
+    const scanExternalPRs = vi.fn(() => []);
+    const onPollComplete = vi.fn();
+    const syncDisplay = vi.fn();
+
+    const buildSnapshot = vi.fn((): PollSnapshot => ({
+      items: [
+        { id: "PAUSE-MERGE", prNumber: 11, prState: "open", ciStatus: "pass", isMergeable: true },
+        { id: "PAUSE-REVIEW", prNumber: 12, prState: "open", ciStatus: "pass", isMergeable: true },
+        { id: "PAUSE-REBASE", prNumber: 13, prState: "open", ciStatus: "pending", isMergeable: false },
+      ],
+      readyIds: ["PAUSE-LAUNCH"],
+    }));
+
+    // lint-ignore: no-unbounded-orchestrate-loop
+    await orchestrateLoop(
+      orch,
+      defaultCtx,
+      {
+        buildSnapshot,
+        sleep: () => Promise.resolve(),
+        log: () => {},
+        actionDeps,
+        isPaused: () => true,
+        onPollComplete,
+        syncDisplay,
+        externalReviewDeps: {
+          scanExternalPRs,
+          launchReview: vi.fn(() => ({ workspaceRef: "review:1" })),
+          cleanReview: vi.fn(() => true),
+          log: vi.fn(),
+        },
+        scheduleDeps: {
+          listScheduledTasks: scheduleList,
+          readState: vi.fn(() => ({ tasks: {}, active: [], queued: [] })),
+          writeState: vi.fn(),
+          launchWorker: vi.fn(() => null),
+          monitorDeps: {
+            listWorkspaces: vi.fn(() => []),
+            closeWorkspace: vi.fn(() => true),
+          },
+          aiTool: "claude",
+          triggerDir: "/tmp/triggers",
+        } as any,
+      },
+      { maxIterations: 2, reviewExternal: true },
+    );
+
+    expect(buildSnapshot).toHaveBeenCalledTimes(2);
+    expect(onPollComplete).toHaveBeenCalledTimes(2);
+    expect(syncDisplay).toHaveBeenCalledTimes(2);
+    expect(actionDeps.launchSingleItem).not.toHaveBeenCalled();
+    expect(actionDeps.prMerge).not.toHaveBeenCalled();
+    expect(actionDeps.writeInbox).not.toHaveBeenCalled();
+    expect(actionDeps.fetchOrigin).not.toHaveBeenCalled();
+    expect(actionDeps.ffMerge).not.toHaveBeenCalled();
+    expect(scheduleList).not.toHaveBeenCalled();
+    expect(scanExternalPRs).not.toHaveBeenCalled();
+  });
+
+  it("buffers watch discoveries while paused and enrolls them after resume", async () => {
+    const orch = new Orchestrator({ wipLimit: 1, mergeStrategy: "manual" });
+    const actionDeps = mockActionDeps();
+    const logs: LogEntry[] = [];
+    let paused = true;
+    let sleepCalls = 0;
+
+    const scanWorkItems = vi.fn(() => [makeWorkItem("WATCH-1")]);
+    const buildSnapshot = vi.fn((innerOrch: Orchestrator): PollSnapshot => {
+      const item = innerOrch.getItem("WATCH-1");
+      if (!item) return { items: [], readyIds: [] };
+      if (item.state === "queued") return { items: [], readyIds: ["WATCH-1"] };
+      if (item.state === "launching" || item.state === "implementing") {
+        return { items: [{ id: "WATCH-1", workerAlive: true }], readyIds: [] };
+      }
+      return { items: [], readyIds: [] };
+    });
+
+    // lint-ignore: no-unbounded-orchestrate-loop
+    await orchestrateLoop(
+      orch,
+      defaultCtx,
+      {
+        buildSnapshot,
+        sleep: async () => {
+          sleepCalls++;
+          if (sleepCalls === 2) paused = false;
+        },
+        log: (entry) => logs.push(entry),
+        actionDeps,
+        isPaused: () => paused,
+        scanWorkItems,
+      },
+      { watch: true, watchIntervalMs: 0, maxIterations: 6 },
+    );
+
+    expect(scanWorkItems.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(logs.some((entry) => entry.event === "watch_new_items_buffered" && entry.count === 1)).toBe(true);
+    expect(logs.some((entry) => entry.event === "watch_buffer_flushed" && entry.count === 1)).toBe(true);
+    expect(orch.getAllItems().map((item) => item.id)).toEqual(["WATCH-1"]);
+    expect(actionDeps.launchSingleItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("recomputes paused actions from fresh state and executes them once on resume", async () => {
+    const orch = new Orchestrator({ wipLimit: 1, mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("RESUME-1"));
+    orch.hydrateState("RESUME-1", "ci-passed");
+    orch.getItem("RESUME-1")!.reviewCompleted = true;
+    orch.getItem("RESUME-1")!.prNumber = 21;
+
+    const actionDeps = mockActionDeps();
+    const logs: LogEntry[] = [];
+    let paused = true;
+    let sleepCalls = 0;
+
+    const buildSnapshot = vi.fn((): PollSnapshot => ({
+      items: [{ id: "RESUME-1", prNumber: 21, prState: "open", ciStatus: "pass", isMergeable: true }],
+      readyIds: [],
+    }));
+
+    // lint-ignore: no-unbounded-orchestrate-loop
+    await orchestrateLoop(
+      orch,
+      defaultCtx,
+      {
+        buildSnapshot,
+        sleep: async () => {
+          sleepCalls++;
+          if (sleepCalls === 3) paused = false;
+        },
+        log: (entry) => logs.push(entry),
+        actionDeps,
+        isPaused: () => paused,
+      },
+      { maxIterations: 6 },
+    );
+
+    expect(buildSnapshot.mock.calls.length).toBeGreaterThanOrEqual(4);
+    expect(actionDeps.prMerge).toHaveBeenCalledTimes(1);
+    expect(logs.filter((entry) => entry.event === "action_execute" && entry.action === "merge")).toHaveLength(1);
+  });
+
   it("processes dependency chain across batches", async () => {
     const orch = new Orchestrator({ fixForward: false, wipLimit: 1, mergeStrategy: "auto" });
     orch.addItem(makeWorkItem("A-1-1"));

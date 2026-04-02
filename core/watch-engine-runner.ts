@@ -305,6 +305,7 @@ export function createWatchEngineRunner(
           deps.ctx,
           {
             ...deps.loopDeps,
+            isPaused: () => paused,
             log: emitLog,
             onPollComplete: (items, snapshot, pollIntervalMs, interactiveTiming) => {
               const heartbeats = snapshotToHeartbeatMap(snapshot);
