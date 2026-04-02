@@ -28,6 +28,15 @@ export function setupTempRepo(): string {
 }
 
 /**
+ * Create a tracked temp directory for non-repo test state (fake HOME, fixtures, etc).
+ */
+export function setupTempDir(prefix = "nw-test-dir-"): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+/**
  * Create a hub + target repo pair as sibling directories.
  * Returns the hub repo path. Targets are at ../target-repo-a and ../target-repo-b.
  */
@@ -276,6 +285,15 @@ export function setupTempRepoWithRemote(): string {
 }
 
 /**
+ * Resolve the per-project runtime state dir for a given repo/home pair.
+ * Mirrors core/daemon.ts userStateDir() without mutating process.env.HOME.
+ */
+export function resolveProjectStateDir(projectRoot: string, homeDir: string): string {
+  const slug = projectRoot.replace(/\//g, "-");
+  return join(homeDir, ".ninthwave", "projects", slug);
+}
+
+/**
  * Clean up all temp repos created during the test.
  */
 export function cleanupTempRepos(): void {
@@ -388,6 +406,37 @@ export function captureOutputWithExit(
   }
 
   return { stdout: lines.join("\n"), exitCode };
+}
+
+export interface WaitForOptions {
+  timeoutMs?: number;
+  intervalMs?: number;
+  description?: string;
+}
+
+/**
+ * Poll until the predicate returns a truthy value or time out.
+ */
+export async function waitFor<T>(
+  predicate: () => T | false | null | undefined | Promise<T | false | null | undefined>,
+  options: WaitForOptions = {},
+): Promise<T> {
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const intervalMs = options.intervalMs ?? 25;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() <= deadline) {
+    try {
+      const value = await predicate();
+      if (value) return value;
+    } catch {
+      // Artifact or process state may not exist yet -- keep polling until timeout.
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  const suffix = options.description ? ` for ${options.description}` : "";
+  throw new Error(`Timed out after ${timeoutMs}ms waiting${suffix}`);
 }
 
 // Internal helper to run git commands
