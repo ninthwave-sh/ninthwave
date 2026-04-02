@@ -580,6 +580,13 @@ export function buildInteractiveEngineChildArgs(
 
 const DEFAULT_CREW_URL = "wss://ninthwave.sh";
 
+export function resolveConfiguredCrewUrl(
+  crewUrl?: string,
+  projectCrewUrl?: string,
+): string | undefined {
+  return crewUrl ?? projectCrewUrl;
+}
+
 export function resolveStartupCollaborationAction(
   current: {
     connectMode: boolean;
@@ -3496,6 +3503,7 @@ export async function cmdOrchestrate(
   // Pass projectRoot to filter to only items pushed to origin/main
   const workItems = loadRunnableWorkItems("startup");
   const preConfig = loadConfig(projectRoot);
+  crewUrl = resolveConfiguredCrewUrl(crewUrl, preConfig.crew_url);
   const interactiveStartupConfig = resolveInteractiveStartupConfig(preConfig, persistedUserCfg, toolOverride);
 
   // Interactive mode: no --items and stdin is a TTY

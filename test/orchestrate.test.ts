@@ -33,6 +33,7 @@ import {
   formatCompletionBanner,
   waitForCompletionKey,
   applyRuntimeCollaborationAction,
+  resolveConfiguredCrewUrl,
   resolveStartupCollaborationAction,
   createRuntimeControlHandlers,
   runInteractiveWatchOperatorSession,
@@ -5383,6 +5384,45 @@ describe("applyRuntimeCollaborationAction", () => {
     });
   });
 
+  it("uses an existing crew URL for share session creation and broker connection", async () => {
+    const state = {
+      mode: "local" as const,
+      connectMode: false,
+      crewUrl: "wss://config.example/socket",
+    };
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ code: "ABCD-1234" }),
+    }));
+    const broker = makeBroker();
+    const createBroker = vi.fn(() => broker);
+
+    const result = await applyRuntimeCollaborationAction(state, { action: "share" }, {
+      projectRoot: "/project",
+      crewRepoUrl: "git@github.com:test/repo.git",
+      log: () => {},
+      fetchFn: fetchFn as unknown as typeof fetch,
+      createBroker,
+      saveCrewCodeFn: vi.fn(),
+      onBrokerChanged: vi.fn(),
+    });
+
+    expect(result).toEqual({ mode: "shared", code: "ABCD-1234" });
+    expect(fetchFn).toHaveBeenCalledWith(
+      "https://config.example/socket/api/crews",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(createBroker).toHaveBeenCalledWith(
+      "/project",
+      "wss://config.example/socket",
+      "ABCD-1234",
+      "git@github.com:test/repo.git",
+      expect.any(Object),
+      expect.any(String),
+    );
+    expect(state.crewUrl).toBe("wss://config.example/socket");
+  });
+
   it("keeps the current session intact on a rejected join", async () => {
     const currentBroker = makeBroker();
     const rejectedBroker = makeBroker({
@@ -7783,6 +7823,12 @@ describe("log closure ring buffer integration", () => {
 });
 
 describe("resolveStartupCollaborationAction", () => {
+  it("resolves explicit crew URL precedence as CLI first, then project config", () => {
+    expect(resolveConfiguredCrewUrl("wss://cli.example", "wss://config.example")).toBe("wss://cli.example");
+    expect(resolveConfiguredCrewUrl(undefined, "wss://config.example")).toBe("wss://config.example");
+    expect(resolveConfiguredCrewUrl(undefined, undefined)).toBeUndefined();
+  });
+
   it("keeps the current startup collaboration state when local is selected", () => {
     expect(resolveStartupCollaborationAction(
       {
@@ -7823,6 +7869,20 @@ describe("resolveStartupCollaborationAction", () => {
       connectMode: false,
       crewCode: "K2F9-AB3X-7YPL-QM4N",
       crewUrl: "wss://ninthwave.sh",
+    });
+  });
+
+  it("preserves an existing crew URL when startup join is selected", () => {
+    expect(resolveStartupCollaborationAction(
+      {
+        connectMode: true,
+        crewUrl: "wss://config.example",
+      },
+      { type: "join", code: "K2F9-AB3X-7YPL-QM4N" },
+    )).toEqual({
+      connectMode: false,
+      crewCode: "K2F9-AB3X-7YPL-QM4N",
+      crewUrl: "wss://config.example",
     });
   });
 });
