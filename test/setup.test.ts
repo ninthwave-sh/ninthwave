@@ -26,6 +26,7 @@ import {
   detectProjectTools,
   discoverAgentSources,
   buildCopyPlan,
+  filterCopyPlan,
   executeCopyPlan,
   pruneManagedGeneratedEntries,
   interactiveAgentSelection,
@@ -628,6 +629,30 @@ describe("buildCopyPlan", () => {
   });
 });
 
+describe("filterCopyPlan", () => {
+  it("limits actionable entries to the selected preview paths", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const claudeTarget = AGENT_TARGET_DIRS.find((target) => target.dir === ".claude/agents")!;
+    const codexTarget = AGENT_TARGET_DIRS.find((target) => target.dir === ".codex/agents")!;
+    const selection: AgentSelection = {
+      agents: ["implementer.md"],
+      toolDirs: [claudeTarget, codexTarget],
+      selectedDisplayPaths: [".codex/agents/ninthwave-implementer.toml"],
+    };
+
+    const plan = buildCopyPlan(projectDir, bundleDir, {
+      agents: selection.agents,
+      toolDirs: selection.toolDirs,
+    });
+    const filtered = filterCopyPlan(plan, selection);
+
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]!.displayPath).toBe(".codex/agents/ninthwave-implementer.toml");
+  });
+});
+
 // --- executeCopyPlan ---
 
 describe("executeCopyPlan", () => {
@@ -835,7 +860,7 @@ describe("pruneManagedGeneratedEntries", () => {
 // --- interactiveAgentSelection ---
 
 describe("interactiveAgentSelection", () => {
-  it("returns selection with all agents when user confirms defaults", async () => {
+  it("returns all actionable preview entries by default", async () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
@@ -854,6 +879,12 @@ describe("interactiveAgentSelection", () => {
     expect(selection!.agents).toContain("reviewer.md");
     // No tools detected → falls back to all tools
     expect(selection!.toolDirs).toHaveLength(AGENT_TARGET_DIRS.length);
+    expect(selection!.selectedDisplayPaths).toEqual(
+      buildCopyPlan(projectDir, bundleDir, {
+        agents: selection!.agents,
+        toolDirs: selection!.toolDirs,
+      }).map((entry) => entry.displayPath),
+    );
   });
 
   it("returns null when user declines confirmation", async () => {
@@ -876,14 +907,18 @@ describe("interactiveAgentSelection", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
 
-    // First call: tool dir selection (accept all pre-checked); second call: only implementer
+    // First call: tool dir selection (accept all pre-checked); second call: only implementer.
+    // Third call: accept all preview entries.
     let callCount = 0;
     const stubCheckbox: CheckboxPromptFn = async (_msg, choices) => {
       callCount++;
       if (callCount === 1) {
         return choices.filter((c) => c.checked).map((c) => c.value);
       }
-      return ["implementer.md"];
+      if (callCount === 2) {
+        return ["implementer.md"];
+      }
+      return choices.filter((c) => c.checked).map((c) => c.value);
     };
     const stubConfirm: ConfirmPromptFn = async () => true;
 
@@ -894,6 +929,11 @@ describe("interactiveAgentSelection", () => {
 
     expect(selection).not.toBeNull();
     expect(selection!.agents).toEqual(["implementer.md"]);
+    expect(selection!.selectedDisplayPaths).toEqual(
+      selection!.toolDirs.map((target) => agentTargetFilename("implementer.md", target)).map(
+        (filename, index) => `${selection!.toolDirs[index]!.dir}/${filename}`,
+      ),
+    );
   });
 
   it("uses detected tools when present", async () => {
@@ -932,9 +972,12 @@ describe("interactiveAgentSelection", () => {
       }
     }
 
+    let checkboxCallCount = 0;
     let confirmCalled = false;
-    const stubCheckbox: CheckboxPromptFn = async (_msg, choices) =>
-      choices.filter((c) => c.checked).map((c) => c.value);
+    const stubCheckbox: CheckboxPromptFn = async (_msg, choices) => {
+      checkboxCallCount++;
+      return choices.filter((c) => c.checked).map((c) => c.value);
+    };
     const stubConfirm: ConfirmPromptFn = async () => {
       confirmCalled = true;
       return true;
@@ -948,6 +991,41 @@ describe("interactiveAgentSelection", () => {
     expect(selection).not.toBeNull();
     // Should NOT call confirm since everything is already up to date
     expect(confirmCalled).toBe(false);
+    expect(checkboxCallCount).toBe(2);
+    expect(selection!.selectedDisplayPaths).toBeUndefined();
+  });
+
+  it("removes only the unchecked preview line from the returned selection", async () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    let callCount = 0;
+    const stubCheckbox: CheckboxPromptFn = async (_msg, choices) => {
+      callCount++;
+      if (callCount === 1) {
+        return choices.filter((c) => c.checked).map((c) => c.value);
+      }
+      if (callCount === 2) {
+        return ["implementer.md"];
+      }
+
+      return choices
+        .filter((c) => c.checked)
+        .map((c) => c.value)
+        .filter((value) => value !== ".claude/agents/implementer.md");
+    };
+    const stubConfirm: ConfirmPromptFn = async () => true;
+
+    const selection = await interactiveAgentSelection(projectDir, bundleDir, {
+      checkboxPrompt: stubCheckbox,
+      confirmPrompt: stubConfirm,
+    });
+
+    expect(selection).not.toBeNull();
+    expect(selection!.agents).toEqual(["implementer.md"]);
+    expect(selection!.toolDirs).toHaveLength(AGENT_TARGET_DIRS.length);
+    expect(selection!.selectedDisplayPaths).not.toContain(".claude/agents/implementer.md");
+    expect(selection!.selectedDisplayPaths).toHaveLength(AGENT_TARGET_DIRS.length - 1);
   });
 
   it("returns empty agents when user deselects all", async () => {
