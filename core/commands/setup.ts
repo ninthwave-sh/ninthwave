@@ -301,6 +301,8 @@ export interface AgentSelection {
   agents: string[];
   /** Tool target directory indices into AGENT_TARGET_DIRS */
   toolDirs: { dir: string; suffix: string; tool: string }[];
+  /** Actionable managed-copy preview entries selected during interactive init. */
+  selectedDisplayPaths?: string[];
 }
 
 // ── Tool detection ───────────────────────────────────────────────────
@@ -408,6 +410,24 @@ export function buildCopyPlan(
   }
 
   return plan;
+}
+
+/**
+ * Filter a copy plan to the actionable entries selected during interactive init.
+ *
+ * Up-to-date entries are always preserved because they are informational and
+ * execute as no-ops. Pruning still uses the coarse tool/agent selection.
+ */
+export function filterCopyPlan(
+  plan: CopyPlan[],
+  selection: AgentSelection,
+): CopyPlan[] {
+  if (!selection.selectedDisplayPaths) return plan;
+
+  const selectedDisplayPaths = new Set(selection.selectedDisplayPaths);
+  return plan.filter((entry) =>
+    entry.status === "up-to-date" || selectedDisplayPaths.has(entry.displayPath)
+  );
 }
 
 /**
@@ -618,7 +638,7 @@ export function setupGlobal(bundleDir: string): void {
  * Run the interactive agent selection flow:
  * 1. Detect installed AI tools
  * 2. Present checkbox for agent selection
- * 3. Show preview of managed files to create or refresh
+ * 3. Present actionable managed-file preview entries as a checkbox list
  * 4. Ask for confirmation
  *
  * Returns the agent selection, or null if the user cancels.
@@ -694,23 +714,6 @@ export async function interactiveAgentSelection(
   const toReplace = plan.filter((p) => p.status === "replace");
   const upToDate = plan.filter((p) => p.status === "up-to-date");
 
-  if (toCreate.length > 0 || toRefresh.length > 0 || toReplace.length > 0) {
-    console.log("Will install:");
-    for (const entry of toCreate) {
-      console.log(`  ${GREEN}+${RESET} ${entry.displayPath}`);
-    }
-    for (const entry of toRefresh) {
-      console.log(
-        `  ${YELLOW}↻${RESET} ${entry.displayPath} ${DIM}(refreshes managed copy)${RESET}`,
-      );
-    }
-    for (const entry of toReplace) {
-      console.log(
-        `  ${YELLOW}↻${RESET} ${entry.displayPath} ${DIM}(replaces symlink)${RESET}`,
-      );
-    }
-  }
-
   if (upToDate.length > 0) {
     console.log(`${DIM}Already up to date: ${upToDate.map((e) => e.displayPath).join(", ")}${RESET}`);
   }
@@ -722,6 +725,35 @@ export async function interactiveAgentSelection(
 
   console.log();
 
+  const actionableChoices: CheckboxChoice[] = [
+    ...toCreate.map((entry) => ({
+      value: entry.displayPath,
+      label: entry.displayPath,
+      description: "creates managed copy",
+      checked: true,
+    })),
+    ...toRefresh.map((entry) => ({
+      value: entry.displayPath,
+      label: entry.displayPath,
+      description: "refreshes managed copy",
+      checked: true,
+    })),
+    ...toReplace.map((entry) => ({
+      value: entry.displayPath,
+      label: entry.displayPath,
+      description: "replaces symlink",
+      checked: true,
+    })),
+  ];
+
+  const selectedDisplayPaths = await checkbox("Will install:", actionableChoices);
+  if (selectedDisplayPaths.length === 0) {
+    console.log(`${DIM}No install actions selected -- skipping agent writes.${RESET}`);
+    return { ...selection, selectedDisplayPaths: [] };
+  }
+
+  console.log();
+
   // Step 4: Confirm
   const proceed = await confirm("Proceed?", true);
   if (!proceed) {
@@ -729,5 +761,5 @@ export async function interactiveAgentSelection(
     return null;
   }
 
-  return selection;
+  return { ...selection, selectedDisplayPaths };
 }

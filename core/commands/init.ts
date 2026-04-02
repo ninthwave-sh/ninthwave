@@ -35,6 +35,7 @@ import {
   detectProjectTools,
   discoverCanonicalBundleSources,
   buildCopyPlan,
+  filterCopyPlan,
   executeCopyPlan,
   AGENT_TARGET_DIRS,
   pruneManagedGeneratedEntries,
@@ -711,7 +712,7 @@ than average. Open a work item for anything that needs attention.
 
   copySkillFiles(skillsDir, bundleDir);
   const plan = buildCopyPlan(projectDir, bundleDir, selection);
-  executeCopyPlan(plan);
+  executeCopyPlan(filterCopyPlan(plan, selection));
 
   // --- .ninthwave/.gitignore (deny-by-default: only explicitly allowed files are committed) ---
   const nwGitignorePath = join(projectDir, ".ninthwave", ".gitignore");
