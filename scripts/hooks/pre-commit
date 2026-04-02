@@ -1,13 +1,13 @@
 #!/bin/sh
-# Run tests before commit — visible output, 120s wall-clock timeout.
+# Run the deterministic safety gate before commit with a short wall-clock timeout.
 # Unset git env vars that leak into test subprocesses (causes nested git commit failures)
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_AUTHOR_DATE GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL
 
-# Run tests in background with 120s wall-clock timeout
+# Run tests in background with 30s wall-clock timeout
 # (macOS has no `timeout` command — use background-job-kill pattern)
-bun test --smol --bail test/ &
+bun run test:pre-commit &
 TEST_PID=$!
-(sleep 120 && kill -TERM $TEST_PID 2>/dev/null) &
+(sleep 30 && kill -TERM $TEST_PID 2>/dev/null) &
 TIMER_PID=$!
 wait $TEST_PID 2>/dev/null
 status=$?
@@ -17,9 +17,9 @@ wait $TIMER_PID 2>/dev/null
 if [ $status -ne 0 ]; then
   echo ""
   if [ $status -eq 143 ]; then
-    echo "pre-commit: tests killed after 120s timeout"
+    echo "pre-commit: safety checks killed after 30s timeout"
   else
-    echo "pre-commit: tests failed"
+    echo "pre-commit: safety checks failed"
   fi
   exit 1
 fi

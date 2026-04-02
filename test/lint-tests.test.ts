@@ -1,9 +1,9 @@
 // Static analysis for dangerous test patterns.
-// Scans all test/*.test.ts files and fails if dangerous patterns are found.
+// Scans all test/**/*.test.ts files and fails if dangerous patterns are found.
 // This runs as part of the regular test suite -- auto-enforced in pre-commit and CI.
 
 import { describe, it, expect } from "vitest";
-import { readdirSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from "fs";
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -11,15 +11,22 @@ const TEST_DIR = import.meta.dirname;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-/** Read all test files in the test directory (excluding this file). */
+/** Read all test files under the test directory (excluding this file). */
 function getTestFiles(): { name: string; content: string; path: string }[] {
-  return readdirSync(TEST_DIR)
-    .filter((f) => f.endsWith(".test.ts") && f !== "lint-tests.test.ts")
-    .map((f) => ({
-      name: f,
-      content: readFileSync(join(TEST_DIR, f), "utf-8"),
-      path: join(TEST_DIR, f),
-    }));
+  const files: { name: string; content: string; path: string }[] = [];
+
+  for (const relPath of new Bun.Glob("**/*.test.ts").scanSync(TEST_DIR)) {
+    if (relPath === "lint-tests.test.ts") continue;
+
+    const fullPath = join(TEST_DIR, relPath);
+    files.push({
+      name: relPath,
+      content: readFileSync(fullPath, "utf-8"),
+      path: fullPath,
+    });
+  }
+
+  return files;
 }
 
 /** Read all .ts and .md project files, excluding non-source directories. */
@@ -356,7 +363,7 @@ function checkNoDescribeSkip(
 
 function runAllRules(files: { name: string; content: string }[]): Violation[] {
   const violations: Violation[] = [];
-  const testFileNames = new Set(files.map((f) => f.name));
+  const testFileNames = new Set(files.map((f) => f.name.split("/").pop() ?? f.name));
   for (const file of files) {
     violations.push(
       ...checkNoLeakedServer(file),

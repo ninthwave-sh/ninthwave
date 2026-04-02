@@ -4,7 +4,9 @@
   "private": true,
   "license": "Apache-2.0",
   "scripts": {
-    "test": "bun test --smol --bail test/",
+    "test": "bun run test:ci",
+    "test:ci": "bun test --smol --bail test/",
+    "test:pre-commit": "bun test --smol --bail test/lint-tests.test.ts",
     "test:watch": "bun test --smol --watch test/",
     "smoke:compiled-orchestrate-startup": "bun test --smol --bail test/smoke/compiled-orchestrate-startup.test.ts",
     "build": "bun build --compile core/cli.ts --outfile dist/ninthwave",
