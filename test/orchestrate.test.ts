@@ -37,6 +37,7 @@ import {
   resolveStartupCollaborationAction,
   createRuntimeControlHandlers,
   runInteractiveWatchOperatorSession,
+  runTUI,
   spawnInteractiveEngineChild,
   createWatchEngineRunner,
   createDetachedDaemonEngineRunner,
@@ -50,6 +51,7 @@ import {
   INTERACTIVE_WATCH_STAGE_WARN_MS,
   LOG_BUFFER_MAX,
   TEST_INTERACTIVE_ENGINE_STARTUP_FAIL_MESSAGE,
+  waitForEngineRecoveryKey,
   type LogEntry,
   type LogLevelFilter,
   type OrchestrateLoopDeps,
@@ -6142,7 +6144,7 @@ describe("interactive watch operator session", () => {
     };
   }
 
-  function makeOperatorTuiState(): TuiState {
+  function makeOperatorTuiState(overrides: Partial<TuiState> = {}): TuiState {
     return {
       scrollOffset: 0,
       viewOptions: { showBlockerDetail: true, mergeStrategy: "manual" },
@@ -6181,6 +6183,7 @@ describe("interactive watch operator session", () => {
       savedLogScrollOffset: 0,
       statusLayout: null,
       engineDisconnected: false,
+      ...overrides,
     };
   }
 
@@ -6636,6 +6639,110 @@ describe("interactive watch operator session", () => {
     expect(writes.join("")).toContain("Error: startup config missing");
   });
 
+  it("supports keyboard management without terminal management", async () => {
+    const stdin = makeOperatorStdin();
+    const { stream: stdout, writes } = makeOperatorStdout();
+    const tuiState = makeOperatorTuiState();
+    const child = makeOperatorChild();
+
+    const sessionPromise = runInteractiveWatchOperatorSession({
+      projectRoot: "/project",
+      childArgs: ["--items", "H-TRS-3"],
+      tuiState,
+      log: () => {},
+      initialSnapshot: {
+        daemonState: makeOperatorSnapshot().state,
+        runtime: makeOperatorSnapshot().runtime,
+      },
+      watchMode: true,
+      manageTerminal: false,
+      manageKeyboard: true,
+      stdin,
+      stdout,
+      spawnChild: () => child,
+    });
+
+    await Promise.resolve();
+    (stdin as any)._emit("data", "?");
+    expect(tuiState.showHelp).toBe(true);
+
+    (stdin as any)._emit("data", "q");
+    const result = await sessionPromise;
+
+    expect(result.completionAction).toBe("quit");
+    expect((stdin.setRawMode as any).mock.calls).toEqual([[true], [false]]);
+    expect(writes.some((chunk) => chunk.includes("\x1B[?1049h"))).toBe(false);
+    expect(writes.some((chunk) => chunk.includes("\x1B[?1049l"))).toBe(false);
+  });
+
+  it("supports terminal management without keyboard management", async () => {
+    const stdin = makeOperatorStdin();
+    const { stream: stdout, writes } = makeOperatorStdout();
+    const tuiState = makeOperatorTuiState();
+    const child = makeOperatorChild();
+
+    const sessionPromise = runInteractiveWatchOperatorSession({
+      projectRoot: "/project",
+      childArgs: ["--items", "H-TRS-3"],
+      tuiState,
+      log: () => {},
+      initialSnapshot: {
+        daemonState: makeOperatorSnapshot().state,
+        runtime: makeOperatorSnapshot().runtime,
+      },
+      watchMode: true,
+      manageKeyboard: false,
+      stdin,
+      stdout,
+      spawnChild: () => child,
+    });
+
+    await Promise.resolve();
+    child.emit("close", 1, null);
+
+    const result = await sessionPromise;
+
+    expect(result.completionAction).toBeUndefined();
+    expect(tuiState.engineDisconnected).toBe(true);
+    expect((stdin.setRawMode as any).mock.calls).toEqual([]);
+    expect(writes.some((chunk) => chunk.includes("\x1B[?1049h"))).toBe(true);
+    expect(writes.some((chunk) => chunk.includes("\x1B[?1049l"))).toBe(true);
+  });
+
+  it("ignores malformed stdout after the engine is ready", async () => {
+    const stdin = makeOperatorStdin();
+    const { stream: stdout, writes } = makeOperatorStdout();
+    const tuiState = makeOperatorTuiState();
+    const child = makeOperatorChild();
+
+    const sessionPromise = runInteractiveWatchOperatorSession({
+      projectRoot: "/project",
+      childArgs: ["--items", "H-TRS-3"],
+      tuiState,
+      log: () => {},
+      initialSnapshot: {
+        daemonState: makeOperatorSnapshot().state,
+        runtime: makeOperatorSnapshot().runtime,
+      },
+      watchMode: true,
+      stdin,
+      stdout,
+      spawnChild: () => child,
+    });
+
+    await Promise.resolve();
+    child.emitLine({ type: "snapshot", event: makeOperatorSnapshot("Ready snapshot") });
+    child.emitStdoutText("not-json-after-readiness\n");
+    child.emitLine({ type: "result", result: {} });
+    child.emit("close", 0, null);
+
+    const result = await sessionPromise;
+
+    expect(result.lastSnapshot.daemonState.items[0]?.title).toBe("Ready snapshot");
+    expect(result.completionAction).toBeUndefined();
+    expect(writes.join("")).not.toContain("not-json-after-readiness");
+  });
+
   it("restarts after disconnect and keeps rendering engine-confirmed state", async () => {
     const stdin = makeOperatorStdin();
     const { stream: stdout } = makeOperatorStdout();
@@ -6695,6 +6802,71 @@ describe("interactive watch operator session", () => {
     expect(result.completionAction).toBeUndefined();
   });
 
+  it("rebinds runtime controls cleanly across repeated restarts", async () => {
+    const stdin = makeOperatorStdin();
+    const { stream: stdout } = makeOperatorStdout();
+    const tuiState = makeOperatorTuiState();
+    const firstChild = makeOperatorChild();
+    const secondChild = makeOperatorChild();
+    const thirdChild = makeOperatorChild();
+    const children = [firstChild, secondChild, thirdChild];
+    let activeSender: ((command: WatchEngineControlCommand) => void) | undefined;
+
+    const sessionPromise = runInteractiveWatchOperatorSession({
+      projectRoot: "/project",
+      childArgs: ["--items", "H-TRS-3"],
+      tuiState,
+      log: () => {},
+      initialSnapshot: {
+        daemonState: makeOperatorSnapshot().state,
+        runtime: makeOperatorSnapshot().runtime,
+      },
+      watchMode: true,
+      stdin,
+      stdout,
+      spawnChild: () => children.shift()!,
+      bindControlSender: (sender) => {
+        activeSender = sender;
+      },
+    });
+
+    await Promise.resolve();
+    activeSender?.({ type: "set-pause", paused: true });
+    expect((firstChild.stdin.write as any).mock.calls).toHaveLength(1);
+
+    firstChild.emit("close", 1, null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    activeSender?.({ type: "set-pause", paused: false });
+    expect((firstChild.stdin.write as any).mock.calls).toHaveLength(1);
+
+    (stdin as any)._emit("data", "r");
+    await Promise.resolve();
+
+    activeSender?.({ type: "set-pause", paused: false });
+    expect((secondChild.stdin.write as any).mock.calls).toHaveLength(1);
+
+    secondChild.emit("close", 1, null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    activeSender?.({ type: "set-pause", paused: true });
+    expect((secondChild.stdin.write as any).mock.calls).toHaveLength(1);
+
+    (stdin as any)._emit("data", "r");
+    await Promise.resolve();
+
+    activeSender?.({ type: "set-pause", paused: true });
+    expect((thirdChild.stdin.write as any).mock.calls).toHaveLength(1);
+
+    (stdin as any)._emit("data", "q");
+    await sessionPromise;
+
+    activeSender?.({ type: "set-pause", paused: false });
+    expect((thirdChild.stdin.write as any).mock.calls).toHaveLength(1);
+  });
+
   it("bridges live collaboration requests to the engine and resolves control results", async () => {
     const stdin = makeOperatorStdin();
     const { stream: stdout } = makeOperatorStdout();
@@ -6736,6 +6908,181 @@ describe("interactive watch operator session", () => {
 
     (stdin as any)._emit("data", "q");
     await sessionPromise;
+  });
+});
+
+describe("runTUI", () => {
+  function withPatchedReadOnlyTuiStdio<T>(fn: (ctx: {
+    writes: string[];
+    stdin: {
+      setRawMode: ReturnType<typeof vi.fn>;
+      resume: ReturnType<typeof vi.fn>;
+      pause: ReturnType<typeof vi.fn>;
+      setEncoding: ReturnType<typeof vi.fn>;
+      on: ReturnType<typeof vi.fn>;
+      removeListener: ReturnType<typeof vi.fn>;
+    };
+  }) => Promise<T>): Promise<T> {
+    const writes: string[] = [];
+    const stdin = {
+      setRawMode: vi.fn(),
+      resume: vi.fn(),
+      pause: vi.fn(),
+      setEncoding: vi.fn(),
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const stdoutWrite = vi.fn((chunk: string) => {
+      writes.push(chunk);
+      return true;
+    });
+
+    const stdinTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    const stdoutRows = Object.getOwnPropertyDescriptor(process.stdout, "rows");
+    const stdoutColumns = Object.getOwnPropertyDescriptor(process.stdout, "columns");
+    const stdinSetRawMode = process.stdin.setRawMode;
+    const stdinResume = process.stdin.resume;
+    const stdinPause = process.stdin.pause;
+    const stdinSetEncoding = process.stdin.setEncoding;
+    const stdinOn = process.stdin.on;
+    const stdinRemoveListener = process.stdin.removeListener;
+    const stdoutWriteOriginal = process.stdout.write;
+
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    Object.defineProperty(process.stdout, "rows", { value: 24, configurable: true });
+    Object.defineProperty(process.stdout, "columns", { value: 100, configurable: true });
+    process.stdin.setRawMode = stdin.setRawMode as any;
+    process.stdin.resume = stdin.resume as any;
+    process.stdin.pause = stdin.pause as any;
+    process.stdin.setEncoding = stdin.setEncoding as any;
+    process.stdin.on = stdin.on as any;
+    process.stdin.removeListener = stdin.removeListener as any;
+    process.stdout.write = stdoutWrite as any;
+
+    return fn({ writes, stdin }).finally(() => {
+      if (stdinTTY) {
+        Object.defineProperty(process.stdin, "isTTY", stdinTTY);
+      } else {
+        delete (process.stdin as unknown as Record<string, unknown>)["isTTY"];
+      }
+      if (stdoutRows) {
+        Object.defineProperty(process.stdout, "rows", stdoutRows);
+      } else {
+        delete (process.stdout as unknown as Record<string, unknown>)["rows"];
+      }
+      if (stdoutColumns) {
+        Object.defineProperty(process.stdout, "columns", stdoutColumns);
+      } else {
+        delete (process.stdout as unknown as Record<string, unknown>)["columns"];
+      }
+      process.stdin.setRawMode = stdinSetRawMode;
+      process.stdin.resume = stdinResume;
+      process.stdin.pause = stdinPause;
+      process.stdin.setEncoding = stdinSetEncoding;
+      process.stdin.on = stdinOn;
+      process.stdin.removeListener = stdinRemoveListener;
+      process.stdout.write = stdoutWriteOriginal;
+    });
+  }
+
+  it("refreshes read-only log output and restores the terminal on abort", async () => {
+    await withPatchedReadOnlyTuiStdio(async ({ writes, stdin }) => {
+      const abortController = new AbortController();
+      let renderCount = 0;
+      const getItems = vi.fn(() => {
+        renderCount += 1;
+        return {
+          items: [makeStatusItem({ id: "H-TRS-3", title: `Read-only item ${renderCount}` })],
+          wipLimit: 2,
+          sessionStartedAt: "2026-04-01T00:00:00.000Z",
+        };
+      });
+      const getLogEntries = vi.fn(() => [
+        {
+          timestamp: `2026-04-01T00:00:0${renderCount}.000Z`,
+          itemId: "H-TRS-3",
+          message: renderCount >= 2 ? "Refreshed log entry" : "Initial log entry",
+        },
+      ]);
+
+      const runPromise = runTUI({
+        getItems,
+        getLogEntries,
+        intervalMs: 10,
+        signal: abortController.signal,
+        panelMode: "logs-only",
+      });
+
+      await Promise.resolve();
+      setTimeout(() => abortController.abort(), 15);
+      await runPromise;
+
+      const fullOutput = writes.join("")
+        .replace(/\x1b\]8;[^\x07]*\x07/g, "")
+        .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
+
+      expect(getItems).toHaveBeenCalledTimes(2);
+      expect(getLogEntries).toHaveBeenCalledTimes(2);
+      expect(fullOutput).toContain("Refreshed log entry");
+      expect(stdin.setRawMode.mock.calls).toEqual([[true], [false]]);
+      expect(writes[0]).toBe("\x1B[?1049h");
+      expect(writes.at(-1)).toBe("\x1B[?1049l");
+    });
+  });
+
+  it("skips the read-only runner entirely when stdin is not a TTY", async () => {
+    const stdinTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+
+    try {
+      const getItems = vi.fn(() => ({
+        items: [makeStatusItem({ id: "H-TRS-3" })],
+      }));
+
+      await runTUI({ getItems, intervalMs: 1 });
+
+      expect(getItems).not.toHaveBeenCalled();
+    } finally {
+      if (stdinTTY) {
+        Object.defineProperty(process.stdin, "isTTY", stdinTTY);
+      } else {
+        delete (process.stdin as unknown as Record<string, unknown>)["isTTY"];
+      }
+    }
+  });
+});
+
+describe("waitForEngineRecoveryKey", () => {
+  it("resolves with quit when signal is already aborted", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    const mockStdin = { on: vi.fn(), removeListener: vi.fn() } as unknown as NodeJS.ReadStream;
+
+    await expect(waitForEngineRecoveryKey(mockStdin, ac.signal)).resolves.toBe("quit");
+  });
+
+  it("parses restart and quit keys case-insensitively", async () => {
+    const mockStdin = {
+      on: vi.fn(),
+      removeListener: vi.fn(),
+    } as unknown as NodeJS.ReadStream;
+
+    const restartPromise = waitForEngineRecoveryKey(mockStdin);
+    const onData = (mockStdin.on as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: unknown[]) => call[0] === "data",
+    )![1] as (key: string) => void;
+
+    onData("R");
+    await expect(restartPromise).resolves.toBe("restart");
+
+    const quitPromise = waitForEngineRecoveryKey(mockStdin);
+    const secondOnData = (mockStdin.on as ReturnType<typeof vi.fn>).mock.calls.findLast(
+      (call: unknown[]) => call[0] === "data",
+    )![1] as (key: string) => void;
+
+    secondOnData("x");
+    secondOnData("\x03");
+    await expect(quitPromise).resolves.toBe("quit");
   });
 });
 
