@@ -519,8 +519,11 @@ export function launchSingleItem(
     const itemText = extractItemText(workDir, item.id);
     const baseBranchLine = options.baseBranch ? `BASE_BRANCH: ${options.baseBranch}\n` : "";
     const hubRepoNwoLine = options.hubRepoNwo ? `HUB_REPO_NWO: ${options.hubRepoNwo}\n` : "";
-    const seededFilesLine = seededFiles.length > 0
-      ? `\nNOTE: The following files were seeded into this worktree by ninthwave and should be included in your first commit: ${seededFiles.join(", ")}\n`
+    const commitRecommendedSeededFiles = seededFiles
+      .filter((entry) => entry.commitRecommended)
+      .map((entry) => entry.path);
+    const seededFilesLine = commitRecommendedSeededFiles.length > 0
+      ? `\nNOTE: The following files were seeded into this worktree by ninthwave and should be included in your first commit: ${commitRecommendedSeededFiles.join(", ")}\n`
       : "";
     const systemPrompt = `YOUR_WORK_ITEM_ID: ${item.id}
 YOUR_PARTITION: ${partition}

@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { join } from "path";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import type { SeedAgentFilesDeps } from "../core/agent-files.ts";
+import type { SeedAgentFilesDeps, SeededAgentFile } from "../core/agent-files.ts";
 import { readAgentFileContent, seedAgentFiles } from "../core/agent-files.ts";
 import { renderAgentArtifact } from "../core/ai-tools.ts";
 import type { RunResult } from "../core/types.ts";
@@ -43,6 +43,10 @@ function createDeps(overrides: Partial<SeedAgentFilesDeps> = {}): SeedAgentFiles
     info: vi.fn(),
     ...overrides,
   };
+}
+
+function seededPaths(seeded: SeededAgentFile[]): string[] {
+  return seeded.map((entry) => entry.path);
 }
 
 // ── readAgentFileContent ─────────────────────────────────────────────
@@ -183,6 +187,7 @@ describe("seedAgentFiles", () => {
 
     // Should seed all target directories for each agent file
     expect(seeded.length).toBeGreaterThan(0);
+    expect(seeded.every((entry) => entry.commitRecommended)).toBe(true);
 
     // Verify content was written from remote
     const claudeAgent = join(worktree, ".claude/agents/implementer.md");
@@ -220,6 +225,7 @@ describe("seedAgentFiles", () => {
     const seeded = seedAgentFiles(worktree, hubRoot, deps);
 
     expect(seeded.length).toBeGreaterThan(0);
+    expect(seeded.every((entry) => entry.commitRecommended)).toBe(true);
 
     // Verify content came from local
     const claudeAgent = join(worktree, ".claude/agents/implementer.md");
@@ -348,7 +354,7 @@ describe("seedAgentFiles", () => {
     const seeded = seedAgentFiles(worktree, hubRoot, deps);
 
     // .claude/agents/implementer.md should NOT be in the seeded list
-    expect(seeded).not.toContain(".claude/agents/implementer.md");
+    expect(seededPaths(seeded)).not.toContain(".claude/agents/implementer.md");
 
     // Existing file should NOT be overwritten
     expect(readFileSync(join(worktree, ".claude/agents/implementer.md"), "utf-8")).toBe(existingContent);
@@ -377,7 +383,7 @@ describe("seedAgentFiles", () => {
 
     const seeded = seedAgentFiles(worktree, hubRoot, deps);
 
-    expect(seeded).toContain(".claude/agents/implementer.md");
+    expect(seededPaths(seeded)).toContain(".claude/agents/implementer.md");
     expect(readFileSync(join(worktree, ".claude/agents/implementer.md"), "utf-8")).toBe(
       remoteContent,
     );
@@ -411,8 +417,8 @@ describe("seedAgentFiles", () => {
     expect(readFileSync(claudeAgent, "utf-8")).toBe(localContent);
 
     // reviewer and forward-fixer should not be seeded (not available from either source)
-    expect(seeded.some((s) => s.includes("reviewer"))).toBe(false);
-    expect(seeded.some((s) => s.includes("forward-fixer"))).toBe(false);
+    expect(seeded.some((s) => s.path.includes("reviewer"))).toBe(false);
+    expect(seeded.some((s) => s.path.includes("forward-fixer"))).toBe(false);
 
     rmSync(hubRoot, { recursive: true, force: true });
     rmSync(worktree, { recursive: true, force: true });
@@ -438,7 +444,7 @@ describe("seedAgentFiles", () => {
     const seeded = seedAgentFiles(worktree, hubRoot, deps);
 
     // .github/agents/ files should have ninthwave- prefix and .agent.md suffix
-    expect(seeded).toContain(join(".github/agents", "ninthwave-implementer.agent.md"));
+    expect(seededPaths(seeded)).toContain(join(".github/agents", "ninthwave-implementer.agent.md"));
     const ghAgent = join(worktree, ".github/agents/ninthwave-implementer.agent.md");
     expect(existsSync(ghAgent)).toBe(true);
     expect(readFileSync(ghAgent, "utf-8")).toBe(remoteContent);
@@ -468,9 +474,9 @@ describe("seedAgentFiles", () => {
 
     const seeded = seedAgentFiles(worktree, hubRoot, deps);
 
-    expect(seeded).not.toContain(join(".github", "copilot-instructions.md"));
-    expect(seeded).not.toContain("CLAUDE.md");
-    expect(seeded).not.toContain("AGENTS.md");
+    expect(seededPaths(seeded)).not.toContain(join(".github", "copilot-instructions.md"));
+    expect(seededPaths(seeded)).not.toContain("CLAUDE.md");
+    expect(seededPaths(seeded)).not.toContain("AGENTS.md");
     expect(readFileSync(join(worktree, "CLAUDE.md"), "utf-8")).toBe("# Worktree instructions\n");
     expect(readFileSync(join(worktree, "AGENTS.md"), "utf-8")).toBe("# Agent instructions\n");
     expect(readFileSync(join(worktree, ".github", "copilot-instructions.md"), "utf-8")).toBe(
@@ -498,9 +504,83 @@ describe("seedAgentFiles", () => {
 
     const seeded = seedAgentFiles(worktree, hubRoot, deps);
 
-    expect(seeded).toContain(join(".claude/agents", "custom-agent.md"));
-    expect(seeded).toContain(join(".github/agents", "ninthwave-custom-agent.agent.md"));
+    expect(seededPaths(seeded)).toContain(join(".claude/agents", "custom-agent.md"));
+    expect(seededPaths(seeded)).toContain(join(".github/agents", "ninthwave-custom-agent.agent.md"));
     expect(readFileSync(join(worktree, ".claude/agents/custom-agent.md"), "utf-8")).toBe(customContent);
+
+    rmSync(hubRoot, { recursive: true, force: true });
+    rmSync(worktree, { recursive: true, force: true });
+  });
+
+  it("marks gitignored seeded files as not commit recommended", () => {
+    const hubRoot = makeTmpDir();
+    const worktree = makeTmpDir();
+    const remoteContent = "# Implementer agent\nFrom remote";
+
+    writeAgentFile(hubRoot, "implementer.md");
+    writeFileSync(join(worktree, ".gitignore"), "/.claude/agents/\n");
+
+    const deps = createDeps({
+      run: vi.fn((_cmd: string, args: string[]) => {
+        const showArg = args.find((a: string) => a.startsWith("origin/main:"));
+        if (showArg) {
+          return { stdout: remoteContent, stderr: "", exitCode: 0 };
+        }
+        if (args[0] === "check-ignore" && args[2] === ".claude/agents/implementer.md") {
+          return { stdout: ".claude/agents/implementer.md", stderr: "", exitCode: 0 };
+        }
+        return { stdout: "", stderr: "", exitCode: 1 };
+      }) as any,
+    });
+
+    const seeded = seedAgentFiles(worktree, hubRoot, deps);
+    const claudeEntry = seeded.find((entry) => entry.path === ".claude/agents/implementer.md");
+    const githubEntry = seeded.find((entry) => entry.path === ".github/agents/ninthwave-implementer.agent.md");
+
+    expect(claudeEntry).toEqual({
+      path: ".claude/agents/implementer.md",
+      commitRecommended: false,
+    });
+    expect(githubEntry).toEqual({
+      path: ".github/agents/ninthwave-implementer.agent.md",
+      commitRecommended: true,
+    });
+
+    rmSync(hubRoot, { recursive: true, force: true });
+    rmSync(worktree, { recursive: true, force: true });
+  });
+
+  it("marks only non-ignored seeded files as commit recommended", () => {
+    const hubRoot = makeTmpDir();
+    const worktree = makeTmpDir();
+    const remoteContent = "# Implementer agent\nFrom remote";
+
+    writeAgentFile(hubRoot, "implementer.md");
+    writeFileSync(join(worktree, ".gitignore"), "/.opencode/agents/\n");
+
+    const deps = createDeps({
+      run: vi.fn((_cmd: string, args: string[]) => {
+        const showArg = args.find((a: string) => a.startsWith("origin/main:"));
+        if (showArg) {
+          return { stdout: remoteContent, stderr: "", exitCode: 0 };
+        }
+        if (args[0] === "check-ignore" && args[2] === ".opencode/agents/implementer.md") {
+          return { stdout: ".opencode/agents/implementer.md", stderr: "", exitCode: 0 };
+        }
+        return { stdout: "", stderr: "", exitCode: 1 };
+      }) as any,
+    });
+
+    const seeded = seedAgentFiles(worktree, hubRoot, deps);
+
+    expect(seeded.find((entry) => entry.path === ".opencode/agents/implementer.md")).toEqual({
+      path: ".opencode/agents/implementer.md",
+      commitRecommended: false,
+    });
+    expect(seeded.find((entry) => entry.path === ".codex/agents/ninthwave-implementer.toml")).toEqual({
+      path: ".codex/agents/ninthwave-implementer.toml",
+      commitRecommended: true,
+    });
 
     rmSync(hubRoot, { recursive: true, force: true });
     rmSync(worktree, { recursive: true, force: true });

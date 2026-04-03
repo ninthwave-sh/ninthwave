@@ -38,6 +38,11 @@ export interface SeedAgentFilesDeps {
   info: typeof defaultInfo;
 }
 
+export interface SeededAgentFile {
+  path: string;
+  commitRecommended: boolean;
+}
+
 const defaultSeedDeps: SeedAgentFilesDeps = {
   run,
   readFileSync,
@@ -82,14 +87,37 @@ export function readAgentFileContent(
  * Seed agent files into a worktree as managed copies.
  * Reads agent content from origin/main for consistency with remote state,
  * falling back to the hub repo's local agents/ directory. Returns the list
- * of relative paths that were created or refreshed (so the worker can commit them).
+ * of relative paths that were created or refreshed, plus whether each path
+ * should be suggested for commit in the worker prompt.
  */
+function isIgnoredByGit(
+  worktreePath: string,
+  relativePath: string,
+  deps: Pick<SeedAgentFilesDeps, "run" | "existsSync">,
+): boolean {
+  const hasGitMetadata = deps.existsSync(join(worktreePath, ".git"));
+  const hasRootGitignore = deps.existsSync(join(worktreePath, ".gitignore"));
+  if (!hasGitMetadata && !hasRootGitignore) {
+    return false;
+  }
+
+  try {
+    const result = deps.run("git", ["check-ignore", "--no-index", relativePath], {
+      cwd: worktreePath,
+      timeout: GIT_TIMEOUT,
+    });
+    return result.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
 export function seedAgentFiles(
   worktreePath: string,
   hubRoot: string,
   deps: SeedAgentFilesDeps = defaultSeedDeps,
-): string[] {
-  const seeded: string[] = [];
+): SeededAgentFile[] {
+  const seeded: SeededAgentFile[] = [];
   const agentFiles = agentFileTargets(discoverAgentSources(hubRoot));
 
   for (const agent of agentFiles) {
@@ -99,18 +127,22 @@ export function seedAgentFiles(
     for (const target of agent.targets) {
       const rendered = renderAgentArtifact(agent.source, sourceContent, target);
       const filename = rendered.filename;
+      const relativePath = join(target.dir, filename);
       const destPath = join(worktreePath, target.dir, filename);
 
       const status = detectManagedCopyStatus(destPath, rendered.content);
       if (status === "up-to-date") continue;
 
       writeManagedCopy(destPath, rendered.content);
-      seeded.push(join(target.dir, filename));
+      seeded.push({
+        path: relativePath,
+        commitRecommended: !isIgnoredByGit(worktreePath, relativePath, deps),
+      });
     }
   }
 
   if (seeded.length > 0) {
-    deps.info(`Seeded agent files into worktree: ${seeded.join(", ")}`);
+    deps.info(`Seeded agent files into worktree: ${seeded.map((entry) => entry.path).join(", ")}`);
   }
 
   return seeded;

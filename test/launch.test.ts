@@ -907,6 +907,69 @@ describe("launchSingleItem", () => {
     expect(prompt).not.toContain("BASE_BRANCH:");
   });
 
+  it("omits the seeded-file commit note when all seeded files are gitignored", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    seedCanonicalAgent(repo, "implementer.md", "You are a focused implementation agent.");
+    writeFileSync(
+      join(repo, ".gitignore"),
+      [
+        "/.claude/agents/",
+        "/.codex/agents/",
+        "/.opencode/agents/",
+        "/.github/agents/",
+        "",
+      ].join("\n"),
+    );
+    spawnSync("git", ["-C", repo, "add", ".gitignore", "agents"], { stdio: "pipe" });
+    spawnSync("git", ["-C", repo, "commit", "-m", "Add ignore policy", "--quiet"], { stdio: "pipe" });
+    deps.createWorktree.mockImplementation((_repo: string, wtPath: string) => {
+      mkdirSync(wtPath, { recursive: true });
+      writeFileSync(join(wtPath, ".gitignore"), readFileSync(join(repo, ".gitignore"), "utf-8"));
+    });
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    await captureOutput(() => {
+      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
+    });
+
+    const promptPath = join(worktreeDir, "ninthwave-M-CI-1", ".ninthwave", ".prompt");
+    const prompt = readFileSync(promptPath, "utf-8");
+    expect(prompt).not.toContain("should be included in your first commit");
+  });
+
+  it("includes only non-ignored seeded files in the commit note", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    seedCanonicalAgent(repo, "implementer.md", "You are a focused implementation agent.");
+    writeFileSync(join(repo, ".gitignore"), ["/.claude/agents/", ""].join("\n"));
+    spawnSync("git", ["-C", repo, "add", ".gitignore", "agents"], { stdio: "pipe" });
+    spawnSync("git", ["-C", repo, "commit", "-m", "Add partial ignore policy", "--quiet"], { stdio: "pipe" });
+    deps.createWorktree.mockImplementation((_repo: string, wtPath: string) => {
+      mkdirSync(wtPath, { recursive: true });
+      writeFileSync(join(wtPath, ".gitignore"), readFileSync(join(repo, ".gitignore"), "utf-8"));
+    });
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    await captureOutput(() => {
+      launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
+    });
+
+    const promptPath = join(worktreeDir, "ninthwave-M-CI-1", ".ninthwave", ".prompt");
+    const prompt = readFileSync(promptPath, "utf-8");
+    expect(prompt).toContain("should be included in your first commit");
+    expect(prompt).not.toContain(".claude/agents/implementer.md");
+    expect(prompt).toContain(".github/agents/ninthwave-implementer.agent.md");
+  });
+
   it("non-stacked launch still fetches main and calls ffMerge", async () => {
     const mockMux = createMockMux();
     const deps = createMockLaunchDeps();
