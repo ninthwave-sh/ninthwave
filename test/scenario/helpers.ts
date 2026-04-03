@@ -2,6 +2,7 @@
 // Wires FakeGitHub + FakeMux into the real orchestrateLoop via dependency injection.
 
 import { vi } from "vitest";
+import { mkdirSync } from "fs";
 import {
   type OrchestratorDeps,
   type ExecutionContext,
@@ -50,9 +51,11 @@ export function buildActionDeps(
   overrides?: Partial<OrchestratorDeps>,
 ): OrchestratorDeps {
   return {
-    launchSingleItem: vi.fn((_item, _wd, _wtd, _pr, _ai, _bb) => {
-      const ref = fakeMux.launchWorkspace("/tmp/worktree", "claude");
-      return { worktreePath: "/tmp/worktree", workspaceRef: ref! };
+    launchSingleItem: vi.fn((item, _wd, _wtd, _pr, _ai, _bb) => {
+      const worktreePath = `/tmp/worktree-${item.id}`;
+      mkdirSync(worktreePath, { recursive: true });
+      const ref = fakeMux.launchWorkspace(worktreePath, "claude", item.id);
+      return { worktreePath, workspaceRef: ref! };
     }),
     cleanSingleWorktree: vi.fn(() => true),
     prMerge: vi.fn((repoRoot, prNumber, options) => fakeGh.prMerge(repoRoot, prNumber, options)),
