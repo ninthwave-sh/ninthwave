@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
-import { setupTempRepo, cleanupTempRepos, captureOutput } from "./helpers.ts";
+import { setupTempRepo, setupTempRepoPair, cleanupTempRepos, captureOutput } from "./helpers.ts";
 import type { Multiplexer } from "../core/mux.ts";
 import {
   type CleanDeps,
@@ -163,7 +163,7 @@ describe("cleanSingleWorktree", () => {
     expect(deps.removeWorktree).toHaveBeenCalled();
   });
 
-  it("clears inbox messages when cleaning a worktree", () => {
+  it("clears inbox messages in live and legacy namespaces when cleaning a worktree", () => {
     const deps = createMockCleanDeps();
     const repo = setupTempRepo();
     const worktreeDir = join(repo, ".ninthwave", ".worktrees");
@@ -171,13 +171,42 @@ describe("cleanSingleWorktree", () => {
     mkdirSync(worktreePath, { recursive: true });
 
     writeInbox(worktreePath, "H-CI-2", "stale cleanup message");
+    writeInbox(repo, "H-CI-2", "legacy repo-root message");
     expect(checkInbox(worktreePath, "H-CI-2")).toBe("stale cleanup message");
-    writeInbox(worktreePath, "H-CI-2", "stale cleanup message");
+    expect(checkInbox(repo, "H-CI-2")).toBe("legacy repo-root message");
 
     const result = cleanSingleWorktree("H-CI-2", worktreeDir, repo, deps);
 
     expect(result).toBe(true);
     expect(checkInbox(worktreePath, "H-CI-2")).toBeNull();
+    expect(checkInbox(repo, "H-CI-2")).toBeNull();
+  });
+
+  it("best-effort cleans cross-repo worktree, target-repo, and hub-root inbox namespaces", () => {
+    const deps = createMockCleanDeps();
+    const hubRepo = setupTempRepoPair();
+    const targetRepo = join(hubRepo, "..", "target-repo-a");
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    const worktreePath = join(targetRepo, ".ninthwave", ".worktrees", "ninthwave-H-CI-2");
+    mkdirSync(worktreeDir, { recursive: true });
+    mkdirSync(join(targetRepo, ".ninthwave", ".worktrees"), { recursive: true });
+    mkdirSync(worktreePath, { recursive: true });
+    writeFileSync(
+      join(worktreeDir, ".cross-repo-index"),
+      `H-CI-2\t${targetRepo}\t${worktreePath}\n`,
+      "utf-8",
+    );
+
+    writeInbox(worktreePath, "H-CI-2", "worktree message");
+    writeInbox(targetRepo, "H-CI-2", "target repo legacy message");
+    writeInbox(hubRepo, "H-CI-2", "hub repo legacy message");
+
+    const result = cleanSingleWorktree("H-CI-2", worktreeDir, hubRepo, deps);
+
+    expect(result).toBe(true);
+    expect(checkInbox(worktreePath, "H-CI-2")).toBeNull();
+    expect(checkInbox(targetRepo, "H-CI-2")).toBeNull();
+    expect(checkInbox(hubRepo, "H-CI-2")).toBeNull();
   });
 
   it("works without mux parameter (backward compatibility)", () => {

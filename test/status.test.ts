@@ -43,6 +43,20 @@ function stripAnsi(s: string): string {
     .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");  // Strip CSI sequences (colors, etc.)
 }
 
+async function withMockedStdinTTY<T>(isTTY: boolean, fn: () => Promise<T>): Promise<T> {
+  const original = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+  Object.defineProperty(process.stdin, "isTTY", { value: isTTY, configurable: true });
+  try {
+    return await fn();
+  } finally {
+    if (original) {
+      Object.defineProperty(process.stdin, "isTTY", original);
+    } else {
+      delete (process.stdin as unknown as Record<string, unknown>).isTTY;
+    }
+  }
+}
+
 function ok(stdout = ""): RunResult {
   return { stdout, stderr: "", exitCode: 0 };
 }
@@ -799,14 +813,14 @@ describe("cmdStatus", () => {
 
 describe("cmdStatusWatch", () => {
   it("delegates to runTUI and returns immediately in non-TTY mode", async () => {
-    // runTUI returns immediately when process.stdin.isTTY is false (test env)
     const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
-    const start = Date.now();
-    await cmdStatusWatch("/nonexistent", "/nonexistent", 5000);
-    const elapsed = Date.now() - start;
+    const elapsed = await withMockedStdinTTY(false, async () => {
+      const start = Date.now();
+      await cmdStatusWatch("/nonexistent", "/nonexistent", 5000);
+      return Date.now() - start;
+    });
 
-    // Should resolve quickly (non-TTY fast path)
     expect(elapsed).toBeLessThan(500);
 
     writeSpy.mockRestore();
@@ -818,9 +832,11 @@ describe("cmdStatusWatch", () => {
 
     const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
-    const start = Date.now();
-    await cmdStatusWatch("/nonexistent", "/nonexistent", 5000, controller.signal);
-    const elapsed = Date.now() - start;
+    const elapsed = await withMockedStdinTTY(false, async () => {
+      const start = Date.now();
+      await cmdStatusWatch("/nonexistent", "/nonexistent", 5000, controller.signal);
+      return Date.now() - start;
+    });
 
     expect(elapsed).toBeLessThan(100);
 
@@ -1857,10 +1873,11 @@ describe("cmdStatusWatch non-TTY handling", () => {
     const controller = new AbortController();
     const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
-    // runTUI returns immediately when process.stdin.isTTY is false
-    const start = Date.now();
-    await cmdStatusWatch("/nonexistent", "/nonexistent", 5000, controller.signal);
-    const elapsed = Date.now() - start;
+    const elapsed = await withMockedStdinTTY(false, async () => {
+      const start = Date.now();
+      await cmdStatusWatch("/nonexistent", "/nonexistent", 5000, controller.signal);
+      return Date.now() - start;
+    });
 
     expect(elapsed).toBeLessThan(500);
 
@@ -1873,9 +1890,11 @@ describe("cmdStatusWatch non-TTY handling", () => {
 
     const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
-    const start = Date.now();
-    await cmdStatusWatch("/nonexistent", "/nonexistent", 5000, controller.signal);
-    const elapsed = Date.now() - start;
+    const elapsed = await withMockedStdinTTY(false, async () => {
+      const start = Date.now();
+      await cmdStatusWatch("/nonexistent", "/nonexistent", 5000, controller.signal);
+      return Date.now() - start;
+    });
 
     expect(elapsed).toBeLessThan(100);
 
@@ -1889,10 +1908,11 @@ describe("status command flag routing", () => {
   it("default (no flags) calls cmdStatusWatch which delegates to runTUI", async () => {
     const writeSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
 
-    // cmdStatusWatch delegates to runTUI, which returns immediately in non-TTY
-    const start = Date.now();
-    await cmdStatusWatch("/nonexistent", "/nonexistent", 10);
-    const elapsed = Date.now() - start;
+    const elapsed = await withMockedStdinTTY(false, async () => {
+      const start = Date.now();
+      await cmdStatusWatch("/nonexistent", "/nonexistent", 10);
+      return Date.now() - start;
+    });
     expect(elapsed).toBeLessThan(500);
 
     writeSpy.mockRestore();

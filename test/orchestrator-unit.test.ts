@@ -3,7 +3,9 @@
 // and the standalone reconstructState/buildSnapshot from orchestrate.ts.
 // No vi.mock -- all isolation via dependency injection.
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   Orchestrator,
   statusDisplayForState,
@@ -25,6 +27,7 @@ import {
   type StaleBranchCleanupDeps,
 } from "../core/branch-cleanup.ts";
 import type { WorkItem, Priority } from "../core/types.ts";
+import { cleanupTempRepos, setupTempRepo } from "./helpers.ts";
 import {
   writeHeartbeat,
   readHeartbeat,
@@ -2489,8 +2492,8 @@ describe("executeMerge conflict-aware rebase", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
-    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
-    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
+    item.worktreePath = join(setupTempRepo(), ".ninthwave", ".worktrees", "ninthwave-H-1-1");
+    mkdirSync(item.worktreePath, { recursive: true });
 
     const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
@@ -2519,7 +2522,8 @@ describe("executeMerge conflict-aware rebase", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
-    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
+    item.worktreePath = join(setupTempRepo(), ".ninthwave", ".worktrees", "ninthwave-H-1-1");
+    mkdirSync(item.worktreePath, { recursive: true });
 
     const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
@@ -3645,7 +3649,8 @@ describe("rebaser worker state transitions", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
-    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
+    item.worktreePath = join(setupTempRepo(), ".ninthwave", ".worktrees", "ninthwave-H-1-1");
+    mkdirSync(item.worktreePath, { recursive: true });
 
     const inboxMessages: string[] = [];
     const deps = makeMinimalDeps({
@@ -3724,7 +3729,8 @@ describe("rebase circuit breaker and worker message priority", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
-    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
+    item.worktreePath = join(setupTempRepo(), ".ninthwave", ".worktrees", "ninthwave-H-1-1");
+    mkdirSync(item.worktreePath, { recursive: true });
 
     const launchRebaserCalled = { value: false };
     const inboxMessages: string[] = [];
@@ -3749,7 +3755,8 @@ describe("rebase circuit breaker and worker message priority", () => {
     const item = orch.getItem("H-1-1")!;
     item.prNumber = 42;
     item.workspaceRef = "workspace:1";
-    item.worktreePath = "/tmp/test/ninthwave-H-1-1";
+    item.worktreePath = join(setupTempRepo(), ".ninthwave", ".worktrees", "ninthwave-H-1-1");
+    mkdirSync(item.worktreePath, { recursive: true });
 
     const deps = makeMinimalDeps({
       daemonRebase: () => false,
@@ -4080,6 +4087,281 @@ describe("daemon-worker worktree race prevention (H-WR-1)", () => {
     orch.executeAction(launchAction!, ctx, deps);
     expect(item.workspaceRef).toBe("workspace:2");
     expect(item.needsCiFix).toBe(false);
+  });
+});
+
+// ── Implementer inbox delivery resolution ──────────────────────────
+
+describe("implementer inbox delivery resolution", () => {
+  afterEach(() => cleanupTempRepos());
+
+  function makeMinimalDeps(overrides: Partial<OrchestratorDeps> = {}): OrchestratorDeps {
+    return {
+      launchSingleItem: () => ({ worktreePath: "/tmp/wt", workspaceRef: "workspace:1" }),
+      cleanSingleWorktree: () => true,
+      prMerge: () => true,
+      prComment: () => true,
+      sendMessage: () => true,
+      writeInbox: () => {},
+      closeWorkspace: () => true,
+      fetchOrigin: () => {},
+      ffMerge: () => {},
+      validatePickupCandidate: (item) => ({
+        status: "launch",
+        targetRepo: "/tmp/proj",
+        branchName: `ninthwave/${item.id}`,
+      }),
+      ...overrides,
+    };
+  }
+
+  function createEventCollector(): {
+    orch: Orchestrator;
+    events: Array<{ itemId: string; event: string; data?: Record<string, unknown> }>;
+  } {
+    const events: Array<{ itemId: string; event: string; data?: Record<string, unknown> }> = [];
+    const orch = new Orchestrator({
+      sessionLimit: 1,
+      onEvent: (itemId, event, data) => {
+        events.push({ itemId, event, data });
+      },
+    });
+    return { orch, events };
+  }
+
+  it("delivers review feedback to the indexed live worktree namespace", () => {
+    const hubRepo = setupTempRepo();
+    const targetRepo = setupTempRepo();
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    const targetWorktree = join(targetRepo, ".ninthwave", ".worktrees", "ninthwave-H-1-1");
+    mkdirSync(worktreeDir, { recursive: true });
+    mkdirSync(targetWorktree, { recursive: true });
+    writeFileSync(
+      join(worktreeDir, ".cross-repo-index"),
+      `H-1-1\t${targetRepo}\t${targetWorktree}\n`,
+      "utf-8",
+    );
+
+    const { orch, events } = createEventCollector();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    const item = orch.getItem("H-1-1")!;
+    item.resolvedRepoRoot = targetRepo;
+    item.workspaceRef = "workspace:1";
+
+    const writes: Array<{ targetRoot: string; itemId: string; message: string }> = [];
+    const deps = makeMinimalDeps({
+      writeInbox: (targetRoot, itemId, message) => {
+        writes.push({ targetRoot, itemId, message });
+      },
+    });
+    const ctx: ExecutionContext = {
+      projectRoot: hubRepo,
+      worktreeDir,
+      workDir: join(hubRepo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction(
+      { type: "notify-review", itemId: "H-1-1", message: "Please address feedback." },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(writes).toEqual([
+      { targetRoot: targetWorktree, itemId: "H-1-1", message: "Please address feedback." },
+    ]);
+    expect(events).toContainEqual({
+      itemId: "H-1-1",
+      event: "inbox-delivery",
+      data: expect.objectContaining({
+        actionType: "notify-review",
+        outcome: "delivered",
+        targetProjectRoot: targetWorktree,
+        targetSource: "cross-repo-index",
+      }),
+    });
+  });
+
+  it("does not fall back to repo-root namespaces for missing review targets", () => {
+    const hubRepo = setupTempRepo();
+    const targetRepo = setupTempRepo();
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    const missingWorktree = join(targetRepo, ".ninthwave", ".worktrees", "ninthwave-H-1-1");
+    mkdirSync(worktreeDir, { recursive: true });
+    writeFileSync(
+      join(worktreeDir, ".cross-repo-index"),
+      `H-1-1\t${targetRepo}\t${missingWorktree}\n`,
+      "utf-8",
+    );
+
+    const { orch, events } = createEventCollector();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    const item = orch.getItem("H-1-1")!;
+    item.resolvedRepoRoot = targetRepo;
+    item.workspaceRef = "workspace:1";
+    item.worktreePath = missingWorktree;
+
+    const writeInbox = vi.fn();
+    const deps = makeMinimalDeps({ writeInbox });
+    const ctx: ExecutionContext = {
+      projectRoot: hubRepo,
+      worktreeDir,
+      workDir: join(hubRepo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction(
+      { type: "notify-review", itemId: "H-1-1", message: "Please address feedback." },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(false);
+    expect(writeInbox).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      itemId: "H-1-1",
+      event: "inbox-delivery",
+      data: expect.objectContaining({
+        actionType: "notify-review",
+        outcome: "missing-target",
+        reason: "cross-repo-worktree-missing",
+        candidateProjectRoot: missingWorktree,
+      }),
+    });
+  });
+
+  it("logs CI failure relaunch when no safe inbox target exists", () => {
+    const hubRepo = setupTempRepo();
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    const { orch, events } = createEventCollector();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "ci-failed");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+
+    const writeInbox = vi.fn();
+    const deps = makeMinimalDeps({ writeInbox });
+    const ctx: ExecutionContext = {
+      projectRoot: hubRepo,
+      worktreeDir,
+      workDir: join(hubRepo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction(
+      { type: "notify-ci-failure", itemId: "H-1-1", message: "CI failed." },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(item.state).toBe("ready");
+    expect(item.needsCiFix).toBe(true);
+    expect(writeInbox).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      itemId: "H-1-1",
+      event: "inbox-delivery",
+      data: expect.objectContaining({
+        actionType: "notify-ci-failure",
+        outcome: "relaunch-requested",
+        reason: "no-worktree-path",
+      }),
+    });
+  });
+
+  it("does not fall back to repo-root namespaces for generic worker nudges", () => {
+    const hubRepo = setupTempRepo();
+    const targetRepo = setupTempRepo();
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    mkdirSync(worktreeDir, { recursive: true });
+
+    const { orch, events } = createEventCollector();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    const item = orch.getItem("H-1-1")!;
+    item.resolvedRepoRoot = targetRepo;
+    item.workspaceRef = "workspace:1";
+
+    const writeInbox = vi.fn();
+    const deps = makeMinimalDeps({ writeInbox });
+    const ctx: ExecutionContext = {
+      projectRoot: hubRepo,
+      worktreeDir,
+      workDir: join(hubRepo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction(
+      { type: "send-message", itemId: "H-1-1", message: "Are you still making progress?" },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(false);
+    expect(writeInbox).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      itemId: "H-1-1",
+      event: "inbox-delivery",
+      data: expect.objectContaining({
+        actionType: "send-message",
+        outcome: "missing-target",
+        reason: "no-worktree-path",
+      }),
+    });
+  });
+
+  it("delivers rebase requests to the live worktree namespace", () => {
+    const hubRepo = setupTempRepo();
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    const worktreePath = join(worktreeDir, "ninthwave-H-1-1");
+    mkdirSync(worktreePath, { recursive: true });
+
+    const { orch, events } = createEventCollector();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    const item = orch.getItem("H-1-1")!;
+    item.worktreePath = worktreePath;
+    item.workspaceRef = "workspace:1";
+
+    const writes: Array<{ targetRoot: string; itemId: string; message: string }> = [];
+    const deps = makeMinimalDeps({
+      writeInbox: (targetRoot, itemId, message) => {
+        writes.push({ targetRoot, itemId, message });
+      },
+    });
+    const ctx: ExecutionContext = {
+      projectRoot: hubRepo,
+      worktreeDir,
+      workDir: join(hubRepo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction(
+      { type: "rebase", itemId: "H-1-1", message: "Please rebase." },
+      ctx,
+      deps,
+    );
+
+    expect(result.success).toBe(true);
+    expect(writes).toEqual([
+      { targetRoot: worktreePath, itemId: "H-1-1", message: "Please rebase." },
+    ]);
+    expect(events).toContainEqual({
+      itemId: "H-1-1",
+      event: "inbox-delivery",
+      data: expect.objectContaining({
+        actionType: "rebase",
+        outcome: "delivered",
+        targetProjectRoot: worktreePath,
+        targetSource: "hub-worktree",
+      }),
+    });
   });
 });
 

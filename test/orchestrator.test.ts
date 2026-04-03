@@ -1,6 +1,7 @@
 // Tests for core/orchestrator.ts -- Orchestrator state machine and action execution.
 // No vi.mock -- executeAction uses dependency injection to stay bun-test compatible.
 
+import { mkdirSync } from "fs";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   Orchestrator,
@@ -17,6 +18,18 @@ import {
   type OrchestratorDeps,
 } from "../core/orchestrator.ts";
 import type { WorkItem, Priority } from "../core/types.ts";
+
+const EXISTING_TEST_WORKTREES = [
+  "/tmp/test/ninthwave-test",
+  "/tmp/test/ninthwave-H-1-1",
+  "/tmp/test/ninthwave-H-1-2",
+  "/tmp/test/ninthwave-A-1-2",
+  "/tmp/test/ninthwave-R-13-1b",
+];
+
+for (const worktreePath of EXISTING_TEST_WORKTREES) {
+  mkdirSync(worktreePath, { recursive: true });
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -1391,6 +1404,8 @@ describe("Orchestrator", () => {
 
     it("merge: sends rebase requests to dependent WIP items", () => {
       const deps = mockDeps();
+      const worktreePath = "/tmp/test/ninthwave-H-1-2";
+      mkdirSync(worktreePath, { recursive: true });
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.addItem(makeWorkItem("H-1-2", ["H-1-1"]));
@@ -1398,7 +1413,7 @@ describe("Orchestrator", () => {
       orch.getItem("H-1-1")!.prNumber = 42;
       orch.hydrateState("H-1-2", "implementing");
       orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
-      orch.getItem("H-1-2")!.worktreePath = "/tmp/test/ninthwave-H-1-2";
+      orch.getItem("H-1-2")!.worktreePath = worktreePath;
 
       orch.executeAction(
         { type: "merge", itemId: "H-1-1", prNumber: 42 },
@@ -1407,7 +1422,7 @@ describe("Orchestrator", () => {
       );
 
       expect(deps.writeInbox).toHaveBeenCalledWith(
-        "/tmp/test/ninthwave-H-1-2",
+        worktreePath,
         "H-1-2",
         expect.stringContaining("Dependency H-1-1 merged"),
       );
@@ -1842,9 +1857,12 @@ describe("Orchestrator", () => {
 
     it("notify-review: succeeds via inbox even without workspace ref", () => {
       const deps = mockDeps();
+      const worktreePath = "/tmp/test/ninthwave-H-1-1";
+      mkdirSync(worktreePath, { recursive: true });
       orch.addItem(makeWorkItem("H-1-1"));
       orch.getItem("H-1-1")!.reviewCompleted = true;
       orch.hydrateState("H-1-1", "review-pending");
+      orch.getItem("H-1-1")!.worktreePath = worktreePath;
 
       const result = orch.executeAction(
         { type: "notify-review", itemId: "H-1-1" },
@@ -6323,15 +6341,18 @@ describe("Orchestrator", () => {
 
     it("CI failure comment uses resolvedRepoRoot", () => {
       const deps = mockDeps();
+      const targetRepo = "/tmp/test/target-repo";
+      const worktreePath = "/tmp/test/target-repo/.ninthwave/.worktrees/ninthwave-X-1-8";
+      mkdirSync(worktreePath, { recursive: true });
       orch.addItem(makeWorkItem("X-1-8"));
       orch.getItem("X-1-8")!.reviewCompleted = true;
       orch.hydrateState("X-1-8", "ci-failed");
       orch.getItem("X-1-8")!.reviewCompleted = true;
       const item = orch.getItem("X-1-8")!;
       item.prNumber = 48;
-      item.resolvedRepoRoot = "/path/to/target-repo";
+      item.resolvedRepoRoot = targetRepo;
       item.workspaceRef = "workspace:8";
-      item.worktreePath = "/path/to/target-repo/.ninthwave/.worktrees/ninthwave-X-1-8";
+      item.worktreePath = worktreePath;
 
       orch.executeAction(
         { type: "notify-ci-failure", itemId: "X-1-8", message: "CI failed" },
@@ -6340,7 +6361,7 @@ describe("Orchestrator", () => {
       );
 
       expect(deps.prComment).toHaveBeenCalledWith(
-        "/path/to/target-repo",
+        targetRepo,
         48,
         expect.stringContaining("CI failure"),
       );

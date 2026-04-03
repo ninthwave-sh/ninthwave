@@ -1,6 +1,7 @@
 // Tests for core/analytics.ts and core/commands/analytics.ts.
 // Uses dependency injection (no vi.mock) per project conventions.
 
+import { mkdirSync } from "fs";
 import { describe, it, expect, vi } from "vitest";
 import {
   collectRunMetrics,
@@ -56,10 +57,14 @@ function makeWorkItem(id: string, deps: string[] = []): WorkItem {
 
 function mockActionDeps(overrides?: Partial<OrchestratorDeps>): OrchestratorDeps {
   return {
-    launchSingleItem: vi.fn(() => ({
-      worktreePath: "/tmp/test/item-test",
-      workspaceRef: "workspace:1",
-    })),
+    launchSingleItem: vi.fn(() => {
+      const worktreePath = "/tmp/test/item-test";
+      mkdirSync(worktreePath, { recursive: true });
+      return {
+        worktreePath,
+        workspaceRef: "workspace:1",
+      };
+    }),
     cleanSingleWorktree: vi.fn(() => true),
     prMerge: vi.fn(() => true),
     prComment: vi.fn(() => true),

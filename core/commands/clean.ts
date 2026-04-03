@@ -40,6 +40,16 @@ function extractWorkspaceRef(line: string): string {
   return line.trim().split(/\s+/, 1)[0] ?? line;
 }
 
+function cleanInboxNamespaces(id: string, roots: Array<string | undefined>): void {
+  for (const root of new Set(roots.filter((value): value is string => !!value))) {
+    try {
+      cleanInbox(root, id);
+    } catch {
+      // best-effort inbox cleanup
+    }
+  }
+}
+
 /**
  * Close multiplexer workspaces whose item ID is in the given set.
  * Shared helper used by both reconcile (targeted) and clean (broad).
@@ -352,11 +362,7 @@ export function cleanSingleWorktree(
   } catch (e) {
     warn(`Failed to delete remote branch ${branch}: ${e instanceof Error ? e.message : e}`);
   }
-  try {
-    cleanInbox(worktreePath, id);
-  } catch {
-    // best-effort inbox cleanup
-  }
+  cleanInboxNamespaces(id, [worktreePath, targetRepo, projectRoot]);
   releasePartition(partitionDir, id);
   removeCrossRepoIndex(crossRepoIndex, id);
   return true;

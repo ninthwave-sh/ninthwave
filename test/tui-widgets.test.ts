@@ -1342,7 +1342,7 @@ describe("runSelectionScreen", () => {
       refreshItems: () => refresh.promise,
     });
 
-    expect(getLastRenderedFrame(getOutput())).toContain("A-1  First task");
+    expect(getPlainFrameLines(getOutput()).join("\n")).toContain("A-1  First task");
 
     refresh.resolve({
       localItems: items,
@@ -1365,7 +1365,7 @@ describe("runSelectionScreen", () => {
     });
     await flushMicrotasks();
 
-    const refreshedFrame = getLastRenderedFrame(getOutput());
+    const refreshedFrame = getPlainFrameLines(getOutput()).join("\n");
     expect(refreshedFrame).toContain("B-2  Second task");
     expect(refreshedFrame).not.toContain("A-1  First task");
     expect(refreshedFrame).toContain("Removed merged items: A-1. Cleared selection for A-1");
