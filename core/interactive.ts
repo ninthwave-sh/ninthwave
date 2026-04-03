@@ -76,6 +76,7 @@ export interface InteractiveDeps {
 export interface StartupPersistenceOptions {
   backendMode?: PersistedBackendMode;
   savedToolIds?: string[];
+  defaults?: TuiSettingsDefaults;
 }
 
 // ── Default prompt using readline ────────────────────────────────────
@@ -469,19 +470,37 @@ export function buildStartupPersistenceUpdates(
     : undefined;
 
   const backendMode = result.backendMode ?? options.backendMode;
+  const defaults = options.defaults;
 
-  return {
-    ...(backendMode ? { backend_mode: backendMode } : {}),
-    merge_strategy: result.mergeStrategy === "auto" ? "auto" : "manual",
-    review_mode: result.reviewMode,
-    session_limit: result.sessionLimit,
-    collaboration_mode: result.connectionAction?.type === "connect"
-      ? "share"
-      : result.connectionAction?.type === "join"
-      ? "join"
-      : "local",
-    ...(aiTools ? { ai_tools: aiTools } : {}),
-  };
+  const mergeStrategy = result.mergeStrategy === "auto" ? "auto" as const : "manual" as const;
+  const collaborationMode = result.connectionAction?.type === "connect"
+    ? "share" as const
+    : result.connectionAction?.type === "join"
+    ? "join" as const
+    : "local" as const;
+
+  // Only persist settings the user actively changed from their startup defaults.
+  // This prevents a wrong default from being cemented by pressing Enter.
+  const updates: Partial<UserConfig> = {};
+  if (backendMode && backendMode !== defaults?.backendMode) {
+    updates.backend_mode = backendMode;
+  }
+  if (mergeStrategy !== defaults?.mergeStrategy) {
+    updates.merge_strategy = mergeStrategy;
+  }
+  if (result.reviewMode !== defaults?.reviewMode) {
+    updates.review_mode = result.reviewMode;
+  }
+  if (result.sessionLimit !== undefined) {
+    updates.session_limit = result.sessionLimit;
+  }
+  if (collaborationMode !== defaults?.collaborationMode) {
+    updates.collaboration_mode = collaborationMode;
+  }
+  if (aiTools) {
+    updates.ai_tools = aiTools;
+  }
+  return updates;
 }
 
 // ── TUI widget flow ─────────────────────────────────────────────────

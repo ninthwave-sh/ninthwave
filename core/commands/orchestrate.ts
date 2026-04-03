@@ -4090,6 +4090,7 @@ export async function cmdOrchestrate(
         ...buildStartupPersistenceUpdates(result, {
           backendMode: startupBackendMode,
           savedToolIds: interactiveStartupConfig.savedToolIds,
+          defaults: interactiveStartupConfig.defaults,
         }),
         schedule_enabled_projects: {
           ...(persistedUserCfg.schedule_enabled_projects ?? {}),

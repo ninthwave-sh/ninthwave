@@ -277,6 +277,7 @@ describe("onboard", () => {
         commandExists: (cmd) => cmd === "claude",
         prompt: async () => "",
         getBundleDir: () => bundleDir,
+        saveUserConfig: () => {},
       });
     } finally {
       console.log = origLog;
@@ -313,6 +314,7 @@ describe("onboard", () => {
         commandExists: (cmd) => cmd === "claude",
         prompt: async () => "",
         getBundleDir: () => bundleDir,
+        saveUserConfig: () => {},
       });
     } finally {
       console.log = origLog;
@@ -558,6 +560,8 @@ describe("cmdNoArgs", () => {
       isDaemonRunning: () => null,
       ensureMux: async () => { ensureMuxCalled = true; },
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async () => interactiveResult,
       runWatch: async (args) => {
         watchCalled = true;
@@ -680,6 +684,8 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -705,6 +711,8 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
         itemIds: [],
         mergeStrategy: "auto" as MergeStrategy,
@@ -733,6 +741,8 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -758,6 +768,8 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -784,6 +796,8 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -810,6 +824,8 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -836,6 +852,8 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
         mergeStrategy: "auto" as MergeStrategy,
@@ -861,6 +879,7 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
       runInteractiveFlow: async () => null, // User cancelled
       runWatch: async () => { watchCalled = true; },
     });
@@ -879,6 +898,8 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async () => {
         interactiveCalled = true;
         return {
@@ -909,6 +930,7 @@ describe("cmdNoArgs", () => {
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: true, schedule_enabled: false }),
       loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
       runInteractiveFlow: async (_todos, _wip, deps) => {
         interactiveCalled = true;
         // Verify that the deps include the correct defaultReviewMode
@@ -971,6 +993,7 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
       saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
@@ -1015,6 +1038,7 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadUserConfig: () => ({}),
       saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
       runInteractiveFlow: async () => ({
         itemIds: ["H-1"],
@@ -1031,9 +1055,8 @@ describe("cmdNoArgs", () => {
     expect(watchArgs).toContain("--crew");
     expect(watchArgs).toContain("K2F9-AB3X-7YPL-QM4N");
     expect(savedUpdates).toHaveLength(1);
+    // backendMode "auto" and mergeStrategy "manual" match TUI defaults, so they are not re-saved
     expect(savedUpdates[0]).toMatchObject({
-      backend_mode: "auto",
-      merge_strategy: "manual",
       review_mode: "mine",
       session_limit: 4,
       collaboration_mode: "join",
@@ -1041,6 +1064,8 @@ describe("cmdNoArgs", () => {
         [projectDir.replace(/\//g, "-")]: false,
       },
     });
+    expect(savedUpdates[0]).not.toHaveProperty("backend_mode");
+    expect(savedUpdates[0]).not.toHaveProperty("merge_strategy");
     expect(savedUpdates[0]).not.toHaveProperty("code");
     expect(JSON.stringify(savedUpdates[0])).not.toContain("K2F9-AB3X-7YPL-QM4N");
   });

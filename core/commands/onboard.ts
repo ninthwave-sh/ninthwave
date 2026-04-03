@@ -434,6 +434,7 @@ export async function cmdNoArgs(
       ...buildStartupPersistenceUpdates(result, {
         backendMode: defaultSettings.backendMode,
         savedToolIds: userConfig.ai_tools,
+        defaults: defaultSettings,
       }),
       schedule_enabled_projects: {
         ...(userConfig.schedule_enabled_projects ?? {}),
