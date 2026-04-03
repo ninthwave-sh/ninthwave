@@ -78,7 +78,7 @@ Install [tmux](https://github.com/tmux/tmux/wiki) or [cmux](https://cmux.com) fo
 
 2. Optional but recommended: install `cmux` or `tmux` so you can attach to worker sessions when needed.
 
-3. Once a plan is fleshed out to low spec, create work items with `/decompose`, then run:
+3. Once you have a plan, create work items with `/decompose`, then run:
 
    ```bash
    nw
