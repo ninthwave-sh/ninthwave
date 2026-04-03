@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <a href="https://ninthwave.sh"><img src="docs/assets/hero-orchestrator.png" alt="Ninthwave orchestrator: status table showing parallel work items with states, throughput, and merged PRs" width="740" /></a>
+  <a href="https://ninthwave.sh"><img src="docs/assets/hero-orchestrator.png" alt="Ninthwave orchestrator managing parallel work items with live queue and PR pipeline status" width="740" /></a>
 </p>
 
 Ninthwave is the orchestration layer for parallel AI coding. Turn plans into small, reviewable PRs while keeping your existing AI tool, billing, and local control.
@@ -61,11 +61,11 @@ Requires [gh](https://cli.github.com).
 Install [tmux](https://github.com/tmux/tmux/wiki) or [cmux](https://cmux.com) for the best experience. Ninthwave can launch workers in headless mode, but attachable sessions are what let you jump straight into a worker when you need to inspect or steer it. If you are not already comfortable with tmux, start with cmux.
 
 <p align="center">
-  <img src="docs/assets/cmux-worker-panels.png" alt="cmux showing active Ninthwave worker sessions alongside orchestrator status" width="540" />
+  <img src="docs/assets/cmux-worker-panels.png" alt="cmux showing active Ninthwave worker sessions and in-flight task output one step away while Ninthwave runs" width="540" />
 </p>
 
 <p align="center">
-  <em>cmux keeps active worker sessions one step away when you need to inspect, steer, or unblock work in flight.</em>
+  <em>Ninthwave works standalone; cmux or tmux keeps active worker sessions one step away when you need to inspect, steer, or unblock work in flight.</em>
 </p>
 
 ## Quick start
