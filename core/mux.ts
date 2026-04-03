@@ -3,7 +3,7 @@
 
 import { createInterface } from "readline";
 import * as cmux from "./cmux.ts";
-import { loadUserConfig } from "./config.ts";
+import { isTmuxLayoutMode, loadUserConfig } from "./config.ts";
 import { HeadlessAdapter, isHeadlessWorkspaceRef } from "./headless.ts";
 import { TmuxAdapter } from "./tmux.ts";
 import { die, warn as defaultWarn } from "./output.ts";
@@ -91,6 +91,7 @@ export type BackendPreferenceSource = "env" | "user-config" | "auto";
 
 export function muxTypeForWorkspaceRef(ref: string): MuxType {
   if (isHeadlessWorkspaceRef(ref)) return "headless";
+  if (ref.startsWith("%")) return "tmux";
   if (ref.startsWith("workspace:")) return "cmux";
   if (ref.includes(":")) return "tmux";
   return "headless";
@@ -258,11 +259,15 @@ export function detectMuxType(deps?: DetectMuxDeps): MuxType {
 /** Instantiate a mux adapter for a detected mux type. */
 export function createMux(muxType: MuxType, cwd: string = process.cwd()): Multiplexer {
   if (muxType === "tmux") {
+    const tmuxLayout = isTmuxLayoutMode(process.env.NINTHWAVE_TMUX_LAYOUT)
+      ? process.env.NINTHWAVE_TMUX_LAYOUT
+      : loadUserConfig().tmux_layout ?? "dashboard";
     return new TmuxAdapter({
       runner: defaultShellRun,
       sleep: process.env.NODE_ENV === "test" ? () => {} : (ms) => Bun.sleepSync(ms),
       env: process.env,
-      cwd: () => process.cwd(),
+      cwd: () => cwd,
+      layout: tmuxLayout,
     });
   }
   if (muxType === "headless") {

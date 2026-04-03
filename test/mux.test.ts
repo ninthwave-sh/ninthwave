@@ -199,6 +199,10 @@ describe("detectMuxType", () => {
     expect(detectMuxType(deps)).toBe("tmux");
   });
 
+  it("recognizes tmux pane refs", () => {
+    expect(muxTypeForWorkspaceRef("%12")).toBe("tmux");
+  });
+
   it("returns tmux when tmux binary available (no session)", () => {
     const deps = makeDeps({}, ["tmux"]);
     expect(detectMuxType(deps)).toBe("tmux");

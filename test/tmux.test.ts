@@ -182,7 +182,7 @@ describe("TmuxAdapter", () => {
         if (args[0] === "has-session") return fail("no session");
         return ok();
       });
-      const deps = makeDeps({ runner });
+      const deps = makeDeps({ runner, layout: "windows" });
       const adapter = new TmuxAdapter(deps);
 
       const ref = adapter.launchWorkspace(
@@ -204,7 +204,7 @@ describe("TmuxAdapter", () => {
         calls.push(args);
         return ok(); // has-session succeeds → session exists
       });
-      const deps = makeDeps({ runner });
+      const deps = makeDeps({ runner, layout: "windows" });
       const adapter = new TmuxAdapter(deps);
 
       const ref = adapter.launchWorkspace(
@@ -220,13 +220,14 @@ describe("TmuxAdapter", () => {
 
     it("kills existing window before creating (retry scenario)", () => {
       const runner = vi.fn(() => ok());
-      const deps = makeDeps({ runner });
+      const deps = makeDeps({ runner, layout: "windows" });
       const adapter = new TmuxAdapter(deps);
 
       adapter.launchWorkspace("/code/project", "claude", "H-TM-1");
 
       // kill-window must be called before new-window
-      const callArgs = runner.mock.calls.map((c) => c[1] as string[]);
+      const calls = runner.mock.calls as unknown as Array<[string, string[]]>;
+      const callArgs = calls.map(([, args]) => args);
       const killIdx = callArgs.findIndex((a) => a[0] === "kill-window");
       const newIdx = callArgs.findIndex((a) => a[0] === "new-window");
       expect(killIdx).toBeGreaterThan(-1);
@@ -240,12 +241,13 @@ describe("TmuxAdapter", () => {
         if (args[0] === "new-session") return fail("creation failed");
         return ok();
       });
-      const deps = makeDeps({ runner });
+      const deps = makeDeps({ runner, layout: "windows" });
       const adapter = new TmuxAdapter(deps);
 
       expect(
         adapter.launchWorkspace("/code/project", "claude", "H-TM-1"),
       ).toBeNull();
+      expect(adapter.getLastLaunchError()).toBe("creation failed");
     });
 
     it("returns null when window creation fails", () => {
@@ -253,17 +255,18 @@ describe("TmuxAdapter", () => {
         if (args[0] === "new-window") return fail("window failed");
         return ok();
       });
-      const deps = makeDeps({ runner });
+      const deps = makeDeps({ runner, layout: "windows" });
       const adapter = new TmuxAdapter(deps);
 
       expect(
         adapter.launchWorkspace("/code/project", "claude", "H-TM-1"),
       ).toBeNull();
+      expect(adapter.getLastLaunchError()).toBe("window failed");
     });
 
     it("generates fallback window name when todoId is not provided", () => {
       const runner = vi.fn(() => ok());
-      const deps = makeDeps({ runner });
+      const deps = makeDeps({ runner, layout: "windows" });
       const adapter = new TmuxAdapter(deps);
 
       const ref = adapter.launchWorkspace("/code/project", "claude");
@@ -274,7 +277,7 @@ describe("TmuxAdapter", () => {
 
     it("sanitizes todoId with special characters", () => {
       const runner = vi.fn(() => ok());
-      const deps = makeDeps({ runner });
+      const deps = makeDeps({ runner, layout: "windows" });
       const adapter = new TmuxAdapter(deps);
 
       const ref = adapter.launchWorkspace(
@@ -288,19 +291,89 @@ describe("TmuxAdapter", () => {
 
     it("passes cwd and command to new-window", () => {
       const runner = vi.fn(() => ok());
-      const deps = makeDeps({ runner });
+      const deps = makeDeps({ runner, layout: "windows" });
       const adapter = new TmuxAdapter(deps);
 
       adapter.launchWorkspace("/my/path", "claude --resume", "H-1");
 
-      const newWindowCall = runner.mock.calls.find(
-        ([, args]) => (args as string[])[0] === "new-window",
+      const calls = runner.mock.calls as unknown as Array<[string, string[]]>;
+      const newWindowCall = calls.find(
+        ([, args]) => args[0] === "new-window",
       );
       expect(newWindowCall).toBeTruthy();
-      const args = newWindowCall![1] as string[];
+      const args = newWindowCall![1];
       expect(args).toContain("-c");
       expect(args).toContain("/my/path");
       expect(args).toContain("claude --resume");
+    });
+
+    it("targets numeric tmux session names with a trailing colon", () => {
+      const runner = vi.fn((_cmd: string, args: string[]) => {
+        if (args[0] === "display-message") return ok("0");
+        return ok();
+      });
+      const deps = makeDeps({
+        runner,
+        layout: "windows",
+        env: { TMUX: "/tmp/tmux-501/default,12345,0" },
+      });
+      const adapter = new TmuxAdapter(deps);
+
+      const ref = adapter.launchWorkspace("/code/project", "claude", "H-TM-1");
+
+      expect(ref).toBe("0:nw_H-TM-1");
+      expect(runner).toHaveBeenCalledWith("tmux", ["has-session", "-t", "0:"]);
+      expect(runner).toHaveBeenCalledWith("tmux", [
+        "new-window",
+        "-t",
+        "0:",
+        "-n",
+        "nw_H-TM-1",
+        "-c",
+        "/code/project",
+        "claude",
+      ]);
+    });
+
+    it("uses a dashboard pane layout by default and keeps a status pane present", () => {
+      let listPanesCalls = 0;
+      const runner = vi.fn((_cmd: string, args: string[]) => {
+        if (args[0] === "list-panes") {
+          listPanesCalls++;
+          if (listPanesCalls === 1) return fail("no dashboard");
+          return ok("%1 nw_status");
+        }
+        if (args[0] === "new-window") return ok("%1");
+        if (args[0] === "split-window") return ok("%2");
+        return ok();
+      });
+      const deps = makeDeps({ runner });
+      const adapter = new TmuxAdapter(deps);
+
+      const ref = adapter.launchWorkspace("/code/project", "claude --resume", "H-TM-1");
+      const calls = runner.mock.calls as unknown as Array<[string, string[]]>;
+      const statusWindowCall = calls.find(([, args]) => args[0] === "new-window");
+
+      expect(ref).toBe("%2");
+      expect(statusWindowCall).toBeTruthy();
+      expect(statusWindowCall![1]).toContain("nw_dashboard");
+      expect(statusWindowCall![1]).toContain("/Users/me/code/myproject");
+      expect(statusWindowCall![1][statusWindowCall![1].length - 1]).toContain("status");
+      expect(statusWindowCall![1][statusWindowCall![1].length - 1]).toContain("--watch");
+      expect(runner).toHaveBeenCalledWith("tmux", [
+        "split-window",
+        "-d",
+        "-P",
+        "-F",
+        "#{pane_id}",
+        "-t",
+        "nw-myproject:nw_dashboard",
+        "-c",
+        "/code/project",
+        "claude --resume",
+      ]);
+      expect(runner).toHaveBeenCalledWith("tmux", ["select-pane", "-t", "%1", "-T", "nw_status"]);
+      expect(runner).toHaveBeenCalledWith("tmux", ["select-pane", "-t", "%2", "-T", "nw_H-TM-1"]);
     });
   });
 
@@ -338,22 +411,22 @@ describe("TmuxAdapter", () => {
   });
 
   describe("listWorkspaces", () => {
-    it("lists windows and filters nw_ prefix", () => {
+    it("lists dashboard worker panes and excludes the status pane by default", () => {
       const runner = vi.fn((_cmd: string, args: string[]) => {
-        if (args[0] === "list-windows") {
-          return ok("nw_H-TM-1\nbash\nnw_H-TM-2\nvim");
+        if (args[0] === "list-panes") {
+          return ok("%1 nw_status\n%2 nw_H-TM-1\n%3 shell\n%4 nw_H-TM-2");
         }
         return ok();
       });
       const deps = makeDeps({ runner });
       const adapter = new TmuxAdapter(deps);
 
-      expect(adapter.listWorkspaces()).toBe("nw-myproject:nw_H-TM-1\nnw-myproject:nw_H-TM-2");
+      expect(adapter.listWorkspaces()).toBe("%2 nw_H-TM-1\n%4 nw_H-TM-2");
     });
 
-    it("returns empty string when no nw_ windows exist", () => {
+    it("returns empty string when no dashboard worker panes exist", () => {
       const runner = vi.fn((_cmd: string, args: string[]) => {
-        if (args[0] === "list-windows") return ok("bash\nvim");
+        if (args[0] === "list-panes") return ok("%1 nw_status\n%2 shell");
         return ok();
       });
       const deps = makeDeps({ runner });
@@ -364,7 +437,7 @@ describe("TmuxAdapter", () => {
 
     it("returns empty string on failure", () => {
       const runner = vi.fn((_cmd: string, args: string[]) => {
-        if (args[0] === "list-windows") return fail("no session");
+        if (args[0] === "list-panes") return fail("no dashboard");
         return ok();
       });
       const deps = makeDeps({ runner });
@@ -372,11 +445,30 @@ describe("TmuxAdapter", () => {
 
       expect(adapter.listWorkspaces()).toBe("");
     });
+
+    it("can still list legacy worker windows when windows layout is configured", () => {
+      const runner = vi.fn((_cmd: string, args: string[]) => {
+        if (args[0] === "list-windows") {
+          return ok("nw_H-TM-1\nbash\nnw_H-TM-2\nvim");
+        }
+        return ok();
+      });
+      const deps = makeDeps({ runner, layout: "windows" });
+      const adapter = new TmuxAdapter(deps);
+
+      expect(adapter.listWorkspaces()).toBe("nw-myproject:nw_H-TM-1\nnw-myproject:nw_H-TM-2");
+    });
   });
 
   describe("closeWorkspace", () => {
-    it("returns true when kill-window succeeds", () => {
+    it("kills pane refs in dashboard mode", () => {
       const deps = makeDeps({ runner: vi.fn(() => ok()) });
+      const adapter = new TmuxAdapter(deps);
+      expect(adapter.closeWorkspace("%12")).toBe(true);
+    });
+
+    it("returns true when kill-window succeeds", () => {
+      const deps = makeDeps({ runner: vi.fn(() => ok()), layout: "windows" });
       const adapter = new TmuxAdapter(deps);
       expect(adapter.closeWorkspace("session:nw_H-TM-1")).toBe(true);
     });
@@ -386,7 +478,7 @@ describe("TmuxAdapter", () => {
         if (args[0] === "kill-window") return fail("no window");
         return ok();
       });
-      const deps = makeDeps({ runner });
+      const deps = makeDeps({ runner, layout: "windows" });
       const adapter = new TmuxAdapter(deps);
       expect(adapter.closeWorkspace("session:nw_H-TM-1")).toBe(false);
     });

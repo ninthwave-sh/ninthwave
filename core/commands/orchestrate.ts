@@ -4131,8 +4131,7 @@ export async function cmdOrchestrate(
       for (const line of list.split("\n")) {
         const trimmed = line.trim();
         if (!trimmed || !trimmed.includes(itemId)) continue;
-        const match = trimmed.match(/workspace:\d+/);
-        mux.closeWorkspace(match?.[0] ?? trimmed);
+        mux.closeWorkspace(trimmed.split(/\s+/, 1)[0] ?? trimmed);
         return;
       }
     },
@@ -4178,7 +4177,13 @@ export async function cmdOrchestrate(
   const actionDeps: OrchestratorDeps = {
     validatePickupCandidate: (item, projRoot) => validatePickupCandidate(item, projRoot),
     launchSingleItem: (item, workDir, worktreeDir, projectRoot, aiTool, baseBranch, forceWorkerLaunch) =>
-      launchSingleItem(item, workDir, worktreeDir, projectRoot, aiTool, mux, { baseBranch, forceWorkerLaunch, hubRepoNwo }),
+      launchSingleItem(item, workDir, worktreeDir, projectRoot, aiTool, mux, {
+        baseBranch,
+        forceWorkerLaunch,
+        hubRepoNwo,
+        resolveMux: resolveLaunchMux,
+        throwOnLaunchFailure: true,
+      }),
     cleanStaleBranch: (item, projRoot) => {
       let targetRepo: string;
       try {

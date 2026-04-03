@@ -17,6 +17,7 @@ type MockMux = Multiplexer & {
   isAvailable: Mock;
   diagnoseUnavailable: Mock;
   launchWorkspace: Mock;
+  getLastLaunchError: Mock;
   splitPane: Mock;
   sendMessage: Mock;
   writeInbox: Mock;
@@ -46,6 +47,7 @@ function createMockMux(type: Multiplexer["type"] = "cmux"): MockMux {
     isAvailable: vi.fn(() => true),
     diagnoseUnavailable: vi.fn(() => "not available"),
     launchWorkspace: vi.fn(() => type === "headless" ? "headless:test" : "workspace:1"),
+    getLastLaunchError: vi.fn(() => undefined),
     splitPane: vi.fn(() => "pane:1"),
     sendMessage: vi.fn(() => true),
     writeInbox: vi.fn(),
@@ -570,6 +572,27 @@ describe("launchSingleItem", () => {
     expect(resolvedMux.launchWorkspace).toHaveBeenCalled();
   });
 
+  it("uses the runtime-resolved tmux adapter even when the ambient mux is also tmux", async () => {
+    const ambientMux = createMockMux("tmux");
+    const resolvedMux = createMockMux("tmux");
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    await captureOutput(() => {
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", ambientMux, {
+        resolveMux: () => resolvedMux,
+      }, deps);
+      expect(res).not.toBeNull();
+    });
+
+    expect(ambientMux.launchWorkspace).not.toHaveBeenCalled();
+    expect(resolvedMux.launchWorkspace).toHaveBeenCalled();
+  });
+
   it("logs detached headless workers with their log path", async () => {
     const ambientMux = createMockMux("cmux");
     const resolvedMux = createMockMux("headless");
@@ -614,6 +637,30 @@ describe("launchSingleItem", () => {
     });
 
     expect(checkInbox(worktreePath, item.id)).toBeNull();
+  });
+
+  it("rethrows detailed mux launch failures when requested", async () => {
+    const mockMux = createMockMux("tmux");
+    const deps = createMockLaunchDeps();
+    mockMux.launchWorkspace.mockReturnValueOnce(null);
+    mockMux.getLastLaunchError.mockReturnValue("can't find session: dev");
+
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    const output = await captureOutput(() => {
+      expect(() =>
+        launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {
+          throwOnLaunchFailure: true,
+        }, deps)
+      ).toThrow("tmux launch failed for M-CI-1: can't find session: dev");
+    });
+
+    expect(output).toContain("tmux launch failed for M-CI-1: can't find session: dev");
+    expect(output).toContain("Launch failed for M-CI-1, cleaning up");
   });
 
   it("returns null and cleans up when mux launch fails", async () => {

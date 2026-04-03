@@ -751,7 +751,7 @@ export function isWorkerAliveWithCache(item: OrchestratorItem, workspaceListing:
   if (!workspaceListing) return false;
   const escapedRef = item.workspaceRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const escapedId = item.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const refRe = new RegExp(`\\b${escapedRef}\\b`);
+  const refRe = new RegExp(`(^|\\s)${escapedRef}($|\\s)`);
   const idRe = new RegExp(`\\b${escapedId}\\b`);
   return workspaceListing.split("\n").some(
     (line) => refRe.test(line) || idRe.test(line),

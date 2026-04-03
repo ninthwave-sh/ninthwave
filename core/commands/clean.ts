@@ -36,6 +36,10 @@ import {
   removeCrossRepoIndex,
 } from "../cross-repo.ts";
 
+function extractWorkspaceRef(line: string): string {
+  return line.trim().split(/\s+/, 1)[0] ?? line;
+}
+
 /**
  * Close multiplexer workspaces whose item ID is in the given set.
  * Shared helper used by both reconcile (targeted) and clean (broad).
@@ -74,11 +78,12 @@ export function closeWorkspacesForIds(
     // Multiplexer format where the ref itself contains the item ID.
     for (const id of ids) {
       if (trimmed.includes(id)) {
-        info(`Closing workspace ${trimmed} (${id})`);
-        if (mux.closeWorkspace(trimmed)) {
+        const wsRef = extractWorkspaceRef(trimmed);
+        info(`Closing workspace ${wsRef} (${id})`);
+        if (mux.closeWorkspace(wsRef)) {
           closed++;
         } else {
-          warn(`Failed to close ${trimmed}`);
+          warn(`Failed to close ${wsRef}`);
         }
         break;
       }
@@ -102,12 +107,13 @@ export function cmdCloseWorkspaces(mux: Multiplexer = getMux()): void {
 
   let closed = 0;
   for (const line of workspaces.split("\n")) {
-    const wsMatch = line.match(/workspace:\d+/);
-    const idMatch = line.match(/TODO\s+([A-Z]+-[A-Za-z0-9]+-[0-9]+)/);
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const itemId = trimmed.match(/TODO\s+([A-Z]+-[A-Za-z0-9]+-[0-9]+)/)?.[1]
+      ?? trimmed.match(/[A-Z]+-[A-Za-z0-9]+-[0-9]+/)?.[0];
 
-    if (wsMatch && idMatch) {
-      const wsRef = wsMatch[0];
-      const itemId = idMatch[1];
+    if (itemId) {
+      const wsRef = extractWorkspaceRef(trimmed);
       info(`Closing workspace ${wsRef} (${itemId})`);
       if (!mux.closeWorkspace(wsRef)) {
         warn(`Failed to close ${wsRef}`);
@@ -132,9 +138,9 @@ export function cmdCloseWorkspace(targetId: string, mux: Multiplexer = getMux())
   if (!workspaces) return;
 
   for (const line of workspaces.split("\n")) {
-    const wsMatch = line.match(/workspace:\d+/);
-    if (wsMatch && line.includes(targetId)) {
-      const wsRef = wsMatch[0];
+    const trimmed = line.trim();
+    if (trimmed.includes(targetId)) {
+      const wsRef = extractWorkspaceRef(trimmed);
       info(`Closing workspace ${wsRef} for ${targetId}`);
       if (!mux.closeWorkspace(wsRef)) {
         warn(`Failed to close ${wsRef}`);

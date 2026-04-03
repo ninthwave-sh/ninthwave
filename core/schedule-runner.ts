@@ -158,7 +158,7 @@ export function isScheduleWorkerAlive(
   const workspaces = deps.listWorkspaces();
   if (!workspaces) return false;
   const escapedRef = worker.workspaceRef.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const refRe = new RegExp(`\\b${escapedRef}\\b`);
+  const refRe = new RegExp(`(^|\\s)${escapedRef}($|\\s)`);
   return workspaces.split("\n").some((line) => refRe.test(line));
 }
 

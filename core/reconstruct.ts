@@ -497,8 +497,7 @@ function escapeRegExp(value: string): string {
 }
 
 function extractWorkspaceRef(line: string): string {
-  const match = line.match(/workspace:\d+/);
-  return match?.[0] ?? line;
+  return line.trim().split(/\s+/, 1)[0] ?? line;
 }
 
 function lineIncludesWorkspaceRef(line: string, workspaceRef: string): boolean {

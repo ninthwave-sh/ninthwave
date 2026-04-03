@@ -106,10 +106,19 @@ export function saveConfig(
 // ── User-level config (~/.ninthwave/config.json) ──────────────────────
 
 /** User config shape. */
+export type TmuxLayoutMode = "dashboard" | "windows";
+
+const TMUX_LAYOUT_MODES: readonly TmuxLayoutMode[] = ["dashboard", "windows"] as const;
+
+export function isTmuxLayoutMode(value: unknown): value is TmuxLayoutMode {
+  return TMUX_LAYOUT_MODES.includes(value as TmuxLayoutMode);
+}
+
 export interface UserConfig {
   ai_tools?: string[];
   wip_limit?: number;
   backend_mode?: PersistedBackendMode;
+  tmux_layout?: TmuxLayoutMode;
   merge_strategy?: PersistedMergeStrategy;
   review_mode?: PersistedReviewMode;
   collaboration_mode?: PersistedCollaborationMode;
@@ -144,6 +153,9 @@ export function loadUserConfig(homeOverride?: string): UserConfig {
     }
     if (isPersistedBackendMode(parsed.backend_mode)) {
       result.backend_mode = parsed.backend_mode;
+    }
+    if (isTmuxLayoutMode(parsed.tmux_layout)) {
+      result.tmux_layout = parsed.tmux_layout;
     }
     if (isPersistedMergeStrategy(parsed.merge_strategy)) {
       result.merge_strategy = parsed.merge_strategy;
@@ -223,6 +235,12 @@ export function saveUserConfig(
     }
     if (key === "backend_mode") {
       if (isPersistedBackendMode(value)) {
+        merged[key] = value;
+      }
+      continue;
+    }
+    if (key === "tmux_layout") {
+      if (isTmuxLayoutMode(value)) {
         merged[key] = value;
       }
       continue;

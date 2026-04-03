@@ -126,12 +126,32 @@ export type PickupCandidateValidation =
 
 type RuntimeMuxResolver = () => Multiplexer;
 
+type LaunchErrorAwareMux = Multiplexer & {
+  getLastLaunchError?: () => string | undefined;
+};
+
+class AiSessionLaunchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AiSessionLaunchError";
+  }
+}
+
+function formatMuxLaunchFailure(mux: Multiplexer, id: string): string {
+  const launchError = (mux as LaunchErrorAwareMux).getLastLaunchError?.();
+  if (launchError && launchError.trim()) {
+    return `${mux.type} launch failed for ${id}: ${launchError}`;
+  }
+  return `${mux.type} launch failed for ${id} -- is ${mux.type} running?`;
+}
+
 function resolveRuntimeLaunchMux(
   mux: Multiplexer,
   resolveMux?: RuntimeMuxResolver,
 ): Multiplexer {
   if (!resolveMux) return mux;
   const runtimeMux = resolveMux();
+  if (runtimeMux.type === "tmux") return runtimeMux;
   return runtimeMux.type === mux.type ? mux : runtimeMux;
 }
 
@@ -170,7 +190,7 @@ export function launchAiSession(
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);
   if (!wsRef) {
-    warn(`${mux.type} launch failed for ${id} -- is ${mux.type} running?`);
+    warn(formatMuxLaunchFailure(mux, id));
     return null;
   }
 
@@ -428,7 +448,7 @@ export function launchSingleItem(
   projectRoot: string,
   aiTool: string,
   mux: Multiplexer = getMux(),
-  options: { baseBranch?: string; forceWorkerLaunch?: boolean; hubRepoNwo?: string; resolveMux?: RuntimeMuxResolver; launchOverride?: LaunchOverride } = {},
+  options: { baseBranch?: string; forceWorkerLaunch?: boolean; hubRepoNwo?: string; resolveMux?: RuntimeMuxResolver; launchOverride?: LaunchOverride; throwOnLaunchFailure?: boolean } = {},
   deps: LaunchGitDeps = defaultLaunchGitDeps,
 ): LaunchResult | null {
   let targetRepo: string;
@@ -531,8 +551,7 @@ ${itemText}`;
       { projectRoot, launchOverride: options.launchOverride },
     );
     if (!workspaceRef) {
-      // launchAiSession returned null -- clean up and propagate
-      throw new Error(`AI session launch failed for ${item.id}`);
+      throw new AiSessionLaunchError(formatMuxLaunchFailure(launchMux, item.id));
     }
     if (launchMux.type === "headless") {
       logHeadlessLaunch(item.id, projectRoot, workspaceRef);
@@ -551,6 +570,9 @@ ${itemText}`;
     }
     try { deps.removeWorktree(targetRepo, worktreePath, /* force */ true); } catch (e) {
       warn(`Failed to remove worktree for ${item.id}: ${e instanceof Error ? e.message : e}`);
+    }
+    if (err instanceof AiSessionLaunchError && options.throwOnLaunchFailure) {
+      throw err;
     }
     return null;
   }

@@ -373,6 +373,19 @@ describe("loadUserConfig", () => {
     expect(config.backend_mode).toBe("cmux");
   });
 
+  it("reads tmux_layout from valid JSON", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ tmux_layout: "windows" }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.tmux_layout).toBe("windows");
+  });
+
   it("reads update_checks_enabled from valid JSON", () => {
     const tmpHome = setupTempRepo();
     const configDir = join(tmpHome, ".ninthwave");
@@ -416,6 +429,19 @@ describe("loadUserConfig", () => {
 
     const config = loadUserConfig(tmpHome);
     expect(config.backend_mode).toBeUndefined();
+  });
+
+  it("ignores invalid tmux_layout safely", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ tmux_layout: "grid" }),
+    );
+
+    const config = loadUserConfig(tmpHome);
+    expect(config.tmux_layout).toBeUndefined();
   });
 
   it("reads wip_limit from valid JSON", () => {
@@ -550,6 +576,7 @@ describe("saveUserConfig", () => {
 
     saveUserConfig({
       backend_mode: "cmux",
+      tmux_layout: "windows",
       merge_strategy: "auto",
       review_mode: "mine",
       collaboration_mode: "join",
@@ -559,6 +586,7 @@ describe("saveUserConfig", () => {
     const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
     expect(content.custom_key).toBe("hello");
     expect(content.backend_mode).toBe("cmux");
+    expect(content.tmux_layout).toBe("windows");
     expect(content.merge_strategy).toBe("auto");
     expect(content.review_mode).toBe("mine");
     expect(content.collaboration_mode).toBe("join");
@@ -567,6 +595,7 @@ describe("saveUserConfig", () => {
     const config = loadUserConfig(tmpHome);
     expect(config).toMatchObject({
       backend_mode: "cmux",
+      tmux_layout: "windows",
       merge_strategy: "auto",
       review_mode: "mine",
       collaboration_mode: "join",
