@@ -32,7 +32,7 @@ import { launchSingleItem, launchReviewWorker, launchRebaserWorker, launchForwar
 import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import { selectAiTools, detectInstalledAITools } from "../tool-select.ts";
 import { cleanSingleWorktree } from "./clean.ts";
-import { writeInbox } from "./inbox.ts";
+import { writeInbox, type InboxSnapshot } from "./inbox.ts";
 import { prMerge, prComment, checkPrMergeable, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, getDefaultBranch as ghGetDefaultBranch, ensureDomainLabels, listPrComments, updatePrComment, ghFailureKindLabel, getPrBaseBranch as ghGetPrBaseBranch, getPrBaseAndState as ghGetPrBaseAndState, retargetPrBase as ghRetargetPrBase, queryRateLimitAsync as ghQueryRateLimitAsync } from "../gh.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush, daemonRebase } from "../git.ts";
 import { run } from "../shell.ts";
@@ -2445,6 +2445,7 @@ export async function cmdOrchestrate(
     items: OrchestratorItem[],
     heartbeats: ReadonlyMap<string, WorkerProgress>,
     _snapshot: PollSnapshot,
+    inboxSnapshots: ReadonlyMap<string, InboxSnapshot>,
   ) => {
     const crewStatus = crewBroker?.getCrewStatus();
     return serializeOrchestratorState(items, process.pid, daemonStartedAt, {
@@ -2453,6 +2454,7 @@ export async function cmdOrchestrate(
       operatorId,
       remoteItemSnapshots: crewStatusToRemoteItemSnapshots(crewStatus),
       heartbeats,
+      inboxSnapshots,
       crewStatus: crewStatusToDaemonCrewStatus(crewStatus, crewCode, crewBroker?.isConnected() ?? false),
       ...(tuiState.viewOptions.emptyState ? { emptyState: tuiState.viewOptions.emptyState } : {}),
     });

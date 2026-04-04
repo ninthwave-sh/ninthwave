@@ -17,6 +17,7 @@ import { dirname, join } from "path";
 import { spawn as nodeSpawn } from "node:child_process";
 import type { OrchestratorItem } from "./orchestrator.ts";
 import type { CrewRemoteItemSnapshot } from "./crew.ts";
+import type { InboxSnapshot } from "./commands/inbox.ts";
 import { resolveCliRespawnCommand } from "./cli-spawn.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -101,6 +102,14 @@ export interface DaemonStateItem {
   aiTool?: string;
   /** Broker-derived remote truth for this item, when another crew view overrides local state. */
   remoteSnapshot?: DaemonRemoteItemSnapshot;
+  /** Number of pending inbox messages queued for this worker. */
+  inboxPendingCount?: number;
+  /** ISO timestamp of when the worker entered `nw inbox --wait`. */
+  inboxWaitingSince?: string;
+  /** Namespace project root the worker's inbox is attached to. */
+  inboxNamespace?: string;
+  /** ISO timestamp of the last inbox activity (write, deliver, drain). */
+  inboxLastActivity?: string;
 }
 
 export interface DaemonRemoteItemSnapshot {
@@ -649,6 +658,7 @@ export function serializeOrchestratorState(
     crewStatus?: DaemonCrewStatus;
     remoteItemSnapshots?: ReadonlyMap<string, CrewRemoteItemSnapshot>;
     heartbeats?: ReadonlyMap<string, WorkerProgress | null | undefined>;
+    inboxSnapshots?: ReadonlyMap<string, InboxSnapshot>;
   },
 ): DaemonState {
   return {
@@ -724,6 +734,16 @@ export function serializeOrchestratorState(
               },
             }
           : {}),
+        ...(() => {
+          const inbox = extras?.inboxSnapshots?.get(item.id);
+          if (!inbox) return {};
+          return {
+            ...(inbox.pendingCount > 0 ? { inboxPendingCount: inbox.pendingCount } : {}),
+            ...(inbox.waitingSince ? { inboxWaitingSince: inbox.waitingSince } : {}),
+            ...(inbox.namespace ? { inboxNamespace: inbox.namespace } : {}),
+            ...(inbox.lastActivity ? { inboxLastActivity: inbox.lastActivity } : {}),
+          };
+        })(),
       };
     }),
   };

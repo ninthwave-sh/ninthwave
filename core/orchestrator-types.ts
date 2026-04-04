@@ -209,6 +209,8 @@ export interface ItemSnapshot {
   hasPushWorkflows?: boolean;
   /** Structured verdict from the review worker (read from verdict file). */
   reviewVerdict?: import("./daemon.ts").ReviewVerdict;
+  /** Inbox metadata snapshot for daemon state serialization. */
+  inboxSnapshot?: import("./commands/inbox.ts").InboxSnapshot;
 }
 
 export interface PollSnapshot {

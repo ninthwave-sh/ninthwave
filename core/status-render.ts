@@ -311,6 +311,14 @@ export interface StatusItem {
   progressLabel?: string;
   /** ISO timestamp of the latest worker heartbeat. */
   progressTs?: string;
+  /** Number of pending inbox messages queued for this worker. */
+  inboxPendingCount?: number;
+  /** ISO timestamp of when the worker entered `nw inbox --wait`. */
+  inboxWaitingSince?: string;
+  /** Namespace project root the worker's inbox is attached to. */
+  inboxNamespace?: string;
+  /** ISO timestamp of the last inbox activity (write, deliver, drain). */
+  inboxLastActivity?: string;
 }
 
 function headlessModeTag(item: StatusItem): string {
@@ -1501,6 +1509,12 @@ export function daemonStateToStatusItems(state: DaemonState): StatusItem[] {
       progressLabel: item.progressLabel,
       progressTs: item.progressTs,
       remote: item.remoteSnapshot ? item.remoteSnapshot.ownerDaemonId !== null : false,
+      ...(item.inboxPendingCount != null && item.inboxPendingCount > 0
+        ? { inboxPendingCount: item.inboxPendingCount }
+        : {}),
+      ...(item.inboxWaitingSince ? { inboxWaitingSince: item.inboxWaitingSince } : {}),
+      ...(item.inboxNamespace ? { inboxNamespace: item.inboxNamespace } : {}),
+      ...(item.inboxLastActivity ? { inboxLastActivity: item.inboxLastActivity } : {}),
     };
   });
 }
@@ -2624,6 +2638,28 @@ export function formatItemDetail(
 
   if (item.workspaceRef && muxTypeForWorkspaceRef(item.workspaceRef) === "headless") {
     lines.push(`  ${DIM}Runtime:${RESET}   detached headless worker`);
+  }
+
+  // Inbox state
+  if (item.inboxWaitingSince || (item.inboxPendingCount != null && item.inboxPendingCount > 0)) {
+    const parts: string[] = [];
+    if (item.inboxWaitingSince) {
+      const waitMs = Date.now() - new Date(item.inboxWaitingSince).getTime();
+      parts.push(`${CYAN}waiting${RESET} ${formatAge(waitMs)}`);
+    }
+    if (item.inboxPendingCount != null && item.inboxPendingCount > 0) {
+      parts.push(`${YELLOW}${item.inboxPendingCount} pending${RESET}`);
+    }
+    lines.push(`  ${DIM}Inbox:${RESET}     ${parts.join(", ")}`);
+  }
+
+  if (item.inboxNamespace) {
+    lines.push(`  ${DIM}Namespace:${RESET} ${item.inboxNamespace}`);
+  }
+
+  if (item.inboxLastActivity) {
+    const actMs = Date.now() - new Date(item.inboxLastActivity).getTime();
+    lines.push(`  ${DIM}Last msg:${RESET}  ${formatAge(actMs)} ago`);
   }
 
   return lines;

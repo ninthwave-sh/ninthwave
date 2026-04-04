@@ -137,6 +137,14 @@ export interface InboxInspection {
   recentHistory: InboxHistoryEntry[];
 }
 
+/** Lightweight inbox metadata snapshot for daemon state serialization. */
+export interface InboxSnapshot {
+  pendingCount: number;
+  waitingSince: string | null;
+  namespace: string;
+  lastActivity: string | null;
+}
+
 // ── Core operations ──────────────────────────────────────────────────
 
 let inboxWriteSequence = 0;
@@ -302,6 +310,28 @@ export function inspectInbox(
     pendingMessages,
     waitState: readInboxWaitState(namespace.activeProjectRoot, itemId, io),
     recentHistory: readInboxHistory(namespace.activeProjectRoot, itemId, DEFAULT_HISTORY_LIMIT, io),
+  };
+}
+
+/**
+ * Lightweight inbox snapshot for daemon state serialization.
+ * Cheaper than inspectInbox: skips message previews and limits history to 1 entry.
+ */
+export function snapshotInboxState(
+  projectRoot: string,
+  itemId: string,
+  io: InboxIO = defaultDeps.io,
+): InboxSnapshot {
+  const namespace = resolveActiveWorkerNamespace(projectRoot, itemId, io);
+  const ns = namespace.activeProjectRoot;
+  const pendingCount = listInboxFiles(ns, itemId, io).length;
+  const waitState = readInboxWaitState(ns, itemId, io);
+  const history = readInboxHistory(ns, itemId, 1, io);
+  return {
+    pendingCount,
+    waitingSince: waitState?.startedAt ?? null,
+    namespace: ns,
+    lastActivity: history[0]?.ts ?? null,
   };
 }
 

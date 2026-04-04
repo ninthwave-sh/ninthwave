@@ -971,6 +971,135 @@ describe("crash recovery fields serialization", () => {
   });
 });
 
+// ── Inbox metadata serialization ────────────────────────────────────
+
+describe("inbox metadata serialization", () => {
+  it("includes inbox fields when inboxSnapshots are provided", () => {
+    const item = makeOrchestratorItem("INB-1", "implementing", 10);
+    const inboxSnapshots = new Map([["INB-1", {
+      pendingCount: 3,
+      waitingSince: "2026-04-04T20:00:00.000Z",
+      namespace: "/worktrees/ninthwave-INB-1",
+      lastActivity: "2026-04-04T20:05:00.000Z",
+    }]]);
+
+    const state = serializeOrchestratorState(
+      [item],
+      42,
+      "2026-04-04T00:00:00.000Z",
+      { inboxSnapshots },
+    );
+
+    expect(state.items[0]!.inboxPendingCount).toBe(3);
+    expect(state.items[0]!.inboxWaitingSince).toBe("2026-04-04T20:00:00.000Z");
+    expect(state.items[0]!.inboxNamespace).toBe("/worktrees/ninthwave-INB-1");
+    expect(state.items[0]!.inboxLastActivity).toBe("2026-04-04T20:05:00.000Z");
+  });
+
+  it("omits inbox fields when no snapshot exists for an item", () => {
+    const item = makeOrchestratorItem("INB-2", "implementing");
+    const inboxSnapshots = new Map<string, any>();
+
+    const state = serializeOrchestratorState(
+      [item],
+      42,
+      "2026-04-04T00:00:00.000Z",
+      { inboxSnapshots },
+    );
+
+    expect(state.items[0]!.inboxPendingCount).toBeUndefined();
+    expect(state.items[0]!.inboxWaitingSince).toBeUndefined();
+    expect(state.items[0]!.inboxNamespace).toBeUndefined();
+    expect(state.items[0]!.inboxLastActivity).toBeUndefined();
+  });
+
+  it("omits inboxPendingCount when zero", () => {
+    const item = makeOrchestratorItem("INB-3", "implementing");
+    const inboxSnapshots = new Map([["INB-3", {
+      pendingCount: 0,
+      waitingSince: "2026-04-04T20:00:00.000Z",
+      namespace: "/worktrees/ninthwave-INB-3",
+      lastActivity: null,
+    }]]);
+
+    const state = serializeOrchestratorState(
+      [item],
+      42,
+      "2026-04-04T00:00:00.000Z",
+      { inboxSnapshots },
+    );
+
+    expect(state.items[0]!.inboxPendingCount).toBeUndefined();
+    expect(state.items[0]!.inboxWaitingSince).toBe("2026-04-04T20:00:00.000Z");
+  });
+
+  it("omits inboxWaitingSince when null (not waiting)", () => {
+    const item = makeOrchestratorItem("INB-4", "implementing");
+    const inboxSnapshots = new Map([["INB-4", {
+      pendingCount: 2,
+      waitingSince: null,
+      namespace: "/worktrees/ninthwave-INB-4",
+      lastActivity: "2026-04-04T20:01:00.000Z",
+    }]]);
+
+    const state = serializeOrchestratorState(
+      [item],
+      42,
+      "2026-04-04T00:00:00.000Z",
+      { inboxSnapshots },
+    );
+
+    expect(state.items[0]!.inboxWaitingSince).toBeUndefined();
+    expect(state.items[0]!.inboxPendingCount).toBe(2);
+  });
+
+  it("omits inboxLastActivity when null", () => {
+    const item = makeOrchestratorItem("INB-5", "implementing");
+    const inboxSnapshots = new Map([["INB-5", {
+      pendingCount: 0,
+      waitingSince: null,
+      namespace: "/worktrees/ninthwave-INB-5",
+      lastActivity: null,
+    }]]);
+
+    const state = serializeOrchestratorState(
+      [item],
+      42,
+      "2026-04-04T00:00:00.000Z",
+      { inboxSnapshots },
+    );
+
+    expect(state.items[0]!.inboxLastActivity).toBeUndefined();
+  });
+
+  it("roundtrips inbox fields through write/read", () => {
+    const io = createMockIO();
+    const item = makeOrchestratorItem("INB-6", "implementing", 20);
+    const inboxSnapshots = new Map([["INB-6", {
+      pendingCount: 1,
+      waitingSince: "2026-04-04T21:00:00.000Z",
+      namespace: "/worktrees/ninthwave-INB-6",
+      lastActivity: "2026-04-04T21:05:00.000Z",
+    }]]);
+
+    const state = serializeOrchestratorState(
+      [item],
+      99,
+      "2026-04-04T00:00:00.000Z",
+      { inboxSnapshots },
+    );
+
+    writeStateFile("/project", state, io);
+    const restored = readStateFile("/project", io);
+
+    expect(restored).not.toBeNull();
+    expect(restored!.items[0]!.inboxPendingCount).toBe(1);
+    expect(restored!.items[0]!.inboxWaitingSince).toBe("2026-04-04T21:00:00.000Z");
+    expect(restored!.items[0]!.inboxNamespace).toBe("/worktrees/ninthwave-INB-6");
+    expect(restored!.items[0]!.inboxLastActivity).toBe("2026-04-04T21:05:00.000Z");
+  });
+});
+
 // ── PID file locking ────────────────────────────────────────────────
 
 describe("PID file exclusive locking", () => {

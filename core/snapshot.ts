@@ -11,6 +11,7 @@ import {
   TERMINAL_STATES,
 } from "./orchestrator.ts";
 import { readHeartbeat, readVerdictFile } from "./daemon.ts";
+import { snapshotInboxState } from "./commands/inbox.ts";
 import {
   checkPrStatusDetailed,
   checkPrStatusDetailedAsync,
@@ -534,6 +535,13 @@ export function buildSnapshot(
       } catch { /* best-effort -- heartbeat read failure doesn't block polling */ }
     }
 
+    // Read inbox state for active items
+    if (heartbeatStates.has(orchItem.state)) {
+      try {
+        snap.inboxSnapshot = snapshotInboxState(projectRoot, orchItem.id);
+      } catch { /* best-effort -- inbox read failure doesn't block polling */ }
+    }
+
     // Fast PR detection: if GitHub didn't find a PR but the heartbeat reports one,
     // trust the heartbeat. The worker writes --pr after gh pr create returns, so
     // the PR definitely exists. GitHub API will confirm on the next cycle.
@@ -763,6 +771,13 @@ export async function buildSnapshotAsync(
     if (heartbeatStates.has(orchItem.state)) {
       try {
         snap.lastHeartbeat = readHeartbeat(projectRoot, orchItem.id) ?? null;
+      } catch { /* best-effort */ }
+    }
+
+    // Inbox state
+    if (heartbeatStates.has(orchItem.state)) {
+      try {
+        snap.inboxSnapshot = snapshotInboxState(projectRoot, orchItem.id);
       } catch { /* best-effort */ }
     }
 

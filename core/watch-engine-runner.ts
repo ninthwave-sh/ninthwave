@@ -6,6 +6,7 @@ import type {
   PollSnapshot,
 } from "./orchestrator.ts";
 import type { DaemonState, WorkerProgress } from "./daemon.ts";
+import type { InboxSnapshot } from "./commands/inbox.ts";
 import type { LogEntry } from "./types.ts";
 import {
   mergeStrategyToPersisted,
@@ -192,6 +193,7 @@ export interface WatchEngineRunnerDeps {
     items: OrchestratorItem[],
     heartbeats: ReadonlyMap<string, WorkerProgress>,
     snapshot: PollSnapshot,
+    inboxSnapshots: ReadonlyMap<string, InboxSnapshot>,
   ) => DaemonState;
   initialReviewMode: ReviewMode;
   initialCollaborationMode: CollaborationMode;
@@ -211,6 +213,17 @@ function snapshotToHeartbeatMap(snapshot: PollSnapshot | undefined): Map<string,
   return heartbeats;
 }
 
+function snapshotToInboxMap(snapshot: PollSnapshot | undefined): Map<string, InboxSnapshot> {
+  const inboxSnapshots = new Map<string, InboxSnapshot>();
+  if (!snapshot) return inboxSnapshots;
+  for (const item of snapshot.items) {
+    if (item.inboxSnapshot) {
+      inboxSnapshots.set(item.id, item.inboxSnapshot);
+    }
+  }
+  return inboxSnapshots;
+}
+
 export function createWatchEngineRunner(
   deps: WatchEngineRunnerDeps,
 ): WatchEngineRunner {
@@ -221,6 +234,7 @@ export function createWatchEngineRunner(
   let activeAbortController: AbortController | undefined;
   let lastPollSnapshot: PollSnapshot = { items: [], readyIds: [] };
   let lastHeartbeats = new Map<string, WorkerProgress>();
+  let lastInboxSnapshots = new Map<string, InboxSnapshot>();
 
   const emitLog = (entry: LogEntry) => {
     deps.emitLog(entry);
@@ -231,7 +245,7 @@ export function createWatchEngineRunner(
     interactiveTiming?: InteractiveWatchTiming,
   ) => {
     deps.emitSnapshot({
-      state: deps.buildState(deps.orch.getAllItems(), lastHeartbeats, lastPollSnapshot),
+      state: deps.buildState(deps.orch.getAllItems(), lastHeartbeats, lastPollSnapshot, lastInboxSnapshots),
       pollSnapshot: lastPollSnapshot,
       ...(pollIntervalMs !== undefined ? { pollIntervalMs } : {}),
       ...(interactiveTiming ? { interactiveTiming } : {}),
@@ -365,6 +379,7 @@ export function createWatchEngineRunner(
             onPollComplete: (items, snapshot, pollIntervalMs, interactiveTiming) => {
               lastPollSnapshot = snapshot;
               lastHeartbeats = snapshotToHeartbeatMap(snapshot);
+              lastInboxSnapshots = snapshotToInboxMap(snapshot);
               emitSnapshot(pollIntervalMs, interactiveTiming);
             },
           },

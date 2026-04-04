@@ -1853,6 +1853,86 @@ describe("daemonStateToStatusItems", () => {
       remote: true,
     });
   });
+
+  it("maps inbox metadata fields when present", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "INB-1",
+          state: "implementing",
+          prNumber: null,
+          title: "Inbox item",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          inboxPendingCount: 2,
+          inboxWaitingSince: "2026-04-04T20:00:00.000Z",
+          inboxNamespace: "/worktrees/ninthwave-INB-1",
+          inboxLastActivity: "2026-04-04T20:05:00.000Z",
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.inboxPendingCount).toBe(2);
+    expect(items[0]!.inboxWaitingSince).toBe("2026-04-04T20:00:00.000Z");
+    expect(items[0]!.inboxNamespace).toBe("/worktrees/ninthwave-INB-1");
+    expect(items[0]!.inboxLastActivity).toBe("2026-04-04T20:05:00.000Z");
+  });
+
+  it("omits inbox metadata when absent from daemon state", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "INB-2",
+          state: "implementing",
+          prNumber: null,
+          title: "No inbox item",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.inboxPendingCount).toBeUndefined();
+    expect(items[0]!.inboxWaitingSince).toBeUndefined();
+    expect(items[0]!.inboxNamespace).toBeUndefined();
+    expect(items[0]!.inboxLastActivity).toBeUndefined();
+  });
+
+  it("maps partially populated inbox metadata", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "INB-3",
+          state: "ci-pending",
+          prNumber: 10,
+          title: "Partial inbox",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          inboxWaitingSince: "2026-04-04T21:00:00.000Z",
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.inboxWaitingSince).toBe("2026-04-04T21:00:00.000Z");
+    expect(items[0]!.inboxPendingCount).toBeUndefined();
+    expect(items[0]!.inboxNamespace).toBeUndefined();
+    expect(items[0]!.inboxLastActivity).toBeUndefined();
+  });
 });
 
 // ── TUI mode detection ────────────────────────────────────────────────────────
@@ -4185,6 +4265,95 @@ describe("formatItemDetail", () => {
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("Runtime:");
     expect(text).toContain("detached headless worker");
+  });
+
+  it("renders inbox waiting state and pending count", () => {
+    const item = makeStatusItem({
+      id: "H-IB-1",
+      state: "implementing",
+      inboxWaitingSince: new Date(Date.now() - 120_000).toISOString(),
+      inboxPendingCount: 2,
+    });
+    const lines = formatItemDetail(item);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Inbox:");
+    expect(text).toContain("waiting");
+    expect(text).toContain("2 pending");
+  });
+
+  it("renders inbox with only pending count (not waiting)", () => {
+    const item = makeStatusItem({
+      id: "H-IB-2",
+      state: "implementing",
+      inboxPendingCount: 5,
+    });
+    const lines = formatItemDetail(item);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Inbox:");
+    expect(text).toContain("5 pending");
+    expect(text).not.toContain("waiting");
+  });
+
+  it("renders inbox with only waiting (no pending)", () => {
+    const item = makeStatusItem({
+      id: "H-IB-3",
+      state: "implementing",
+      inboxWaitingSince: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const lines = formatItemDetail(item);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Inbox:");
+    expect(text).toContain("waiting");
+    expect(text).not.toContain("pending");
+  });
+
+  it("renders inbox namespace when present", () => {
+    const item = makeStatusItem({
+      id: "H-IB-4",
+      state: "implementing",
+      inboxWaitingSince: new Date().toISOString(),
+      inboxNamespace: "/worktrees/ninthwave-H-IB-4",
+    });
+    const lines = formatItemDetail(item);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Namespace:");
+    expect(text).toContain("/worktrees/ninthwave-H-IB-4");
+  });
+
+  it("renders last inbox activity when present", () => {
+    const item = makeStatusItem({
+      id: "H-IB-5",
+      state: "implementing",
+      inboxWaitingSince: new Date().toISOString(),
+      inboxLastActivity: new Date(Date.now() - 300_000).toISOString(),
+    });
+    const lines = formatItemDetail(item);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).toContain("Last msg:");
+    expect(text).toContain("ago");
+  });
+
+  it("omits inbox section when no inbox metadata present", () => {
+    const item = makeStatusItem({
+      id: "H-IB-6",
+      state: "implementing",
+    });
+    const lines = formatItemDetail(item);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).not.toContain("Inbox:");
+    expect(text).not.toContain("Namespace:");
+    expect(text).not.toContain("Last msg:");
+  });
+
+  it("omits inbox section when pendingCount is zero and not waiting", () => {
+    const item = makeStatusItem({
+      id: "H-IB-7",
+      state: "implementing",
+      inboxPendingCount: 0,
+    });
+    const lines = formatItemDetail(item);
+    const text = lines.map(stripAnsi).join("\n");
+    expect(text).not.toContain("Inbox:");
   });
 });
 

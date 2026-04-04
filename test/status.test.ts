@@ -1020,6 +1020,108 @@ describe("daemonStateToStatusItems", () => {
     };
     expect(daemonStateToStatusItems(state)).toEqual([]);
   });
+
+  it("maps inbox metadata fields to StatusItems", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "INB-S-1",
+          state: "implementing",
+          prNumber: null,
+          title: "Inbox test",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          inboxPendingCount: 3,
+          inboxWaitingSince: "2026-04-04T20:00:00.000Z",
+          inboxNamespace: "/worktrees/test",
+          inboxLastActivity: "2026-04-04T20:05:00.000Z",
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.inboxPendingCount).toBe(3);
+    expect(items[0]!.inboxWaitingSince).toBe("2026-04-04T20:00:00.000Z");
+    expect(items[0]!.inboxNamespace).toBe("/worktrees/test");
+    expect(items[0]!.inboxLastActivity).toBe("2026-04-04T20:05:00.000Z");
+  });
+
+  it("omits inbox fields when absent from daemon state", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "INB-S-2",
+          state: "ci-pending",
+          prNumber: 5,
+          title: "No inbox",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.inboxPendingCount).toBeUndefined();
+    expect(items[0]!.inboxWaitingSince).toBeUndefined();
+    expect(items[0]!.inboxNamespace).toBeUndefined();
+    expect(items[0]!.inboxLastActivity).toBeUndefined();
+  });
+
+  it("renders stable when inbox is partially populated", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "INB-S-3",
+          state: "implementing",
+          prNumber: null,
+          title: "Partial inbox",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+          inboxWaitingSince: "2026-04-04T22:00:00.000Z",
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.inboxWaitingSince).toBe("2026-04-04T22:00:00.000Z");
+    expect(items[0]!.inboxPendingCount).toBeUndefined();
+    expect(items[0]!.inboxNamespace).toBeUndefined();
+  });
+
+  it("renders stable after worker cleanup (stale inbox metadata cleared)", () => {
+    const now = new Date().toISOString();
+    const state: DaemonState = {
+      pid: 1,
+      startedAt: now,
+      updatedAt: now,
+      items: [
+        {
+          id: "INB-S-4",
+          state: "done",
+          prNumber: 99,
+          title: "Done item",
+          lastTransition: now,
+          ciFailCount: 0,
+          retryCount: 0,
+        },
+      ],
+    };
+    const items = daemonStateToStatusItems(state);
+    expect(items[0]!.inboxPendingCount).toBeUndefined();
+    expect(items[0]!.inboxWaitingSince).toBeUndefined();
+  });
 });
 
 describe("parseCrewStatusUpdate", () => {
