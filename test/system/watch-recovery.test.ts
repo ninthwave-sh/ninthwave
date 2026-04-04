@@ -3,7 +3,6 @@ import { existsSync, rmSync } from "fs";
 import { join } from "path";
 import type { DaemonState } from "../../core/daemon.ts";
 import {
-  RESTART_RECOVERY_HOLD_REASON,
   TEST_ORCH_ACTIVITY_TIMEOUT_MS_ENV,
   TEST_ORCH_GRACE_PERIOD_MS_ENV,
   TEST_ORCH_LAUNCH_TIMEOUT_MS_ENV,
@@ -211,7 +210,7 @@ describe("system: watch recovery", () => {
     }
   }, 30_000);
 
-  it("holds an unresolved restarted worker instead of relaunching a duplicate", async () => {
+  it("auto-relaunches an unresolved restarted worker after restart", async () => {
     const harness = new CliHarness();
     harness.writeWorkItems(RECOVERY_ITEM);
     harness.commitAndPushWorkItems("Add watch recovery retry test item");
@@ -251,13 +250,12 @@ describe("system: watch recovery", () => {
 
       const restarted = startRecoveryChild(harness, env);
       try {
+        // After restart, item should be auto-relaunched (not held as blocked)
         await harness.waitForOrchestratorState((state) => {
           const item = state.items.find((entry) => entry.id === "H-WRR-1");
-          return item?.state === "blocked" ? item : false;
+          return item?.state === "implementing" ? item : false;
         }, 15_000);
-        expect(readRecoveryItemState(harness)?.failureReason).toBe(RESTART_RECOVERY_HOLD_REASON);
-        await Bun.sleep(500);
-        expect(readFakeAiLaunches(harness.stateDir, run.runId)).toHaveLength(1);
+        expect(readFakeAiLaunches(harness.stateDir, run.runId)).toHaveLength(2);
       } finally {
         await harness.stop(restarted, "SIGKILL");
       }

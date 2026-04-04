@@ -21,6 +21,7 @@ import {
   buildSnapshot,
   reconstructState,
   syncWorkerDisplay,
+  RESTART_RECOVERY_HOLD_REASON,
 } from "../core/commands/orchestrate.ts";
 import {
   cleanStaleBranchForReuse,
@@ -145,6 +146,89 @@ describe("reconstructState", () => {
       () => "", daemonState,
     );
 
+    expect(orch.getItem("H-1-1")!.state).toBe("blocked");
+  });
+
+  it("re-evaluates restart-hold blocked items with existing worktrees", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+
+    const wtPath = join(require("os").tmpdir(), `nw-restart-hold-${Date.now()}`);
+    mkdirSync(wtPath, { recursive: true });
+
+    const daemonState = {
+      items: [{
+        id: "H-1-1",
+        state: "blocked",
+        ciFailCount: 0,
+        retryCount: 0,
+        prNumber: null,
+        failureReason: RESTART_RECOVERY_HOLD_REASON,
+        worktreePath: wtPath,
+      }],
+    };
+
+    const result = reconstructState(
+      orch, "/tmp/proj", "/tmp/proj/.ninthwave/.worktrees", undefined,
+      () => "", daemonState,
+    );
+
+    // Item should be added to unresolvedImplementations for re-evaluation, not stuck as blocked
+    expect(result.unresolvedImplementations).toContainEqual(
+      expect.objectContaining({ itemId: "H-1-1", worktreePath: wtPath }),
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+
+    // Cleanup
+    require("fs").rmSync(wtPath, { recursive: true, force: true });
+  });
+
+  it("keeps non-restart-hold blocked items as blocked", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+
+    const daemonState = {
+      items: [{
+        id: "H-1-1",
+        state: "blocked",
+        ciFailCount: 0,
+        retryCount: 0,
+        prNumber: null,
+        failureReason: "launch-blocked: Repo 'missing-repo' not found.",
+      }],
+    };
+
+    const result = reconstructState(
+      orch, "/tmp/proj", "/tmp/proj/.ninthwave/.worktrees", undefined,
+      () => "", daemonState,
+    );
+
+    expect(result.unresolvedImplementations).toHaveLength(0);
+    expect(orch.getItem("H-1-1")!.state).toBe("blocked");
+  });
+
+  it("keeps restart-hold blocked items as blocked when worktree is missing", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+
+    const daemonState = {
+      items: [{
+        id: "H-1-1",
+        state: "blocked",
+        ciFailCount: 0,
+        retryCount: 0,
+        prNumber: null,
+        failureReason: RESTART_RECOVERY_HOLD_REASON,
+        worktreePath: "/tmp/nw-nonexistent-worktree-path",
+      }],
+    };
+
+    const result = reconstructState(
+      orch, "/tmp/proj", "/tmp/proj/.ninthwave/.worktrees", undefined,
+      () => "", daemonState,
+    );
+
+    expect(result.unresolvedImplementations).toHaveLength(0);
     expect(orch.getItem("H-1-1")!.state).toBe("blocked");
   });
 });

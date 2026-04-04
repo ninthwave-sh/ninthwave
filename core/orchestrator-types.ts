@@ -517,6 +517,10 @@ export const CI_FIX_ACK_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 /** Timeout (ms) for items in launching state with no workerAlive signal. Default: 5 minutes. */
 export const LAUNCHING_TIMEOUT_MS = 5 * 60 * 1000;
 
+/** Failure reason set when a restarted worker has no live workspace and is held for operator relaunch. */
+export const RESTART_RECOVERY_HOLD_REASON =
+  "restart-hold: restarted worker has no live workspace; waiting for operator relaunch";
+
 // ── WIP states: states that count toward the WIP limit ───────────────
 
 export const ACTIVE_SESSION_STATES: Set<OrchestratorItemState> = new Set([

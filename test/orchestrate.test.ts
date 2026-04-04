@@ -1952,7 +1952,7 @@ describe("reconstructState", () => {
     }));
   });
 
-  it("non-interactive restart recovery holds unresolved workers instead of relaunching them", async () => {
+  it("non-interactive restart recovery auto-relaunches unresolved workers", async () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-RSM-3C"));
     orch.hydrateState("H-RSM-3C", "implementing");
@@ -1972,12 +1972,11 @@ describe("reconstructState", () => {
 
     const item = orch.getItem("H-RSM-3C")!;
     expect(prompt).not.toHaveBeenCalled();
-    expect(item.state).toBe("blocked");
-    expect(item.failureReason).toBe(RESTART_RECOVERY_HOLD_REASON);
+    expect(item.state).toBe("ready");
+    expect(item.failureReason).toBeUndefined();
     expect(logs).toContainEqual(expect.objectContaining({
-      event: "restart_recovery_held_worker",
+      event: "restart_recovery_unresolved_worker",
       itemId: "H-RSM-3C",
-      interactive: false,
     }));
   });
 

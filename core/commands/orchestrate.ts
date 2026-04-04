@@ -13,6 +13,7 @@ import {
   Orchestrator,
   DEFAULT_CONFIG,
   CI_FIX_ACK_TIMEOUT_MS,
+  RESTART_RECOVERY_HOLD_REASON,
   calculateMemorySessionLimit,
   statusDisplayForState,
   TERMINAL_STATES,
@@ -219,8 +220,7 @@ export {
   type WatchEngineRunner,
 } from "../watch-engine-runner.ts";
 
-export const RESTART_RECOVERY_HOLD_REASON =
-  "restart-hold: restarted worker has no live workspace; waiting for operator relaunch";
+export { RESTART_RECOVERY_HOLD_REASON } from "../orchestrator-types.ts";
 
 interface ResolveRestartRecoveryOptions {
   interactive: boolean;
@@ -248,7 +248,7 @@ export async function resolveUnresolvedRestartedWorkers(
     item.workspaceRef = undefined;
     const timestamp = now().toISOString();
 
-    let action: RestartRecoveryAction = "hold";
+    let action: RestartRecoveryAction = "relaunch";
     if (options.interactive) {
       action = await prompt(unresolved.itemId, unresolved.worktreePath);
     }

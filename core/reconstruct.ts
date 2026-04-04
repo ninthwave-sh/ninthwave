@@ -8,6 +8,7 @@ import type { DaemonState } from "./daemon.ts";
 import { checkPrStatus } from "./commands/pr-monitor.ts";
 import { classifyPrMetadataMatch } from "./work-item-files.ts";
 import type { Multiplexer } from "./mux.ts";
+import { RESTART_RECOVERY_HOLD_REASON } from "./orchestrator-types.ts";
 
 // ── State reconstruction (crash recovery) ──────────────────────────
 
@@ -193,6 +194,7 @@ export function reconstructState(
     worktreePath?: string;
     workspaceRef?: string;
     aiTool?: string;
+    failureReason?: string;
   }>();
   if (daemonState?.items) {
     for (const si of daemonState.items) {
@@ -226,6 +228,7 @@ export function reconstructState(
         worktreePath: si.worktreePath,
         workspaceRef: si.workspaceRef,
         aiTool: si.aiTool,
+        failureReason: si.failureReason,
       });
     }
   }
@@ -259,6 +262,7 @@ export function reconstructState(
       if (saved.fixForwardWorkspaceRef) item.fixForwardWorkspaceRef = saved.fixForwardWorkspaceRef;
       if (saved.worktreePath) item.worktreePath = saved.worktreePath;
       if (saved.aiTool) item.aiTool = saved.aiTool;
+      if (saved.failureReason) item.failureReason = saved.failureReason;
     }
     const savedWorkspaceRef = saved?.workspaceRef;
 
@@ -269,6 +273,16 @@ export function reconstructState(
     }
 
     if (saved?.state === "blocked") {
+      // Restart-hold items with an existing worktree can be re-evaluated instead of staying stuck.
+      if (saved.failureReason === RESTART_RECOVERY_HOLD_REASON && saved.worktreePath && existsSync(saved.worktreePath)) {
+        result.unresolvedImplementations.push({
+          itemId: item.id,
+          worktreePath: saved.worktreePath,
+          ...(saved.workspaceRef ? { savedWorkspaceRef: saved.workspaceRef } : {}),
+        });
+        orch.hydrateState(item.id, "implementing");
+        continue;
+      }
       orch.hydrateState(item.id, "blocked");
       continue;
     }
