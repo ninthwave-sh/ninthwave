@@ -57,6 +57,16 @@ import {
   executeCleanForwardFixer,
 } from "./orchestrator-actions.ts";
 
+// ── Merge commit CI grace periods ────────────────────────────────────
+// After merge, we poll CI on the merge commit. If no check runs appear
+// within the grace period, treat as "no CI configured" and mark done.
+
+/** Grace period when push workflows exist (check runs appear quickly, even if queued). */
+const MERGE_CI_GRACE_MS = 60_000; // 60 seconds
+
+/** Grace period when no push workflows detected (only third-party status checks). */
+const NO_CI_MERGE_GRACE_MS = 15_000; // 15 seconds
+
 // ── Orchestrator class ───────────────────────────────────────────────
 
 export class Orchestrator {
@@ -450,7 +460,7 @@ export class Orchestrator {
         break;
 
       case "forward-fix-pending":
-        actions = this.handleForwardFixPending(item, snap);
+        actions = this.handleForwardFixPending(item, snap, now);
         break;
 
       case "fix-forward-failed":
@@ -1151,6 +1161,7 @@ export class Orchestrator {
   private handleForwardFixPending(
     item: OrchestratorItem,
     snap: ItemSnapshot | undefined,
+    now: Date,
   ): Action[] {
     if (!snap?.mergeCommitCIStatus) return [];
 
@@ -1163,9 +1174,16 @@ export class Orchestrator {
         this.transition(item, "fix-forward-failed");
         item.failureReason = `fix-forward-failed: CI failed on main for merge commit ${item.mergeCommitSha}`;
         return [];
-      case "pending":
-        // Still waiting -- no transition
+      case "pending": {
+        // If no checks have appeared after grace period, treat as no CI configured.
+        const hasPushWorkflows = snap.hasPushWorkflows ?? true; // assume yes if unknown
+        const gracePeriod = hasPushWorkflows ? MERGE_CI_GRACE_MS : NO_CI_MERGE_GRACE_MS;
+        const elapsed = now.getTime() - new Date(item.lastTransition).getTime();
+        if (elapsed > gracePeriod) {
+          this.transition(item, "done");
+        }
         return [];
+      }
     }
   }
 

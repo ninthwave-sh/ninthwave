@@ -23,6 +23,7 @@ import {
   getMergeCommitSha as defaultGetMergeCommitSha,
   type PrComment,
 } from "./gh.ts";
+import { detectWorkflowPresence } from "./workflow-detect.ts";
 
 function normalizePrStatusResult(result: string | null | PrStatusPollResult): PrStatusPollResult {
   if (typeof result === "string" || result == null) {
@@ -472,6 +473,11 @@ export function buildSnapshot(
     enrichMergedMetadata(snap, orchItem, repoRoot, getMergeCommitSha, getDefaultBranch);
     enrichMergedCommitCiStatus(snap, orchItem, repoRoot, checkCommitCI);
 
+    // Detect workflow presence for merge commit CI grace period decisions
+    if (snap.mergeCommitCIStatus === "pending") {
+      snap.hasPushWorkflows = detectWorkflowPresence(repoRoot).hasPushWorkflows;
+    }
+
     // Check review worker health and verdict file for items in reviewing state
     if (orchItem.state === "reviewing" && orchItem.reviewWorkspaceRef) {
       snap.workerAlive = isWorkerAliveWithCache(
@@ -694,6 +700,11 @@ export async function buildSnapshotAsync(
 
     await enrichMergedMetadataAsync(snap, orchItem, repoRoot, getMergeCommitSha, getDefaultBranch);
     await enrichMergedCommitCiStatusAsync(snap, orchItem, repoRoot, checkCommitCI);
+
+    // Detect workflow presence for merge commit CI grace period decisions
+    if (snap.mergeCommitCIStatus === "pending") {
+      snap.hasPushWorkflows = detectWorkflowPresence(repoRoot).hasPushWorkflows;
+    }
 
     // Review worker health
     if (orchItem.state === "reviewing" && orchItem.reviewWorkspaceRef) {

@@ -10,6 +10,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as gh from "../../core/gh.ts";
 import { prChecks } from "../../core/gh.ts";
 import { CI_FAILURE_STATES, checkPrStatus } from "../../core/commands/pr-monitor.ts";
+import { checkPrStatusDetailed } from "../../core/commands/pr-monitor.ts";
+import * as workflowDetect from "../../core/workflow-detect.ts";
 
 // ── Spies on gh-module sync functions ──────────────────────────────
 // These are unique to this test file (no other file spies on sync gh fns).
@@ -18,14 +20,18 @@ const isAvailableSpy = vi.spyOn(gh, "isAvailable");
 const prListSpy = vi.spyOn(gh, "prList");
 const prViewSpy = vi.spyOn(gh, "prView");
 const prChecksSpy = vi.spyOn(gh, "prChecks");
+const detectWorkflowSpy = vi.spyOn(workflowDetect, "detectWorkflowPresence");
 
 beforeEach(() => {
   isAvailableSpy.mockReset();
   prListSpy.mockReset();
   prViewSpy.mockReset();
   prChecksSpy.mockReset();
+  detectWorkflowSpy.mockReset();
   // Default: gh is available
   isAvailableSpy.mockReturnValue(true);
+  // Default: no workflows detected (relevant for zero-checks path)
+  detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: false, hasPushWorkflows: false });
 });
 
 afterEach(() => {
@@ -33,6 +39,7 @@ afterEach(() => {
   prListSpy.mockReset();
   prViewSpy.mockReset();
   prChecksSpy.mockReset();
+  detectWorkflowSpy.mockReset();
 });
 
 // ── Helper: stub all gh calls for checkPrStatus ────────────────────
@@ -418,5 +425,85 @@ describe("checkPrStatus classification", () => {
 
     const result = parseStatus(checkPrStatus("TEST-1", "/repo"));
     expect(result.status).toBe("pending");
+  });
+});
+
+// ── 4. prChecks failure handling (no CI workflows) ────────────────────
+// When gh pr checks returns an error (e.g., exit code 1 for repos with
+// no check runs), the status should fall through to processChecks with
+// empty data instead of losing CI status entirely.
+
+describe("checkPrStatus with prChecks failure (repos with no CI)", () => {
+  function parseStatus(line: string) {
+    const parts = line.split("\t");
+    return {
+      id: parts[0],
+      prNumber: parts[1],
+      status: parts[2],
+      mergeable: parts[3],
+      eventTime: parts[4],
+    };
+  }
+
+  function stubOpenPr(createdAt: string): void {
+    prListSpy.mockImplementation((_root: string, _branch: string, state: string) => {
+      if (state === "open") return { ok: true as const, data: [{ number: 100, title: "Test PR" }] };
+      return { ok: true as const, data: [] };
+    });
+    prViewSpy.mockReturnValue({ ok: true as const, data: {
+      reviewDecision: "",
+      mergeable: "UNKNOWN",
+      updatedAt: "2026-03-29T12:00:00Z",
+      createdAt,
+    } });
+  }
+
+  it("treats prChecks failure as ci-passed when past grace period and no PR workflows", () => {
+    stubOpenPr(new Date(Date.now() - 3 * 60_000).toISOString()); // 3 min ago
+    prChecksSpy.mockReturnValue({ ok: false as const, kind: "command-error" as const, error: "gh pr checks exited with code 1" });
+    detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: false, hasPushWorkflows: false });
+
+    const result = parseStatus(checkPrStatus("TEST-1", "/repo"));
+    expect(result.status).toBe("ci-passed");
+  });
+
+  it("treats prChecks failure as pending when within short grace period (no PR workflows)", () => {
+    stubOpenPr(new Date(Date.now() - 5_000).toISOString()); // 5s ago -- within 15s grace
+    prChecksSpy.mockReturnValue({ ok: false as const, kind: "command-error" as const, error: "gh pr checks exited with code 1" });
+    detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: false, hasPushWorkflows: false });
+
+    const result = parseStatus(checkPrStatus("TEST-1", "/repo"));
+    expect(result.status).toBe("pending");
+  });
+
+  it("treats prChecks failure as ci-passed when past standard grace period (has PR workflows)", () => {
+    stubOpenPr(new Date(Date.now() - 3 * 60_000).toISOString()); // 3 min ago -- past 2 min grace
+    prChecksSpy.mockReturnValue({ ok: false as const, kind: "command-error" as const, error: "gh pr checks exited with code 1" });
+    detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: true, hasPushWorkflows: true });
+
+    const result = parseStatus(checkPrStatus("TEST-1", "/repo"));
+    expect(result.status).toBe("ci-passed");
+  });
+
+  it("treats prChecks failure as pending when within standard grace period (has PR workflows)", () => {
+    stubOpenPr(new Date(Date.now() - 30_000).toISOString()); // 30s ago -- within 2 min grace
+    prChecksSpy.mockReturnValue({ ok: false as const, kind: "command-error" as const, error: "gh pr checks exited with code 1" });
+    detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: true, hasPushWorkflows: true });
+
+    const result = parseStatus(checkPrStatus("TEST-1", "/repo"));
+    expect(result.status).toBe("pending");
+  });
+
+  it("preserves failure info on the PrStatusPollResult when prChecks fails", () => {
+    stubOpenPr(new Date(Date.now() - 3 * 60_000).toISOString());
+    prChecksSpy.mockReturnValue({ ok: false as const, kind: "command-error" as const, error: "gh pr checks exited with code 1" });
+    detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: false, hasPushWorkflows: false });
+
+    const result = checkPrStatusDetailed("TEST-1", "/repo");
+    expect(result.failure).toBeDefined();
+    expect(result.failure!.kind).toBe("command-error");
+    expect(result.failure!.stage).toBe("prChecks");
+    // Status line should still contain valid CI status
+    expect(result.statusLine).toContain("ci-passed");
   });
 });

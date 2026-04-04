@@ -111,7 +111,7 @@ describe("checkPrStatusAsync", () => {
     expect(result).toBe("T-1-2\t10\topen\t\t");
   });
 
-  it("preserves open PR state when prChecks fails after PR discovery", async () => {
+  it("falls through to processChecks when prChecks fails (treats as zero checks)", async () => {
     prListAsyncSpy.mockImplementation(async (_root: string, _branch: string, state: string) => {
       if (state === "open") return { ok: true, data: [{ number: 10, title: "Fix" }] };
       return { ok: true, data: [] };
@@ -126,7 +126,9 @@ describe("checkPrStatusAsync", () => {
 
     const result = await checkPrStatusAsync("T-1-3", "/repo");
 
-    expect(result).toBe("T-1-3\t10\topen\tUNKNOWN\t2026-01-01T00:00:00Z");
+    // prChecks failure is treated as zero checks. PR created well in the past
+    // (past any grace period) → processChecks returns "pass" → "ci-passed".
+    expect(result).toBe("T-1-3\t10\tci-passed\tUNKNOWN\t2026-01-01T00:00:00Z");
   });
 });
 

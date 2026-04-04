@@ -163,6 +163,101 @@ describe("forward-fix-pending → done when CI passes", () => {
   });
 });
 
+// ── Forward-fix-pending grace period (no CI repos) ──────────────────
+
+describe("forward-fix-pending grace period for repos with no CI", () => {
+  it("stays pending when no push workflows and within grace period (15s)", () => {
+    const orch = new Orchestrator({ fixForward: true });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "forward-fix-pending");
+    orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
+
+    const transitionTime = new Date(orch.getItem("H-1-1")!.lastTransition);
+    const now = new Date(transitionTime.getTime() + 5_000); // 5s later
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", mergeCommitCIStatus: "pending", hasPushWorkflows: false }]),
+      now,
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("forward-fix-pending");
+  });
+
+  it("transitions to done when no push workflows and past grace period (15s)", () => {
+    const orch = new Orchestrator({ fixForward: true });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "forward-fix-pending");
+    orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
+
+    const transitionTime = new Date(orch.getItem("H-1-1")!.lastTransition);
+    const now = new Date(transitionTime.getTime() + 20_000); // 20s later
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", mergeCommitCIStatus: "pending", hasPushWorkflows: false }]),
+      now,
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("done");
+  });
+
+  it("stays pending when has push workflows and within grace period (60s)", () => {
+    const orch = new Orchestrator({ fixForward: true });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "forward-fix-pending");
+    orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
+
+    const transitionTime = new Date(orch.getItem("H-1-1")!.lastTransition);
+    const now = new Date(transitionTime.getTime() + 30_000); // 30s later
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", mergeCommitCIStatus: "pending", hasPushWorkflows: true }]),
+      now,
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("forward-fix-pending");
+  });
+
+  it("transitions to done when has push workflows and past grace period (60s)", () => {
+    const orch = new Orchestrator({ fixForward: true });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "forward-fix-pending");
+    orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
+
+    const transitionTime = new Date(orch.getItem("H-1-1")!.lastTransition);
+    const now = new Date(transitionTime.getTime() + 90_000); // 90s later
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", mergeCommitCIStatus: "pending", hasPushWorkflows: true }]),
+      now,
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("done");
+  });
+
+  it("assumes push workflows when hasPushWorkflows is undefined (conservative)", () => {
+    const orch = new Orchestrator({ fixForward: true });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "forward-fix-pending");
+    orch.getItem("H-1-1")!.mergeCommitSha = "abc123";
+
+    const transitionTime = new Date(orch.getItem("H-1-1")!.lastTransition);
+    const now = new Date(transitionTime.getTime() + 30_000); // 30s -- past no-CI grace but within workflows grace
+
+    orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", mergeCommitCIStatus: "pending" }]), // no hasPushWorkflows
+      now,
+    );
+
+    // Should still be pending because undefined defaults to assuming workflows exist (60s grace)
+    expect(orch.getItem("H-1-1")!.state).toBe("forward-fix-pending");
+  });
+});
+
 // ── Verifying → Verify-failed (CI fails) ────────────────────────────
 
 describe("forward-fix-pending → fix-forward-failed when CI fails", () => {

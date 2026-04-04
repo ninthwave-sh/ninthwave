@@ -17,6 +17,7 @@ import {
   type GhFailureKind,
 } from "../gh.ts";
 import { parseWorkItemReferenceBlock } from "../work-item-files.ts";
+import { detectWorkflowPresence } from "../workflow-detect.ts";
 import * as ghModule from "../gh.ts";
 import type { WatchResult, Transition } from "../types.ts";
 
@@ -220,6 +221,9 @@ export const CI_FAILURE_STATES = new Set([
 /** Grace period after PR creation before treating zero checks as "no CI configured". */
 export const CI_GRACE_PERIOD_MS = 2 * 60 * 1000; // 2 minutes
 
+/** Short grace period when no relevant workflows detected (for third-party status checks). */
+export const NO_CI_GRACE_PERIOD_MS = 15 * 1000; // 15 seconds
+
 /**
  * Shared CI status processing. Determines ciStatus and event time from a set
  * of GitHub check runs/status checks. Used by both sync and async check paths
@@ -233,6 +237,7 @@ export function processChecks(
   checks: { state: string; name: string; completedAt?: string }[],
   prCreatedAt?: string,
   now: Date = new Date(),
+  gracePeriodMs: number = CI_GRACE_PERIOD_MS,
 ): { ciStatus: string; eventTime: string | undefined } {
   const nonSkipped = checks.filter((c) => c.state !== "SKIPPED");
   let ciStatus: string;
@@ -241,7 +246,7 @@ export function processChecks(
     const inGrace =
       prCreatedAt !== undefined &&
       prCreatedAt !== "" &&
-      now.getTime() - new Date(prCreatedAt).getTime() < CI_GRACE_PERIOD_MS;
+      now.getTime() - new Date(prCreatedAt).getTime() < gracePeriodMs;
     ciStatus = inGrace ? "unknown" : "pass";
   } else {
     ciStatus = "unknown";
@@ -330,21 +335,30 @@ export function checkPrStatusDetailed(
   const prCreatedAt = (prData.createdAt as string) ?? "";
 
   const checksResult = deps.prChecks(repoRoot, prNumber);
-  if (!checksResult.ok) {
-    return pollFailure(
-      "prChecks",
-      checksResult.kind,
-      checksResult.error,
-      formatOpenPrStatus(id, prNumber, isMergeable || "UNKNOWN", prUpdatedAt),
-    );
+  // Treat prChecks failure as zero checks. Some gh versions return exit code 1
+  // for repos with no CI workflows. Fall through to processChecks so the grace
+  // period logic handles it correctly instead of losing CI status entirely.
+  const checksData = checksResult.ok ? checksResult.data : [];
+
+  // When zero checks, detect workflows to set appropriate grace period
+  let gracePeriodMs = CI_GRACE_PERIOD_MS;
+  if (checksData.length === 0) {
+    const { hasPrWorkflows } = detectWorkflowPresence(repoRoot);
+    if (!hasPrWorkflows) gracePeriodMs = NO_CI_GRACE_PERIOD_MS;
   }
 
-  const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data, prCreatedAt);
+  const { ciStatus, eventTime: ciEventTime } = processChecks(checksData, prCreatedAt, new Date(), gracePeriodMs);
   const status = derivePrStatus(ciStatus, isMergeable, reviewDecision);
   const eventTime = ciEventTime ?? prUpdatedAt;
 
   // Fields: ID, PR number, status, mergeable, eventTime (5th field for detection latency)
-  return { statusLine: `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}` };
+  const result: PrStatusPollResult = {
+    statusLine: `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`,
+  };
+  if (!checksResult.ok) {
+    result.failure = { kind: checksResult.kind, stage: "prChecks", error: checksResult.error };
+  }
+  return result;
 }
 
 export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps = defaultPrMonitorDeps): string {
@@ -397,20 +411,25 @@ export async function checkPrStatusDetailedAsync(
   const prCreatedAt = (prData.createdAt as string) ?? "";
 
   const checksResult = await deps.prChecksAsync(repoRoot, prNumber);
-  if (!checksResult.ok) {
-    return pollFailure(
-      "prChecks",
-      checksResult.kind,
-      checksResult.error,
-      formatOpenPrStatus(id, prNumber, isMergeable || "UNKNOWN", prUpdatedAt),
-    );
+  const checksData = checksResult.ok ? checksResult.data : [];
+
+  let gracePeriodMs = CI_GRACE_PERIOD_MS;
+  if (checksData.length === 0) {
+    const { hasPrWorkflows } = detectWorkflowPresence(repoRoot);
+    if (!hasPrWorkflows) gracePeriodMs = NO_CI_GRACE_PERIOD_MS;
   }
 
-  const { ciStatus, eventTime: ciEventTime } = processChecks(checksResult.data, prCreatedAt);
+  const { ciStatus, eventTime: ciEventTime } = processChecks(checksData, prCreatedAt, new Date(), gracePeriodMs);
   const status = derivePrStatus(ciStatus, isMergeable, reviewDecision);
   const eventTime = ciEventTime ?? prUpdatedAt;
 
-  return { statusLine: `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}` };
+  const result: PrStatusPollResult = {
+    statusLine: `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`,
+  };
+  if (!checksResult.ok) {
+    result.failure = { kind: checksResult.kind, stage: "prChecks", error: checksResult.error };
+  }
+  return result;
 }
 
 export function findTransitions(currentState: string, prevState: string): string {

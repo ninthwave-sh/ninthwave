@@ -368,10 +368,12 @@ describe("checkPrStatus format contract", () => {
     });
 
     it("empty checks array with recent createdAt produces pending (CI not yet registered)", () => {
-      // PR just opened within grace period → CI may not have registered yet
+      // PR just opened within grace period → CI may not have registered yet.
+      // Grace period is 15s for repos with no workflows detected (repoRoot "/repo"
+      // has no .github/workflows), so use a timestamp well within that window.
       const recentView = { ok: true as const, data: {
         ...VIEW_PENDING.data,
-        createdAt: new Date(Date.now() - 30_000).toISOString(),
+        createdAt: new Date(Date.now() - 5_000).toISOString(),
       } };
       setupOpenPr(recentView, { ok: true, data: [] });
 
@@ -461,7 +463,7 @@ describe("checkPrStatus format contract", () => {
       expect(parsed.eventTime).toBe("");
     });
 
-    it("preserves open PR state when prChecks fails for an open PR", () => {
+    it("falls through to processChecks when prChecks fails (treats as zero checks)", () => {
       prListSpy.mockImplementation(
         (_root: string, _branch: string, state: string) => {
           if (state === "open") return OPEN_PR;
@@ -471,10 +473,12 @@ describe("checkPrStatus format contract", () => {
       prViewSpy.mockReturnValue(VIEW_PENDING);
       prChecksSpy.mockReturnValue({ ok: false, error: "network error", kind: "network" });
 
+      // prChecks failure is treated as zero checks. No createdAt in VIEW_PENDING
+      // → past any grace period → processChecks returns "pass" → "ci-passed".
       const parsed = parseFields(checkPrStatus("T-ERR-4", "/repo"));
       expect(parsed.fieldCount).toBe(5);
       expect(parsed.prNumber).toBe("123");
-      expect(parsed.status).toBe("open");
+      expect(parsed.status).toBe("ci-passed");
       expect(parsed.mergeable).toBe("UNKNOWN");
       expect(parsed.eventTime).toBe("2026-03-29T10:30:00Z");
     });

@@ -205,6 +205,8 @@ export interface ItemSnapshot {
   defaultBranch?: string;
   /** CI status of the merge commit on main (for post-merge verification). */
   mergeCommitCIStatus?: "pass" | "fail" | "pending";
+  /** Whether the item's repo has push-triggered GitHub Actions workflows. */
+  hasPushWorkflows?: boolean;
   /** Structured verdict from the review worker (read from verdict file). */
   reviewVerdict?: import("./daemon.ts").ReviewVerdict;
 }
