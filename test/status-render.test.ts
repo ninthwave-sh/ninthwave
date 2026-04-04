@@ -4195,7 +4195,7 @@ describe("formatItemDetail", () => {
 describe("renderDetailOverlay", () => {
   it("renders a centered box with item ID, state, and Escape hint", () => {
     const item = makeStatusItem({ id: "H-DT-1", state: "implementing", title: "Test feature" });
-    const lines = renderDetailOverlay(item, 80, 40);
+    const { lines } = renderDetailOverlay(item, 80, 40);
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("H-DT-1");
     expect(text).toContain("Implementing");
@@ -4204,7 +4204,7 @@ describe("renderDetailOverlay", () => {
 
   it("includes PR link when repoUrl provided", () => {
     const item = makeStatusItem({ id: "H-PR-1", state: "review", prNumber: 42 });
-    const lines = renderDetailOverlay(item, 80, 40, {
+    const { lines } = renderDetailOverlay(item, 80, 40, {
       repoUrl: "https://github.com/org/repo",
     });
     const text = lines.map(stripAnsi).join("\n");
@@ -4213,7 +4213,7 @@ describe("renderDetailOverlay", () => {
 
   it("shows extra fields: priority, dependencies, CI fails, retries", () => {
     const item = makeStatusItem({ id: "H-EX-1", state: "ci-failed", failureReason: "test timeout" });
-    const lines = renderDetailOverlay(item, 100, 40, {
+    const { lines } = renderDetailOverlay(item, 100, 40, {
       priority: "high",
       dependencies: ["H-EX-0", "H-EX-2"],
       ciFailCount: 3,
@@ -4233,7 +4233,7 @@ describe("renderDetailOverlay", () => {
       failureReason: "launch-blocked: Repo 'missing-repo' not found.",
     });
 
-    const lines = renderDetailOverlay(item, 100, 40, {
+    const { lines } = renderDetailOverlay(item, 100, 40, {
       priority: "high",
     });
 
@@ -4251,7 +4251,7 @@ describe("renderDetailOverlay", () => {
       worktreePath: "/tmp/ninthwave-H-RSM-3",
     });
 
-    const lines = renderDetailOverlay(item, 100, 40, {
+    const { lines } = renderDetailOverlay(item, 100, 40, {
       priority: "high",
     });
 
@@ -4271,7 +4271,7 @@ describe("renderDetailOverlay", () => {
       prNumber: null,
     });
 
-    const lines = renderDetailOverlay(item, 100, 40, {
+    const { lines } = renderDetailOverlay(item, 100, 40, {
       priority: "high",
       dependencies: ["H-TI-1", "H-TI-2"],
     });
@@ -4295,14 +4295,14 @@ describe("renderDetailOverlay", () => {
       descriptionSnippet: "Show markdown-derived context in the detail overlay.",
     });
 
-    const lines = renderDetailOverlay(item, 100, 40);
+    const { lines } = renderDetailOverlay(item, 100, 40);
     const text = lines.map(stripAnsi).join("\n");
     expect(text).not.toContain("Summary:");
   });
 
   it("shows manual-review hold text when required", () => {
     const item = makeStatusItem({ id: "H-MR-1", requiresManualReview: true });
-    const lines = renderDetailOverlay(item, 100, 40);
+    const { lines } = renderDetailOverlay(item, 100, 40);
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("Merge hold:");
     expect(text).toContain("manual review required");
@@ -4315,7 +4315,7 @@ describe("renderDetailOverlay", () => {
       priorPrNumbers: [41, 77],
     });
 
-    const lines = renderDetailOverlay(item, 100, 40);
+    const { lines } = renderDetailOverlay(item, 100, 40);
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("PRs:");
     expect(text).toContain("#41 → #77 → #88");
@@ -4327,7 +4327,7 @@ describe("renderDetailOverlay", () => {
       state: "implementing",
       worktreePath: "/tmp/worktrees/H-WT-1",
     });
-    const lines = renderDetailOverlay(item, 100, 40);
+    const { lines } = renderDetailOverlay(item, 100, 40);
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("/tmp/worktrees/H-WT-1");
   });
@@ -4338,7 +4338,7 @@ describe("renderDetailOverlay", () => {
       state: "implementing",
       workspaceRef: "headless:H-HL-2",
     });
-    const lines = renderDetailOverlay(item, 80, 40);
+    const { lines } = renderDetailOverlay(item, 80, 40);
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("Workspace:");
     expect(text).toContain("headless:H-HL-2");
@@ -4349,13 +4349,13 @@ describe("renderDetailOverlay", () => {
 
   it("fills terminal height with blank lines", () => {
     const item = makeStatusItem({ id: "H-FL-1", state: "merged" });
-    const lines = renderDetailOverlay(item, 80, 30);
+    const { lines } = renderDetailOverlay(item, 80, 30);
     expect(lines.length).toBe(30);
   });
 
   it("omits zero CI fails and retries", () => {
     const item = makeStatusItem({ id: "H-ZR-1", state: "implementing" });
-    const lines = renderDetailOverlay(item, 80, 40, {
+    const { lines } = renderDetailOverlay(item, 80, 40, {
       ciFailCount: 0,
       retryCount: 0,
     });
@@ -4367,7 +4367,7 @@ describe("renderDetailOverlay", () => {
   it("renders descriptionBody as a wrapped scrollable region", () => {
     const item = makeStatusItem({ id: "H-DB-1", state: "implementing" });
     const body = "This is a detailed description of the work item that should be word-wrapped and rendered inside the overlay box.";
-    const lines = renderDetailOverlay(item, 80, 40, { descriptionBody: body });
+    const { lines } = renderDetailOverlay(item, 80, 40, { descriptionBody: body });
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("Description");
     expect(text).toContain("detailed description");
@@ -4386,7 +4386,7 @@ describe("renderDetailOverlay", () => {
       "Paragraph two.",
     ].join("\n");
 
-    const contentLines = extractOverlayContentLines(renderDetailOverlay(item, 80, 40, { descriptionBody: body }));
+    const contentLines = extractOverlayContentLines(renderDetailOverlay(item, 80, 40, { descriptionBody: body }).lines);
     const descriptionIndex = contentLines.indexOf("Description");
     expect(descriptionIndex).toBeGreaterThan(-1);
     expect(contentLines).not.toContain("# Refactor: Clean up detail modal description rendering (H-TDM-1)");
@@ -4403,7 +4403,7 @@ describe("renderDetailOverlay", () => {
     const item = makeStatusItem({ id: "H-DB-3", state: "implementing" });
     const body = "A very long description line that should wrap to fit inside the modal body without relying on the overlay truncation path for normal prose content.";
 
-    const contentLines = extractOverlayContentLines(renderDetailOverlay(item, 60, 40, { descriptionBody: body }));
+    const contentLines = extractOverlayContentLines(renderDetailOverlay(item, 60, 40, { descriptionBody: body }).lines);
     const descriptionIndex = contentLines.indexOf("Description");
     const footerIndex = contentLines.indexOf("Press Escape to close");
     const descriptionLines = contentLines
@@ -4418,7 +4418,7 @@ describe("renderDetailOverlay", () => {
 
   it("renders empty descriptionBody without crashing", () => {
     const item = makeStatusItem({ id: "H-EB-1", state: "implementing" });
-    const lines = renderDetailOverlay(item, 80, 40, { descriptionBody: "" });
+    const { lines } = renderDetailOverlay(item, 80, 40, { descriptionBody: "" });
     const text = lines.map(stripAnsi).join("\n");
     // Should not show Description section for empty body
     expect(text).not.toContain("Description");
@@ -4428,8 +4428,8 @@ describe("renderDetailOverlay", () => {
     const item = makeStatusItem({ id: "H-SL-1", state: "implementing" });
     // Build a long body that exceeds a small terminal
     const body = Array.from({ length: 60 }, (_, i) => `Line number ${i + 1} of the description.`).join(" ");
-    const linesAtTop = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 0 });
-    const linesScrolled = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 5 });
+    const { lines: linesAtTop } = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 0 });
+    const { lines: linesScrolled } = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 5 });
     const textTop = linesAtTop.map(stripAnsi).join("\n");
     const textScrolled = linesScrolled.map(stripAnsi).join("\n");
     // Scrolled view should differ from top view
@@ -4439,7 +4439,7 @@ describe("renderDetailOverlay", () => {
   it("shows scroll-down indicator when content overflows", () => {
     const item = makeStatusItem({ id: "H-SD-1", state: "implementing" });
     const body = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} with enough text to fill multiple wrapped lines.`).join(" ");
-    const lines = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 0 });
+    const { lines } = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 0 });
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("▼ scroll down");
   });
@@ -4447,7 +4447,7 @@ describe("renderDetailOverlay", () => {
   it("shows scroll-up indicator when scrolled past top", () => {
     const item = makeStatusItem({ id: "H-SU-1", state: "implementing" });
     const body = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} with enough text to fill.`).join(" ");
-    const lines = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 3 });
+    const { lines } = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 3 });
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("▲ scroll up");
   });
@@ -4455,7 +4455,7 @@ describe("renderDetailOverlay", () => {
   it("shows scroll hint in footer when content needs scrolling", () => {
     const item = makeStatusItem({ id: "H-SH-1", state: "implementing" });
     const body = Array.from({ length: 60 }, (_, i) => `Line ${i + 1} enough to overflow.`).join(" ");
-    const lines = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 0 });
+    const { lines } = renderDetailOverlay(item, 80, 20, { descriptionBody: body, scrollOffset: 0 });
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("scroll");
     expect(text).toContain("Escape to close");
@@ -4463,7 +4463,7 @@ describe("renderDetailOverlay", () => {
 
   it("short content shows standard footer without scroll hint", () => {
     const item = makeStatusItem({ id: "H-SF-1", state: "implementing" });
-    const lines = renderDetailOverlay(item, 80, 40);
+    const { lines } = renderDetailOverlay(item, 80, 40);
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("Press Escape to close");
     expect(text).not.toContain("▼ scroll down");

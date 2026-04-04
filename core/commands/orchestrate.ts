@@ -1378,7 +1378,7 @@ export function renderTuiPanelFrameFromStatusItems(
       const detailStatusItem = statusItems.find((item) => item.id === tuiState.detailItemId);
       if (detailStatusItem) {
         const detailSnapshot = detailSnapshots?.get(tuiState.detailItemId!);
-        const overlayLines = renderDetailOverlay(detailStatusItem, termWidth, termRows, {
+        const { lines: overlayLines, totalContentLines } = renderDetailOverlay(detailStatusItem, termWidth, termRows, {
           repoUrl: tuiState.viewOptions.repoUrl,
           priority: detailSnapshot?.priority,
           dependencies: detailSnapshot?.dependencies,
@@ -1387,6 +1387,7 @@ export function renderTuiPanelFrameFromStatusItems(
           scrollOffset: tuiState.detailScrollOffset ?? 0,
           descriptionBody: detailSnapshot?.descriptionBody,
         });
+        tuiState.detailContentLines = totalContentLines;
         const content = overlayLines.join("\n");
         write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
         break;
@@ -1990,10 +1991,11 @@ export async function runTUI(opts: RunTUIOptions): Promise<void> {
       case "detail": {
         const detailItem = data.items.find((i) => i.id === tuiState.detailItemId);
         if (detailItem) {
-          const overlayLines = renderDetailOverlay(detailItem, termWidth, termRows, {
+          const { lines: overlayLines, totalContentLines } = renderDetailOverlay(detailItem, termWidth, termRows, {
             repoUrl: tuiState.viewOptions.repoUrl,
             scrollOffset: tuiState.detailScrollOffset ?? 0,
           });
+          tuiState.detailContentLines = totalContentLines;
           const content = overlayLines.join("\n");
           write(content.replace(/\n/g, "\x1B[K\n") + "\x1B[K");
           break;

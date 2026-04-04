@@ -3233,7 +3233,7 @@ export function renderDetailOverlay(
     /** Full description body to render in a scrollable region (overrides descriptionSnippet). */
     descriptionBody?: string;
   },
-): string[] {
+): { lines: string[]; totalContentLines: number } {
   // ── Build content lines from formatItemDetail + extras ────────────
 
   const contentLines: string[] = [];
@@ -3402,7 +3402,7 @@ export function renderDetailOverlay(
     result.push("");
   }
 
-  return result;
+  return { lines: result, totalContentLines };
 }
 
 /**
