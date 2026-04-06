@@ -48,12 +48,11 @@ If `nw inbox --check` returns one or more messages, handle them immediately usin
 
 ## 1. Understand the Work Item
 
-Look for `YOUR_WORK_ITEM_ID`, `YOUR_PARTITION`, `PROJECT_ROOT`, `HUB_ROOT`, `IS_HUB_LOCAL`, and `HUB_REPO_NWO` in your system prompt (written to `.ninthwave/.prompt` in your working directory by the orchestrator). These tell you:
+Look for `YOUR_WORK_ITEM_ID`, `YOUR_PARTITION`, `PROJECT_ROOT`, `HUB_ROOT`, and `HUB_REPO_NWO` in your system prompt (written to `.ninthwave/.prompt` in your working directory by the orchestrator). These tell you:
 - **YOUR_WORK_ITEM_ID**: The work item identifier (e.g., `C-2-1`, `H-3-4`)
 - **YOUR_PARTITION**: The test partition number for database and port isolation
 - **PROJECT_ROOT**: Absolute path to your working directory (the git worktree checked out to your branch). All file reads and writes should be relative to this directory.
 - **HUB_ROOT**: Absolute path to the hub repo where `.ninthwave/` lives (including `.ninthwave/work/`)
-- **IS_HUB_LOCAL**: `true` if this item targets the hub repo itself, `false` if it targets a different (cross-repo) repository
 - **HUB_REPO_NWO**: The GitHub `owner/repo` slug for the hub repository (e.g., `ninthwave-sh/ninthwave`). Used for absolute links in PR comments.
 
 These variable names are part of the launched-worker contract. Keep them stable and do not rename or reinterpret them in your changes.
@@ -280,8 +279,6 @@ nw heartbeat --progress 0.85 --label "Checked diff"
 
 ## 8. Remove Your Work Item File
 
-**Hub-local items only** (when `IS_HUB_LOCAL` is `true`):
-
 Before creating the PR, delete your work item file so that merging the PR automatically marks the item as done.
 
 1. Delete the file: `rm .ninthwave/work/*--YOUR_WORK_ITEM_ID.md`
@@ -291,10 +288,6 @@ Before creating the PR, delete your work item file so that merging the PR automa
 If `git diff origin/main -- .ninthwave/work/` shows unrelated work item drift, do not create or restore other work item files by hand just to make the diff clean. Only remove your own file and leave the unrelated drift alone.
 
 > **Why?** The work item file exists in your worktree (branched from main). Use relative paths and stay in your worktree -- do not use `${HUB_ROOT}` absolute paths here. Committing the deletion on your branch means merging the PR removes it from main. Each work item is a separate file, so this cannot conflict with other workers.
-
-**Cross-repo items** (when `IS_HUB_LOCAL` is `false`):
-
-Skip this step entirely. The work item file lives in the hub repo, not the target repo where your PR is created. The orchestrator daemon automatically removes your work item file from the hub repo after your PR merges.
 
 ## 9. Create the PR
 
@@ -402,7 +395,7 @@ After creating the PR, your implementation work is done. The **orchestrator daem
 - **Cleans up** branches and worktrees after merge
 - **Rebases** branches when they fall behind main
 
-> **Note:** For hub-local items, work item removal happens via your PR branch (step 8). For cross-repo items, the orchestrator daemon removes the work item file from the hub repo after your PR merges via the reconcile process.
+> **Note:** Work item removal happens via your PR branch (step 8). Merging the PR removes the work item file from main.
 
 You do NOT need to poll, watch, or decide on post-PR actions yourself. The daemon owns that lifecycle automation. **But when the inbox tells you to act -- especially on a rebase request -- you must do the work. Do not assume the daemon will perform the rebase for you.**
 
