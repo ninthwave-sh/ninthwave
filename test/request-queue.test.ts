@@ -15,9 +15,10 @@ describe("TokenBucket", () => {
   });
 
   it("acquire consumes a token", async () => {
-    const bucket = new TokenBucket(1.0, 5);
-    await bucket.acquire();
-    expect(bucket.getTokenCount()).toBe(4);
+    const now = () => 1000;
+    const bucket = new TokenBucket(1.0, 5, now);
+    await bucket.acquire(undefined, now);
+    expect(bucket.getTokenCount(now)).toBe(4);
   });
 
   it("refills tokens over time", () => {

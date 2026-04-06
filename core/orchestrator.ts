@@ -1394,6 +1394,7 @@ export class Orchestrator {
     // post-merge-complete.
     if (snap?.prNumber && (snap.prState === "open" || snap.prState === "merged")) {
       this.adoptTrackedPrNumber(item, snap.prNumber);
+      item.mergeCommitSha = undefined;
       item.reviewCompleted = false;
       item.reviewRound = undefined;
       item.lastCommentCheck = undefined;

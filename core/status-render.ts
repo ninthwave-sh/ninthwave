@@ -251,6 +251,7 @@ export type ItemState =
   | "implementing"
   | "rebasing"
   | "ci-failed"
+  | "cd-failed"
   | "ci-pending"
   | "ci-passed"
   | "review"
@@ -404,6 +405,7 @@ export function stateColor(state: ItemState): string {
     case "in-progress":
       return YELLOW;
     case "ci-failed":
+    case "cd-failed":
       return RED;
     case "ci-pending":
       return CYAN;
@@ -436,6 +438,7 @@ export function stateIcon(state: ItemState): string {
     case "rebasing":
       return "⟲";
     case "ci-failed":
+    case "cd-failed":
       return "✗";
     case "ci-pending":
       return "◌";
@@ -469,6 +472,8 @@ export function stateLabel(state: ItemState): string {
       return "Rebasing";
     case "ci-failed":
       return "CI Failed";
+    case "cd-failed":
+      return "CD Failed";
     case "ci-pending":
       return "CI Pending";
     case "ci-passed":
@@ -581,7 +586,7 @@ function progressPercentText(progress: number): string {
 
 function shouldShowItemProgress(item: StatusItem): boolean {
   return item.progress !== undefined
-    && (item.state === "implementing" || item.state === "rebasing" || item.state === "ci-failed");
+    && (item.state === "implementing" || item.state === "rebasing" || item.state === "ci-failed" || item.state === "cd-failed");
 }
 
 /**
@@ -762,7 +767,7 @@ export function formatDuration(item: StatusItem): string {
     return formatCountdown(item.timeoutRemainingMs);
   }
   // Live respawn countdown (computed at render time, updates every 1s via timer)
-  if (item.respawnDeadlineMs && item.state === "ci-failed") {
+  if (item.respawnDeadlineMs && (item.state === "ci-failed" || item.state === "cd-failed")) {
     const remaining = Math.max(0, item.respawnDeadlineMs - Date.now());
     if (remaining > 0) return `⟳ ${Math.ceil(remaining / 1000)}s`;
     return "⟳ ...";
@@ -783,12 +788,12 @@ export function formatTelemetrySuffix(item: StatusItem): string {
   const parts: string[] = [];
 
   // Show exit code for failed/stuck workers
-  if (item.state === "ci-failed" && item.exitCode != null) {
+  if ((item.state === "ci-failed" || item.state === "cd-failed") && item.exitCode != null) {
     parts.push(`exit: ${item.exitCode}`);
   }
 
   // Show stderr tail for failed workers
-  if (item.state === "ci-failed" && item.stderrTail) {
+  if ((item.state === "ci-failed" || item.state === "cd-failed") && item.stderrTail) {
     // Show first line of stderr for compact display
     const firstLine = item.stderrTail.split("\n").filter(l => l.trim())[0];
     if (firstLine) {
@@ -909,6 +914,7 @@ export function formatBatchProgress(items: StatusItem[]): string {
     "in-progress",
     "blocked",
     "ci-failed",
+    "cd-failed",
     "queued",
   ];
 
@@ -1159,7 +1165,7 @@ export function computeSessionMetrics(
   sessionStartedAt?: string,
 ): SessionMetrics {
   const doneItems = items.filter((i) => i.state === "done");
-  const failedItems = items.filter((i) => i.state === "ci-failed");
+  const failedItems = items.filter((i) => i.state === "ci-failed" || i.state === "cd-failed");
 
   // Collect lead times from done items with valid timestamps
   const leadTimes: number[] = [];
@@ -1431,8 +1437,9 @@ export function mapDaemonItemState(orchState: string, flags?: { rebaseRequested?
       return "rebasing";
     case "ci-failed":
     case "stuck":
-    case "fix-forward-failed":
       return "ci-failed";
+    case "fix-forward-failed":
+      return "cd-failed";
     case "ci-pending":
     case "merging":
       return "ci-pending";
@@ -1808,6 +1815,7 @@ export function formatUnifiedProgress(
     "in-progress",
     "blocked",
     "ci-failed",
+    "cd-failed",
     "queued",
   ];
 
@@ -2597,9 +2605,12 @@ export function formatItemDetail(
   if (item.state === "blocked" && item.failureReason) {
     pushWrappedDetailField(lines, "Blocked", item.failureReason, YELLOW);
   } else if (item.failureReason) {
-    pushWrappedDetailField(lines, "CI", item.failureReason, RED);
+    const label = item.state === "cd-failed" ? "CD" : "CI";
+    pushWrappedDetailField(lines, label, item.failureReason, RED);
   } else if (item.state === "ci-failed") {
     lines.push(`  ${DIM}CI:${RESET}        ${RED}Failed${RESET}`);
+  } else if (item.state === "cd-failed") {
+    lines.push(`  ${DIM}CD:${RESET}        ${RED}Failed${RESET}`);
   } else if (item.state === "blocked") {
     lines.push(`  ${DIM}Blocked:${RESET}   ${YELLOW}Waiting for intervention${RESET}`);
   } else if (item.state === "ci-pending") {

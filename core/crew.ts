@@ -174,6 +174,7 @@ export type CrewRemoteItemState =
   | "implementing"
   | "rebasing"
   | "ci-failed"
+  | "cd-failed"
   | "ci-pending"
   | "ci-passed"
   | "review"
@@ -211,6 +212,7 @@ const CREW_REMOTE_ITEM_STATES: ReadonlySet<CrewRemoteItemState> = new Set([
   "implementing",
   "rebasing",
   "ci-failed",
+  "cd-failed",
   "ci-pending",
   "ci-passed",
   "review",
@@ -262,8 +264,9 @@ function parseCrewRemoteItemState(value: unknown): CrewRemoteItemState | null {
     case "launching":
       return "implementing";
     case "stuck":
-    case "fix-forward-failed":
       return "ci-failed";
+    case "fix-forward-failed":
+      return "cd-failed";
     case "merging":
       return "ci-pending";
     case "ci-passed":
