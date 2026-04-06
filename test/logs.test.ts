@@ -301,7 +301,7 @@ describe("readLogs", () => {
     const result = readLogs("/nonexistent/path.log", { follow: false, item: null, level: null, lines: 50 }, io);
     expect(result).toHaveLength(1);
     expect(result[0]).toContain("No orchestration logs found");
-    expect(result[0]).toContain("nw watch");
+    expect(result[0]).toContain("nw` to generate logs");
   });
 
   it("displays log entries from file", () => {
