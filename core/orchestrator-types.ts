@@ -128,6 +128,8 @@ export interface OrchestratorItem {
   rebaserModel?: string;
   /** LLM model parsed from agents/forward-fixer.md frontmatter for telemetry. */
   forwardFixerModel?: string;
+  /** Whether this item's worker session is parked (suspended but preservable). Consumers added in H-SP-2. */
+  sessionParked?: boolean;
   /** ISO timestamp after which timeout kill proceeds. Set on first timeout detection, cleared on state transitions. */
   timeoutDeadline?: string;
   /** Number of user-initiated timeout extensions via extendTimeout(). */

@@ -856,6 +856,7 @@ export function executeWorkspaceClose(
     if (!closed) {
       return { success: false, error: `Failed to close workspace for ${item.id}` };
     }
+    item.workspaceRef = undefined;
   }
 
   return { success: true };

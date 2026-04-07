@@ -195,6 +195,7 @@ export function reconstructState(
     workspaceRef?: string;
     aiTool?: string;
     failureReason?: string;
+    sessionParked?: boolean;
   }>();
   if (daemonState?.items) {
     for (const si of daemonState.items) {
@@ -229,6 +230,7 @@ export function reconstructState(
         workspaceRef: si.workspaceRef,
         aiTool: si.aiTool,
         failureReason: si.failureReason,
+        sessionParked: si.sessionParked,
       });
     }
   }
@@ -263,6 +265,7 @@ export function reconstructState(
       if (saved.worktreePath) item.worktreePath = saved.worktreePath;
       if (saved.aiTool) item.aiTool = saved.aiTool;
       if (saved.failureReason) item.failureReason = saved.failureReason;
+      if (saved.sessionParked) item.sessionParked = saved.sessionParked;
     }
     const savedWorkspaceRef = saved?.workspaceRef;
 

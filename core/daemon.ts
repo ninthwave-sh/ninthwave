@@ -86,6 +86,8 @@ export interface DaemonStateItem {
   fixForwardFailCount?: number;
   /** cmux workspace reference for the forward-fixer worker session. */
   fixForwardWorkspaceRef?: string;
+  /** Whether this item's worker session is parked (suspended but preservable). */
+  sessionParked?: boolean;
   /** Absolute path to the preserved worktree directory (set for stuck items). */
   worktreePath?: string;
   /** cmux workspace reference for the implementation worker session. */
@@ -713,6 +715,7 @@ export function serializeOrchestratorState(
         ...(item.fixForwardWorkspaceRef ? { fixForwardWorkspaceRef: item.fixForwardWorkspaceRef } : {}),
         ...(item.worktreePath ? { worktreePath: item.worktreePath } : {}),
         ...(item.workspaceRef ? { workspaceRef: item.workspaceRef } : {}),
+        ...(item.sessionParked ? { sessionParked: item.sessionParked } : {}),
         ...(heartbeat
           ? {
               progress: heartbeat.progress,
