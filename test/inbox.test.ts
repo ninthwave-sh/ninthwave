@@ -16,6 +16,8 @@ import {
   type InboxDeps,
   type InboxWaitRuntime,
 } from "../core/commands/inbox.ts";
+import { stateFilePath } from "../core/daemon.ts";
+import { dirname } from "path";
 import { captureOutput } from "./helpers.ts";
 // ── In-memory IO for fast unit tests ─────────────────────────────────
 
@@ -464,6 +466,171 @@ describe("inbox", () => {
       expect(waitRuntime.stdout.join("")).toBe("arrived after wait");
       expect(activeWaitPath).toBe(inboxWaitStatePath("/fake/project", "H-FOO-1"));
       expect(readInboxWaitState("/fake/project", "H-FOO-1", io)).toBeNull();
+    });
+  });
+
+  // Regression tests for the namespace mismatch where the orchestrator writes
+  // messages to the *worktree* namespace but the worker polls the *hub*
+  // namespace (because `git rev-parse --git-common-dir` from inside a worktree
+  // hands back the main repo path). The read path must resolve the active
+  // worker namespace via the daemon state file so it reads from the same
+  // directory the orchestrator writes to.
+  describe("worker namespace resolution", () => {
+    const hubRoot = "/fake/hub";
+    const worktreeRoot = "/fake/hub/.ninthwave/.worktrees/ninthwave-H-FOO-1";
+    const itemId = "H-FOO-1";
+
+    function seedDaemonState(
+      io: InboxIO,
+      root: string,
+      items: Array<{ id: string; state: string; worktreePath?: string }>,
+    ): void {
+      const filePath = stateFilePath(root);
+      io.mkdirSync(dirname(filePath), { recursive: true });
+      io.writeFileSync(filePath, JSON.stringify({ items }));
+      for (const item of items) {
+        if (item.worktreePath) {
+          io.mkdirSync(item.worktreePath, { recursive: true });
+        }
+      }
+    }
+
+    it("checkInbox reads from the worktree namespace when daemon state points there", () => {
+      const { io } = makeMemIO();
+      seedDaemonState(io, hubRoot, [
+        { id: itemId, state: "implementing", worktreePath: worktreeRoot },
+      ]);
+      // Orchestrator writes to the worktree namespace.
+      writeInbox(worktreeRoot, itemId, "review feedback", io);
+
+      // Worker reads from the hub (getProjectRoot returns the hub inside a worktree).
+      expect(checkInbox(hubRoot, itemId, io)).toBe("review feedback");
+      // The file was consumed from the worktree namespace, not recreated in the hub.
+      expect(checkInbox(hubRoot, itemId, io)).toBeNull();
+    });
+
+    it("drainInbox returns all worktree-namespace messages when called via hub root", () => {
+      const { io } = makeMemIO();
+      seedDaemonState(io, hubRoot, [
+        { id: itemId, state: "implementing", worktreePath: worktreeRoot },
+      ]);
+      writeInbox(worktreeRoot, itemId, "first", io);
+      writeInbox(worktreeRoot, itemId, "second", io);
+      writeInbox(worktreeRoot, itemId, "third", io);
+
+      expect(drainInbox(hubRoot, itemId, io)).toEqual(["first", "second", "third"]);
+
+      // The drain history entry is recorded in the resolved (worktree) namespace,
+      // which is what `nw inbox --status` will read.
+      const history = readInboxHistory(worktreeRoot, itemId, 10, io);
+      expect(history.some((entry) => entry.action === "drain" && entry.messageCount === 3)).toBe(true);
+    });
+
+    it("waitForInbox picks up messages written to the resolved namespace", () => {
+      const { io } = makeMemIO();
+      seedDaemonState(io, hubRoot, [
+        { id: itemId, state: "implementing", worktreePath: worktreeRoot },
+      ]);
+      let sleepCount = 0;
+      const deps = {
+        io,
+        sleep: () => {
+          sleepCount++;
+          if (sleepCount === 2) {
+            // Simulate the orchestrator delivering to the worktree namespace.
+            writeInbox(worktreeRoot, itemId, "arrived via worktree", io);
+          }
+        },
+      };
+
+      const msg = waitForInbox(hubRoot, itemId, deps, 10);
+      expect(msg).toBe("arrived via worktree");
+      expect(sleepCount).toBe(2);
+    });
+
+    it("waitForInbox re-resolves namespace per poll so a mid-wait daemon-state update is picked up", () => {
+      const { io } = makeMemIO();
+      // Start with no worktreePath -- resolver falls back to hub.
+      seedDaemonState(io, hubRoot, [
+        { id: itemId, state: "launching" },
+      ]);
+      let sleepCount = 0;
+      const deps = {
+        io,
+        sleep: () => {
+          sleepCount++;
+          if (sleepCount === 1) {
+            // Orchestrator persists worktreePath + delivers message to worktree.
+            seedDaemonState(io, hubRoot, [
+              { id: itemId, state: "implementing", worktreePath: worktreeRoot },
+            ]);
+            writeInbox(worktreeRoot, itemId, "late-bind delivery", io);
+          }
+        },
+      };
+
+      const msg = waitForInbox(hubRoot, itemId, deps, 10);
+      expect(msg).toBe("late-bind delivery");
+    });
+
+    it("runInboxWait writes its wait-state file next to the resolved queue", () => {
+      const { io } = makeMemIO();
+      seedDaemonState(io, hubRoot, [
+        { id: itemId, state: "implementing", worktreePath: worktreeRoot },
+      ]);
+      const waitRuntime = makeWaitRuntime();
+      const deps: InboxDeps = {
+        io,
+        sleep: () => {
+          // While blocked, the wait-state file must live at the worktree namespace,
+          // because that's where `nw inbox --status` (via inspectInbox) will look.
+          const resolvedWaitPath = inboxWaitStatePath(worktreeRoot, itemId);
+          expect(io.existsSync(resolvedWaitPath)).toBe(true);
+          const raw = io.readFileSync(resolvedWaitPath, "utf-8");
+          expect(raw).toContain(`"itemId": "${itemId}"`);
+          expect(raw).toContain(worktreeRoot);
+          // It must NOT be sitting at the hub path (that would be the old bug).
+          expect(io.existsSync(inboxWaitStatePath(hubRoot, itemId))).toBe(false);
+          writeInbox(worktreeRoot, itemId, "done waiting", io);
+        },
+        getBranch: () => `ninthwave/${itemId}`,
+      };
+
+      cmdInbox(["--wait", itemId], hubRoot, deps, waitRuntime.runtime);
+
+      expect(waitRuntime.stdout.join("")).toBe("done waiting");
+      // Cleanup removes the wait-state file at its original (resolved) location.
+      expect(io.existsSync(inboxWaitStatePath(worktreeRoot, itemId))).toBe(false);
+    });
+
+    it("falls back to the passed-in projectRoot when daemon state is absent", () => {
+      const { io } = makeMemIO();
+      // No daemon state file -- resolver returns the hub path as-is.
+      writeInbox(hubRoot, itemId, "hub-only message", io);
+
+      expect(checkInbox(hubRoot, itemId, io)).toBe("hub-only message");
+    });
+
+    it("uses cwd as the fallback namespace when daemon state lacks worktreePath but cwd is the worktree", () => {
+      const { io } = makeMemIO();
+      // Daemon state exists but has no worktreePath -- simulates the launch
+      // race where executeLaunch has spawned the worker but writeStateFile
+      // hasn't run yet.
+      seedDaemonState(io, hubRoot, [{ id: itemId, state: "launching" }]);
+      // Mark the worktree dir as existing in the mem IO so the cwd fallback
+      // passes its existsSync check.
+      io.mkdirSync(worktreeRoot, { recursive: true });
+      // Orchestrator has already delivered to the worktree namespace.
+      writeInbox(worktreeRoot, itemId, "fast-path CI fix", io);
+
+      // Pretend the worker process is running from its worktree.
+      const origCwd = process.cwd;
+      process.cwd = () => worktreeRoot;
+      try {
+        expect(checkInbox(hubRoot, itemId, io)).toBe("fast-path CI fix");
+      } finally {
+        process.cwd = origCwd;
+      }
     });
   });
 });

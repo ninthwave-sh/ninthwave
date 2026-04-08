@@ -175,6 +175,53 @@ function listInboxFiles(
   }
 }
 
+/**
+ * Resolve the active worker namespace for inbox read operations.
+ *
+ * Workers invoke `nw inbox` from inside a git worktree, where
+ * `git rev-parse --git-common-dir` returns the main repo's `.git` dir -- so
+ * `getProjectRoot()` hands us the hub path, not the worktree path. The
+ * orchestrator, however, delivers messages to the *worktree* namespace
+ * (via `resolveImplementerInboxTarget` in orchestrator-actions.ts). Without
+ * this resolver, read-path functions (checkInbox/waitForInbox) would poll
+ * the hub directory while messages accumulate in the worktree directory --
+ * a silent hang.
+ *
+ * This matches what inspectInbox and snapshotInboxState already do, so the
+ * TUI's pending count, `nw inbox --status`, and the worker's read loop all
+ * converge on the same queue directory.
+ *
+ * Race-window fallback: between `executeLaunch` setting `item.worktreePath`
+ * and the next engine snapshot persisting the daemon state file, a freshly
+ * spawned worker's first `nw inbox --check` could resolve daemon state
+ * without a worktreePath and fall back to the hub (empty). We catch that by
+ * checking whether the process cwd is this item's own worktree -- the mux
+ * always launches workers with cwd set to the worktree -- and using it as
+ * the resolved namespace when daemon state isn't yet populated.
+ */
+function resolveInboxRoot(
+  projectRoot: string,
+  itemId: string,
+  io: InboxIO,
+): string {
+  const resolution = resolveActiveWorkerNamespace(projectRoot, itemId, io);
+  if (resolution.source === "daemon-state") {
+    return resolution.activeProjectRoot;
+  }
+  try {
+    const cwd = process.cwd();
+    if (cwd !== projectRoot) {
+      const basename = cwd.split("/").pop() ?? "";
+      if (basename === `ninthwave-${itemId}` && io.existsSync(cwd)) {
+        return cwd;
+      }
+    }
+  } catch {
+    // process.cwd() can throw if the directory was deleted; fall through.
+  }
+  return resolution.activeProjectRoot;
+}
+
 function ensureParentDir(filePath: string, io: InboxIO): void {
   const dir = dirname(filePath);
   if (!io.existsSync(dir)) {
@@ -443,17 +490,18 @@ export function checkInbox(
   itemId: string,
   io: InboxIO = defaultDeps.io,
 ): string | null {
-  const filePath = listInboxFiles(projectRoot, itemId, io)[0];
+  const ns = resolveInboxRoot(projectRoot, itemId, io);
+  const filePath = listInboxFiles(ns, itemId, io)[0];
   if (!filePath) return null;
   try {
     const content = io.readFileSync(filePath, "utf-8");
     io.unlinkSync(filePath);
-    appendInboxHistoryEntry(projectRoot, {
+    appendInboxHistoryEntry(ns, {
       itemId,
       ts: new Date().toISOString(),
       action: "deliver",
-      namespaceProjectRoot: projectRoot,
-      queuePath: itemInboxDir(projectRoot, itemId),
+      namespaceProjectRoot: ns,
+      queuePath: itemInboxDir(ns, itemId),
       preview: previewMessage(content),
     }, io);
     return content;
@@ -477,12 +525,13 @@ export function drainInbox(
     if (message === null) break;
     messages.push(message);
   }
-  appendInboxHistoryEntry(projectRoot, {
+  const ns = resolveInboxRoot(projectRoot, itemId, io);
+  appendInboxHistoryEntry(ns, {
     itemId,
     ts: new Date().toISOString(),
     action: "drain",
-    namespaceProjectRoot: projectRoot,
-    queuePath: itemInboxDir(projectRoot, itemId),
+    namespaceProjectRoot: ns,
+    queuePath: itemInboxDir(ns, itemId),
     messageCount: messages.length,
     previews: messages.slice(0, DEFAULT_PREVIEW_LIMIT).map((message) => previewMessage(message)),
   }, io);
@@ -517,30 +566,35 @@ export function runInboxWait(
   let delivered = false;
   let cleanedUp = false;
   const waitStartedAt = new Date().toISOString();
+  // Resolve once at entry so the wait-state file lives next to the queue the
+  // worker will actually watch. waitForInbox re-resolves on each poll, so the
+  // read path is unaffected if daemon state updates mid-wait -- but the wait
+  // state file is left at its initial path to keep cleanup deterministic.
+  const waitNs = resolveInboxRoot(projectRoot, itemId, deps.io);
   const waitState: InboxWaitState = {
     itemId,
     startedAt: waitStartedAt,
     pid: process.pid,
     pollMs: 1000,
-    namespaceProjectRoot: projectRoot,
-    queuePath: itemInboxDir(projectRoot, itemId),
+    namespaceProjectRoot: waitNs,
+    queuePath: itemInboxDir(waitNs, itemId),
   };
-  writeInboxWaitState(projectRoot, itemId, waitState, deps.io);
+  writeInboxWaitState(waitNs, itemId, waitState, deps.io);
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
-    clearInboxWaitState(projectRoot, itemId, deps.io);
+    clearInboxWaitState(waitNs, itemId, deps.io);
     runtime.removeSignalListener("SIGINT", onInterrupt);
     runtime.removeSignalListener("SIGTERM", onInterrupt);
   };
   const onInterrupt = () => {
     if (delivered) return;
-    appendInboxHistoryEntry(projectRoot, {
+    appendInboxHistoryEntry(waitNs, {
       itemId,
       ts: new Date().toISOString(),
       action: "wait-interrupted",
-      namespaceProjectRoot: projectRoot,
-      queuePath: itemInboxDir(projectRoot, itemId),
+      namespaceProjectRoot: waitNs,
+      queuePath: itemInboxDir(waitNs, itemId),
       waitStartedAt,
       waitInterruptedAt: new Date().toISOString(),
     }, deps.io);

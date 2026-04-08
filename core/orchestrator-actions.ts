@@ -302,15 +302,19 @@ export function executeLaunch(
     item.aiTool = selectedTool;
 
     // Deliver CI fix instruction AFTER launch (after cleanInbox runs inside launch).
-    // This ensures the worker gets the message -- writing before launch would be
-    // wiped by cleanInbox which clears stale messages from prior sessions.
-    // Use ctx.projectRoot (hub) not result.worktreePath -- workers resolve their
-    // inbox namespace from `git rev-parse --git-common-dir` which gives the hub path.
+    // Writing before launch would be wiped by cleanInbox which clears stale
+    // messages from prior sessions. Route through the standard delivery helper so
+    // the CI-fix message lands in the same namespace as every other notification
+    // (review feedback, rebase, etc.) and matches where the worker's read path
+    // resolves via `resolveActiveWorkerNamespace`.
     if (forceWorker) {
-      deps.io.writeInbox(
-        ctx.projectRoot,
-        item.id,
+      deliverToImplementerInbox(
+        orch,
+        item,
+        "launch",
         "[ORCHESTRATOR] CI Fix Request: CI failed on your PR -- please investigate the failure, fix the issue, and push a candidate fix.",
+        ctx,
+        deps,
       );
     }
 
