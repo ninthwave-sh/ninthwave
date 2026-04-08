@@ -2,7 +2,7 @@
 // Uses dependency injection and gh-module-level spies per project conventions.
 // Avoids vi.spyOn(shell, "run") which leaks across files (gh.test.ts also spies on it).
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { checkPrStatusAsync } from "../core/commands/pr-monitor.ts";
 import { buildSnapshotAsync, getWorktreeLastCommitTimeAsync } from "../core/commands/orchestrate.ts";
 import { getWorktreeLastCommitTime } from "../core/commands/orchestrate.ts";
@@ -35,6 +35,17 @@ afterEach(() => {
   prListAsyncSpy.mockReset();
   prViewAsyncSpy.mockReset();
   prChecksAsyncSpy.mockReset();
+});
+
+// Restore original implementations after this file runs -- otherwise the
+// module-scope spies leak into subsequent test files that import prListAsync
+// directly (e.g., gh-async.test.ts), causing the real function to be shadowed
+// by a dormant spy that returns undefined. CI bails on this intermittently.
+afterAll(() => {
+  isAvailableSpy.mockRestore();
+  prListAsyncSpy.mockRestore();
+  prViewAsyncSpy.mockRestore();
+  prChecksAsyncSpy.mockRestore();
 });
 
 // ── checkPrStatusAsync ──────────────────────────────────────────────
