@@ -584,7 +584,7 @@ export function getMergeCommitSha(repoRoot: string, prNumber: number): string | 
 // ── Commit CI check ─────────────────────────────────────────────────
 
 /** Name of the Ninthwave review status check to ignore in commit CI checks. */
-const IGNORED_CHECK_NAMES = new Set(["Ninthwave / Review"]);
+export const IGNORED_CHECK_NAMES = new Set(["Ninthwave / Review"]);
 
 /**
  * Check CI status on a specific commit SHA (e.g., merge commit on main).

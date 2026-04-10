@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
 import * as gh from "../../core/gh.ts";
 import { checkPrStatus } from "../../core/commands/pr-monitor.ts";
+import * as workflowDetect from "../../core/workflow-detect.ts";
 
 // ── Spies ──────────────────────────────────────────────────────────
 
@@ -19,14 +20,18 @@ const isAvailableSpy = vi.spyOn(gh, "isAvailable");
 const prListSpy = vi.spyOn(gh, "prList");
 const prViewSpy = vi.spyOn(gh, "prView");
 const prChecksSpy = vi.spyOn(gh, "prChecks");
+const detectWorkflowSpy = vi.spyOn(workflowDetect, "detectWorkflowPresence");
 
 beforeEach(() => {
   isAvailableSpy.mockReset();
   prListSpy.mockReset();
   prViewSpy.mockReset();
   prChecksSpy.mockReset();
+  detectWorkflowSpy.mockReset();
   // Default: gh is available
   isAvailableSpy.mockReturnValue(true);
+  // Default: no workflows detected
+  detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: false, hasPushWorkflows: false });
 });
 
 afterAll(() => {
@@ -34,6 +39,7 @@ afterAll(() => {
   prListSpy.mockRestore();
   prViewSpy.mockRestore();
   prChecksSpy.mockRestore();
+  detectWorkflowSpy.mockRestore();
 });
 
 // ── Fixtures: realistic gh CLI JSON responses ──────────────────────
@@ -389,12 +395,13 @@ describe("checkPrStatus format contract", () => {
       expect(parsed.status).toBe("ci-passed");
     });
 
-    it("all-SKIPPED checks with recent createdAt produce pending (CI not yet registered)", () => {
+    it("all-SKIPPED checks with recent createdAt produce pending when PR workflows exist", () => {
       const recentView = { ok: true as const, data: {
         ...VIEW_PENDING.data,
         createdAt: new Date(Date.now() - 30_000).toISOString(),
       } };
       setupOpenPr(recentView, CHECKS_ALL_SKIPPED);
+      detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: true, hasPushWorkflows: true });
 
       const parsed = parseFields(checkPrStatus("T-8b", "/repo"));
       expect(parsed.status).toBe("pending");

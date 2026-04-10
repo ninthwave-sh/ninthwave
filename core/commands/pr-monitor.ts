@@ -14,6 +14,7 @@ import {
   apiGet as defaultApiGet,
   isAvailable as defaultIsAvailable,
   ghInRepo,
+  IGNORED_CHECK_NAMES,
   type GhFailureKind,
 } from "../gh.ts";
 import { parseWorkItemReferenceBlock } from "../work-item-files.ts";
@@ -224,6 +225,14 @@ export const CI_GRACE_PERIOD_MS = 2 * 60 * 1000; // 2 minutes
 /** Short grace period when no relevant workflows detected (for third-party status checks). */
 export const NO_CI_GRACE_PERIOD_MS = 15 * 1000; // 15 seconds
 
+function filterRelevantChecks(
+  checks: { state: string; name: string; completedAt?: string }[],
+): { state: string; name: string; completedAt?: string }[] {
+  return checks.filter(
+    (c) => c.state !== "SKIPPED" && !IGNORED_CHECK_NAMES.has(c.name),
+  );
+}
+
 /**
  * Shared CI status processing. Determines ciStatus and event time from a set
  * of GitHub check runs/status checks. Used by both sync and async check paths
@@ -239,9 +248,9 @@ export function processChecks(
   now: Date = new Date(),
   gracePeriodMs: number = CI_GRACE_PERIOD_MS,
 ): { ciStatus: string; eventTime: string | undefined } {
-  const nonSkipped = checks.filter((c) => c.state !== "SKIPPED");
+  const relevantChecks = filterRelevantChecks(checks);
   let ciStatus: string;
-  if (nonSkipped.length === 0) {
+  if (relevantChecks.length === 0) {
     // No checks registered. If the PR was recently opened, CI may not have started yet.
     const inGrace =
       prCreatedAt !== undefined &&
@@ -250,11 +259,11 @@ export function processChecks(
     ciStatus = inGrace ? "unknown" : "pass";
   } else {
     ciStatus = "unknown";
-    if (nonSkipped.every((c) => c.state === "SUCCESS")) {
+    if (relevantChecks.every((c) => c.state === "SUCCESS")) {
       ciStatus = "pass";
-    } else if (nonSkipped.some((c) => CI_FAILURE_STATES.has(c.state))) {
+    } else if (relevantChecks.some((c) => CI_FAILURE_STATES.has(c.state))) {
       ciStatus = "fail";
-    } else if (nonSkipped.some((c) => c.state === "PENDING")) {
+    } else if (relevantChecks.some((c) => c.state === "PENDING")) {
       ciStatus = "pending";
     }
   }
@@ -262,7 +271,7 @@ export function processChecks(
   // For terminal CI states, derive event time from the latest check completedAt.
   let eventTime: string | undefined;
   if (ciStatus === "pass" || ciStatus === "fail") {
-    const completedTimes = nonSkipped
+    const completedTimes = relevantChecks
       .map((c) => c.completedAt)
       .filter((t): t is string => !!t)
       .sort();
@@ -340,9 +349,9 @@ export function checkPrStatusDetailed(
   // period logic handles it correctly instead of losing CI status entirely.
   const checksData = checksResult.ok ? checksResult.data : [];
 
-  // When zero checks, detect workflows to set appropriate grace period
+  // When zero relevant checks, detect workflows to set appropriate grace period.
   let gracePeriodMs = CI_GRACE_PERIOD_MS;
-  if (checksData.length === 0) {
+  if (filterRelevantChecks(checksData).length === 0) {
     const { hasPrWorkflows } = detectWorkflowPresence(repoRoot);
     if (!hasPrWorkflows) gracePeriodMs = NO_CI_GRACE_PERIOD_MS;
   }
@@ -414,7 +423,7 @@ export async function checkPrStatusDetailedAsync(
   const checksData = checksResult.ok ? checksResult.data : [];
 
   let gracePeriodMs = CI_GRACE_PERIOD_MS;
-  if (checksData.length === 0) {
+  if (filterRelevantChecks(checksData).length === 0) {
     const { hasPrWorkflows } = detectWorkflowPresence(repoRoot);
     if (!hasPrWorkflows) gracePeriodMs = NO_CI_GRACE_PERIOD_MS;
   }
