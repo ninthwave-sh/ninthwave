@@ -702,10 +702,11 @@ export const TIMEOUTS = {
    * worker about a CI failure, the worker must heartbeat within this window
    * to prove it received and is acting on the failure.
    * Consumed by `isCiFixAckTimedOut` in orchestrator-guards.ts.
-   * 2 minutes -- long enough for the message to be read, short enough to
-   * detect an unresponsive worker promptly.
+   * 30 minutes -- workers need substantial time to read CI logs, diagnose the
+   * failure, understand the affected code, and start a fix before the daemon
+   * should conclude the notification was missed.
    */
-  ciFixAck: 2 * 60 * 1000, // 2 min
+  ciFixAck: 30 * 60 * 1000, // 30 min
 
   // ── Merge pipeline ───────────────────────────────────────────────
   /**

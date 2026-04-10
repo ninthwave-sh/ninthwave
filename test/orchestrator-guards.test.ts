@@ -199,7 +199,7 @@ describe("isLaunchTimedOut", () => {
 // ── isCiFixAckTimedOut ─────────────────────────────────────────────
 
 describe("isCiFixAckTimedOut", () => {
-  const TIMEOUT = 2 * 60 * 1000; // 2 min
+  const TIMEOUT = 30 * 60 * 1000; // 30 min
 
   it("returns false when heartbeat is newer than notification", () => {
     // Heartbeat at +30s, notification at BASE
@@ -207,7 +207,7 @@ describe("isCiFixAckTimedOut", () => {
   });
 
   it("returns false when within ack timeout (no heartbeat since notify)", () => {
-    // Notification at BASE, heartbeat at BASE-1s (before), now at BASE+60s (within 2min)
+    // Notification at BASE, heartbeat at BASE-1s (before), now at BASE+60s (within 30min)
     expect(isCiFixAckTimedOut(BASE.toISOString(), iso(-1000), offset(60_000), TIMEOUT)).toBe(false);
   });
 
