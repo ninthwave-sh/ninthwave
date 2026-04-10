@@ -658,7 +658,7 @@ describe("Orchestrator", () => {
     expect(actions.some((a) => a.type === "merge")).toBe(true);
   });
 
-  it("marks stuck after exceeding max CI retries", () => {
+  it("marks stuck and closes workspace after exceeding max CI retries for a dead worker", () => {
     orch = new Orchestrator({ maxCiRetries: 1 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -667,11 +667,28 @@ describe("Orchestrator", () => {
     orch.getItem("H-1-1")!.ciFailCount = 2;
 
     const actions = orch.processTransitions(
-      snapshotWith([{ id: "H-1-1", ciStatus: "fail", prState: "open" }]),
+      snapshotWith([{ id: "H-1-1", ciStatus: "fail", prState: "open", workerAlive: false }]),
     );
 
     expect(orch.getItem("H-1-1")!.state).toBe("stuck");
     expect(actions.some((a) => a.type === "workspace-close" && a.itemId === "H-1-1")).toBe(true);
+  });
+
+  it("marks stuck and parks the session after exceeding max CI retries for a live worker", () => {
+    orch = new Orchestrator({ maxCiRetries: 1 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "ci-failed");
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.getItem("H-1-1")!.ciFailCount = 2;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "fail", prState: "open", workerAlive: true }]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("stuck");
+    expect(orch.getItem("H-1-1")!.sessionParked).toBe(true);
+    expect(actions.some((a) => a.type === "workspace-close" && a.itemId === "H-1-1")).toBe(false);
   });
 
   // ── 9. PR merged → clean action ───────────────────────────────

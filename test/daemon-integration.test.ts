@@ -626,7 +626,7 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
     expect(orch.getItem("STUCK-2")!.state).toBe("stuck");
   });
 
-  it("CI fail exceeding maxCiRetries marks stuck", () => {
+  it("CI fail exceeding maxCiRetries marks stuck and closes the workspace for a dead worker", () => {
     // maxCiRetries: 1 means item can fail once and recover, but second failure → stuck
     const orch = new Orchestrator({ sessionLimit: 4, maxCiRetries: 1 });
     orch.addItem(makeWorkItem("STUCK-3"));
@@ -657,11 +657,57 @@ describe("Daemon lifecycle: stuck item and retry logic", () => {
 
     // Next poll in ci-failed state: ciFailCount (2) > maxCiRetries (1) → stuck
     const actions = orch.processTransitions(
-      snapshotWith([{ id: "STUCK-3", ciStatus: "fail", prState: "open", isMergeable: true }]),
+      snapshotWith([{
+        id: "STUCK-3",
+        ciStatus: "fail",
+        prState: "open",
+        isMergeable: true,
+        workerAlive: false,
+      }]),
     );
     expect(orch.getItem("STUCK-3")!.state).toBe("stuck");
     expect(orch.getItem("STUCK-3")!.failureReason).toContain("max CI retries");
     expect(actions.some((a) => a.type === "workspace-close")).toBe(true);
+  });
+
+  it("CI fail exceeding maxCiRetries marks stuck and parks the session for a live worker", () => {
+    const orch = new Orchestrator({ sessionLimit: 4, maxCiRetries: 1 });
+    orch.addItem(makeWorkItem("STUCK-3"));
+    orch.getItem("STUCK-3")!.reviewCompleted = true;
+    orch.hydrateState("STUCK-3", "ci-pending");
+    orch.getItem("STUCK-3")!.prNumber = 77;
+    orch.getItem("STUCK-3")!.workspaceRef = "workspace:3";
+
+    orch.processTransitions(
+      snapshotWith([{ id: "STUCK-3", ciStatus: "fail", prState: "open", isMergeable: true }]),
+    );
+    expect(orch.getItem("STUCK-3")!.state).toBe("ci-failed");
+    expect(orch.getItem("STUCK-3")!.ciFailCount).toBe(1);
+
+    orch.processTransitions(
+      snapshotWith([{ id: "STUCK-3", ciStatus: "pending", prState: "open" }]),
+    );
+    expect(orch.getItem("STUCK-3")!.state).toBe("ci-pending");
+
+    orch.processTransitions(
+      snapshotWith([{ id: "STUCK-3", ciStatus: "fail", prState: "open", isMergeable: true }]),
+    );
+    expect(orch.getItem("STUCK-3")!.state).toBe("ci-failed");
+    expect(orch.getItem("STUCK-3")!.ciFailCount).toBe(2);
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "STUCK-3",
+        ciStatus: "fail",
+        prState: "open",
+        isMergeable: true,
+        workerAlive: true,
+      }]),
+    );
+    expect(orch.getItem("STUCK-3")!.state).toBe("stuck");
+    expect(orch.getItem("STUCK-3")!.sessionParked).toBe(true);
+    expect(orch.getItem("STUCK-3")!.failureReason).toContain("max CI retries");
+    expect(actions.some((a) => a.type === "workspace-close")).toBe(false);
   });
 
   it("executeWorkspaceClose captures screen output for stuck items", () => {
