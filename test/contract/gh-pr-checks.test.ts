@@ -371,15 +371,27 @@ describe("checkPrStatus classification", () => {
     expect(result.status).toBe("ci-passed");
   });
 
-  it("SKIPPED checks are excluded: only SKIPPED with recent createdAt = pending (CI not yet registered)", () => {
+  it("SKIPPED checks are excluded: only SKIPPED with recent createdAt = pending when PR workflows exist", () => {
     stubCheckPrStatus({
       checks: [{ state: "SKIPPED", name: "optional-check" }],
       createdAt: new Date(Date.now() - 30_000).toISOString(),
     });
+    detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: true, hasPushWorkflows: true });
 
     const result = parseStatus(checkPrStatus("TEST-1", "/repo"));
-    // nonSkipped is empty, within grace period → wait for CI to register
+    // relevantChecks is empty, but PR workflows exist so the standard grace period applies.
     expect(result.status).toBe("pending");
+  });
+
+  it('ignored review-only checks use the no-workflow short grace period', () => {
+    stubCheckPrStatus({
+      checks: [{ state: "FAILURE", name: "Ninthwave / Review" }],
+      createdAt: new Date(Date.now() - 30_000).toISOString(),
+    });
+    detectWorkflowSpy.mockReturnValue({ hasPrWorkflows: false, hasPushWorkflows: false });
+
+    const result = parseStatus(checkPrStatus("TEST-1", "/repo"));
+    expect(result.status).toBe("ci-passed");
   });
 
   it("SKIPPED + SUCCESS = ci-passed", () => {
