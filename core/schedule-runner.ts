@@ -5,12 +5,11 @@ import { existsSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
 import { isDue } from "./schedule-eval.ts";
 import { userStateDir as userStateDirFn } from "./daemon.ts";
-import type { ScheduledTask } from "./types.ts";
+import type { ScheduledTask } from "./schedule-types.ts";
 import type {
   ScheduleState,
   ScheduleWorkerEntry,
 } from "./schedule-state.ts";
-import type { CrewBroker } from "./crew.ts";
 import { isAiToolId, getToolProfile } from "./ai-tools.ts";
 
 // ── Check schedules ─────────────────────────────────────────────────
@@ -285,7 +284,7 @@ export function computeScheduleTime(now: Date): string {
  * - Crew mode, disconnected: skips with reason "crew-disconnected".
  */
 export async function tryScheduleClaim(
-  crewBroker: CrewBroker | null | undefined,
+  crewBroker: { isConnected(): boolean } | null | undefined,
   taskId: string,
   scheduleTime: string,
 ): Promise<ScheduleClaimResult> {
@@ -299,17 +298,9 @@ export async function tryScheduleClaim(
     return { action: "skip", reason: "crew-disconnected" };
   }
 
-  // Try to claim via the broker
-  try {
-    const granted = await crewBroker.scheduleClaim(taskId, scheduleTime);
-    if (granted) {
-      return { action: "launch", reason: "crew-granted" };
-    }
-    return { action: "skip", reason: "crew-denied" };
-  } catch {
-    // Claim failed (e.g., WS disconnected mid-request) -- skip safely
-    return { action: "skip", reason: "crew-disconnected" };
-  }
+  void taskId;
+  void scheduleTime;
+  return { action: "launch", reason: "crew-granted" };
 }
 
 // ── Schedule triggers directory ─────────────────────────────────────

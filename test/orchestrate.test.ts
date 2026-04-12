@@ -47,7 +47,6 @@ import {
   bootstrapTuiUpdateNotice,
   renderTuiPanelFrameFromStatusItems,
   runTuiStartupPreparation,
-  resolveScheduleExecutionEnabled,
   resolveInteractiveStartupConfig,
   resolveUnresolvedRestartedWorkers,
   loadDiscoveryStartupItems,
@@ -81,11 +80,8 @@ import {
   type DeepPartial,
 } from "../core/orchestrator.ts";
 import type { WorkItem } from "../core/types.ts";
-import type { ScheduledTask } from "../core/types.ts";
 import type { StatusItem, ViewOptions } from "../core/status-render.ts";
 import type { Multiplexer } from "../core/mux.ts";
-import { emptyScheduleState } from "../core/schedule-state.ts";
-import { tryScheduleClaim } from "../core/schedule-runner.ts";
 import {
   pidFilePath,
   logFilePath,
@@ -5299,7 +5295,6 @@ describe("orchestrateLoop crew mode", () => {
         }),
         isConnected: vi.fn(() => opts.connected ?? true),
         getCrewStatus: vi.fn(() => null),
-        scheduleClaim: vi.fn(async () => false),
         report: vi.fn(),
       },
       completedIds,
@@ -5496,104 +5491,6 @@ describe("orchestrateLoop crew mode", () => {
     // Should have logged the blocking event
     const blockLogs = logs.filter((l) => l.event === "crew_launches_blocked");
     expect(blockLogs.length).toBeGreaterThan(0);
-  });
-
-  it("deduplicates scheduled fires across two orchestrators in crew mode", async () => {
-    const task: ScheduledTask = {
-      id: "friction-review",
-      title: "Review friction inbox",
-      schedule: "every weekday at 09:00",
-      scheduleCron: "* * * * *",
-      priority: "medium",
-      domain: "friction",
-      timeout: 10 * 60 * 1000,
-      prompt: "Run nw review-inbox friction",
-      filePath: "/tmp/test-project/.ninthwave/schedules/friction--review.md",
-      enabled: true,
-    };
-
-    const claimedScheduleKeys = new Set<string>();
-    const broker: CrewBroker = {
-      connect: vi.fn(async () => {}),
-      sync: vi.fn(),
-      claim: vi.fn(async () => null),
-      complete: vi.fn(),
-      scheduleClaim: vi.fn(async (taskId: string, scheduleTime: string) => {
-        const key = `${taskId}:${scheduleTime}`;
-        if (claimedScheduleKeys.has(key)) return false;
-        claimedScheduleKeys.add(key);
-        return true;
-      }),
-      heartbeat: vi.fn(),
-      disconnect: vi.fn(),
-      isConnected: vi.fn(() => true),
-      getCrewStatus: vi.fn(() => null),
-      report: vi.fn(),
-    };
-
-    const launchCalls: string[] = [];
-    const logs: LogEntry[] = [];
-    const makeScheduleDeps = (name: string) => {
-      let state = emptyScheduleState();
-      return {
-        listScheduledTasks: () => [task],
-        readState: () => state,
-        writeState: (_projectRoot: string, nextState: typeof state) => {
-          state = nextState;
-        },
-        launchWorker: async () => {
-          launchCalls.push(name);
-          return `ws:${name}`;
-        },
-        claimScheduleRun: (taskId: string, scheduleTime: string) =>
-          tryScheduleClaim(broker, taskId, scheduleTime),
-        monitorDeps: {
-          listWorkspaces: () => "",
-          closeWorkspace: () => true,
-        },
-        aiTool: "claude",
-        triggerDir: "/nonexistent",
-      };
-    };
-
-    const loopDepsFor = (name: string): OrchestrateLoopDeps => ({
-      buildSnapshot: (): PollSnapshot => ({ items: [{ id: "KEEP-1", workerAlive: true }], readyIds: [] }),
-      sleep: () => Promise.resolve(),
-      log: (entry) => logs.push({ ...entry, daemon: name }),
-      actionDeps: mockActionDeps(),
-      crewBroker: broker,
-      scheduleDeps: makeScheduleDeps(name),
-      isScheduleExecutionEnabled: () => true,
-      getFreeMem: () => 16 * 1024 ** 3,
-    });
-
-    const makeRunningOrchestrator = () => {
-      const orch = new Orchestrator({ sessionLimit: 5, mergeStrategy: "auto" });
-      orch.addItem(makeWorkItem("KEEP-1"));
-      orch.hydrateState("KEEP-1", "implementing");
-      return orch;
-    };
-
-    await orchestrateLoop(
-      makeRunningOrchestrator(),
-      defaultCtx,
-      loopDepsFor("daemon-a"),
-      { maxIterations: 1 },
-    );
-    await orchestrateLoop(
-      makeRunningOrchestrator(),
-      defaultCtx,
-      loopDepsFor("daemon-b"),
-      { maxIterations: 1 },
-    );
-
-    expect(launchCalls).toHaveLength(1);
-    expect(launchCalls).toEqual(["daemon-a"]);
-    expect(logs).toContainEqual(expect.objectContaining({
-      event: "schedule-skipped",
-      reason: "crew-denied",
-      daemon: "daemon-b",
-    }));
   });
 
   it("calls broker.complete when an item reaches true completion", async () => {
@@ -5950,11 +5847,11 @@ describe("crew remote state: last broker update replaces stale snapshots", () =>
 // ── parseWatchArgs (passthrough path) ──────────────────────────────────
 
 describe("resolveInteractiveStartupConfig", () => {
-  const projectRoot = "/tmp/interactive-schedule";
+  const projectRoot = "/tmp/interactive-startup";
 
   it("keeps persisted merge, review, and collaboration defaults", () => {
     const result = resolveInteractiveStartupConfig(
-      { review_external: false, schedule_enabled: false, ai_tools: ["claude"] },
+      { review_external: false, ai_tools: ["claude"] } as any,
       {
         ai_tools: ["opencode", "copilot"],
         merge_strategy: "auto",
@@ -5968,14 +5865,13 @@ describe("resolveInteractiveStartupConfig", () => {
       mergeStrategy: "auto",
       reviewMode: "all",
       collaborationMode: "share",
-      scheduleEnabled: false,
     });
     expect(result.savedToolIds).toEqual(["opencode", "copilot"]);
   });
 
   it("falls back to manual/off/local when persisted defaults are absent", () => {
     const result = resolveInteractiveStartupConfig(
-      { review_external: true, schedule_enabled: false },
+      { review_external: true } as any,
       {},
       projectRoot,
     );
@@ -5984,14 +5880,13 @@ describe("resolveInteractiveStartupConfig", () => {
       mergeStrategy: "manual",
       reviewMode: "off",
       collaborationMode: "local",
-      scheduleEnabled: false,
     });
     expect(result.savedToolIds).toBeUndefined();
   });
 
   it("honors explicit tool override while keeping resolved startup defaults", () => {
     const result = resolveInteractiveStartupConfig(
-      { review_external: true, schedule_enabled: false },
+      { review_external: true } as any,
       { review_mode: "mine" },
       projectRoot,
       "claude",
@@ -6000,23 +5895,9 @@ describe("resolveInteractiveStartupConfig", () => {
     expect(result.defaults.reviewMode).toBe("mine");
   });
 
-  it("restores the project-local scheduled-task preference on re-entry", () => {
-    const result = resolveInteractiveStartupConfig(
-      { review_external: false, schedule_enabled: true },
-      {
-        schedule_enabled_projects: {
-          [projectRoot.replace(/\//g, "-")]: true,
-        },
-      },
-      projectRoot,
-    );
-
-    expect(result.defaults.scheduleEnabled).toBe(true);
-  });
-
   it("builds full durable startup updates while keeping join codes runtime-only", () => {
     const startupConfig = resolveInteractiveStartupConfig(
-      { review_external: false, schedule_enabled: false },
+      { review_external: false } as any,
       {
         ai_tools: ["opencode", "copilot"],
         merge_strategy: "auto",
@@ -6032,7 +5913,6 @@ describe("resolveInteractiveStartupConfig", () => {
       allSelected: false,
       reviewMode: "all",
       connectionAction: { type: "join", code: "K2F9-AB3X-7YPL-QM4N" },
-      scheduleEnabled: false,
     };
 
     const persisted = buildStartupPersistenceUpdates(result, {
@@ -6059,48 +5939,11 @@ describe("resolveInteractiveStartupConfig", () => {
   });
 });
 
-describe("resolveScheduleExecutionEnabled", () => {
-  const projectRoot = "/tmp/schedule-project";
-  const projectKey = "-tmp-schedule-project";
-
-  it("defaults schedule execution off on first run", () => {
-    expect(resolveScheduleExecutionEnabled(
-      { schedule_enabled: true },
-      {},
-      projectRoot,
-    )).toBe(false);
-  });
-
-  it("keeps schedule execution off when local preference is false", () => {
-    expect(resolveScheduleExecutionEnabled(
-      { schedule_enabled: true },
-      { schedule_enabled_projects: { [projectKey]: false } },
-      projectRoot,
-    )).toBe(false);
-  });
-
-  it("turns schedule execution on only when both project capability and local preference are enabled", () => {
-    expect(resolveScheduleExecutionEnabled(
-      { schedule_enabled: false },
-      { schedule_enabled_projects: { [projectKey]: true } },
-      projectRoot,
-    )).toBe(false);
-
-    expect(resolveScheduleExecutionEnabled(
-      { schedule_enabled: true },
-      { schedule_enabled_projects: { [projectKey]: true } },
-      projectRoot,
-    )).toBe(true);
-  });
-});
-
 describe("createRuntimeControlHandlers", () => {
-  it("persists merge, review, session limit, and schedule changes while keeping pause and collaboration runtime-only", () => {
+  it("persists merge, review, and session limit changes while keeping pause and collaboration runtime-only", () => {
     const savedUpdates: Array<Record<string, unknown>> = [];
-    const savedScheduleEnabled: boolean[] = [];
     const sentControls: Array<Record<string, unknown>> = [];
     let currentSessionLimit = 3;
-    let currentScheduleEnabled = false;
 
     const handlers = createRuntimeControlHandlers({
       sendControl: (command) => {
@@ -6108,18 +5951,10 @@ describe("createRuntimeControlHandlers", () => {
         if (command.type === "set-session-limit") {
           currentSessionLimit = command.limit;
         }
-        if (command.type === "set-schedule-enabled") {
-          currentScheduleEnabled = command.enabled;
-        }
       },
       getSessionLimit: () => currentSessionLimit,
-      getScheduleEnabled: () => currentScheduleEnabled,
-      projectRoot: "/tmp/runtime-controls",
       saveUserConfigFn: (updates) => {
         savedUpdates.push(updates as Record<string, unknown>);
-      },
-      saveProjectScheduleEnabledFn: (_projectRoot, enabled) => {
-        savedScheduleEnabled.push(enabled);
       },
     });
 
@@ -6131,11 +5966,9 @@ describe("createRuntimeControlHandlers", () => {
     handlers.onStrategyChange?.("auto");
     handlers.onReviewChange?.("all-prs");
     handlers.onSessionLimitChange?.(1);
-    handlers.onScheduleEnabledChange?.(true);
     handlers.onShutdown?.();
 
     expect(currentSessionLimit).toBe(4);
-    expect(currentScheduleEnabled).toBe(true);
     expect(sentControls).toEqual([
       { type: "set-collaboration-mode", mode: "shared", source: "keyboard" },
       { type: "set-collaboration-mode", mode: "joined", code: "ABCD-1234", source: "keyboard" },
@@ -6145,7 +5978,6 @@ describe("createRuntimeControlHandlers", () => {
       { type: "set-merge-strategy", strategy: "auto", source: "keyboard" },
       { type: "set-review-mode", mode: "all-prs", source: "keyboard" },
       { type: "set-session-limit", limit: 4, source: "keyboard" },
-      { type: "set-schedule-enabled", enabled: true, source: "keyboard" },
       { type: "shutdown", source: "keyboard" },
     ]);
     expect(savedUpdates).toEqual([
@@ -6153,7 +5985,6 @@ describe("createRuntimeControlHandlers", () => {
       { review_mode: "all" },
       { session_limit: 4 },
     ]);
-    expect(savedScheduleEnabled).toEqual([true]);
     expect(shareResult).toEqual({ mode: "shared" });
     expect(joinResult).toEqual({ mode: "joined" });
     expect(localResult).toEqual({ mode: "local" });
@@ -6182,7 +6013,6 @@ describe("applyRuntimeCollaborationAction", () => {
       sync: vi.fn(),
       claim: vi.fn(async () => null),
       complete: vi.fn(),
-      scheduleClaim: vi.fn(async () => false),
       heartbeat: vi.fn(),
       disconnect: vi.fn(),
       isConnected: vi.fn(() => true),
@@ -6736,7 +6566,6 @@ describe("watch engine runner", () => {
       }),
       initialReviewMode: "ninthwave-prs",
       initialCollaborationMode: "local",
-      initialScheduleEnabled: false,
       getSessionLimit,
       setSessionLimit,
     });
@@ -6798,7 +6627,6 @@ describe("watch engine runner", () => {
       sessionLimit: 2,
       reviewMode: "ninthwave-prs",
       collaborationMode: "local",
-      scheduleEnabled: false,
     });
   });
 
@@ -6836,7 +6664,6 @@ describe("watch engine runner", () => {
     runner.sendControl({ type: "set-review-mode", mode: "off", source: "test-1" });
     runner.sendControl({ type: "set-collaboration-mode", mode: "shared", source: "test-2" });
     runner.sendControl({ type: "set-session-limit", limit: 4, source: "test-3" });
-    runner.sendControl({ type: "set-schedule-enabled", enabled: true, source: "test-3b" });
     runner.sendControl({ type: "set-merge-strategy", strategy: "auto", source: "test-4" });
     continueLoop();
     await runPromise;
@@ -6846,32 +6673,21 @@ describe("watch engine runner", () => {
       "review_mode_changed",
       "collaboration_mode_changed",
       "session_limit_changed",
-      "schedule_enabled_changed",
     ]);
-    expect(snapshots).toHaveLength(3);
+    expect(snapshots).toHaveLength(2);
     expect(snapshots[0]!.runtime).toEqual({
       paused: false,
       mergeStrategy: "manual",
       sessionLimit: 2,
       reviewMode: "ninthwave-prs",
       collaborationMode: "local",
-      scheduleEnabled: false,
     });
     expect(snapshots[1]!.runtime).toEqual({
-      paused: true,
-      mergeStrategy: "manual",
-      sessionLimit: 4,
-      reviewMode: "off",
-      collaborationMode: "shared",
-      scheduleEnabled: true,
-    });
-    expect(snapshots[2]!.runtime).toEqual({
       paused: true,
       mergeStrategy: "auto",
       sessionLimit: 4,
       reviewMode: "off",
       collaborationMode: "shared",
-      scheduleEnabled: true,
     });
     expect(orch.config.mergeStrategy).toBe("auto");
     expect(orch.config.skipReview).toBe(true);
@@ -6949,7 +6765,6 @@ describe("shared engine wrappers", () => {
         serializeOrchestratorState(items, 1, "2026-04-01T00:00:00.000Z", { heartbeats }),
       initialReviewMode: "ninthwave-prs" as const,
       initialCollaborationMode: "local" as const,
-      initialScheduleEnabled: false,
       getSessionLimit: () => 1,
       setSessionLimit: () => {},
     };
@@ -7023,7 +6838,6 @@ describe("shared engine wrappers", () => {
           serializeOrchestratorState(items, 2, "2026-04-01T00:00:00.000Z", { heartbeats }),
         initialReviewMode: "ninthwave-prs",
         initialCollaborationMode: "local",
-        initialScheduleEnabled: false,
         getSessionLimit: () => currentSessionLimit,
         setSessionLimit: (limit) => {
           currentSessionLimit = limit;
@@ -7035,7 +6849,6 @@ describe("shared engine wrappers", () => {
       runner.sendControl({ type: "set-review-mode", mode: "all-prs", source: "test-review" });
       runner.sendControl({ type: "set-collaboration-mode", mode: "shared", source: "test-collab" });
       runner.sendControl({ type: "set-session-limit", limit: 4, source: "test-session-limit" });
-      runner.sendControl({ type: "set-schedule-enabled", enabled: true, source: "test-schedule" });
       runner.sendControl({ type: "set-merge-strategy", strategy: "auto", source: "test-merge" });
       continueLoop();
       await runPromise;
@@ -7061,7 +6874,6 @@ describe("shared engine wrappers", () => {
       "review_mode_changed",
       "collaboration_mode_changed",
       "session_limit_changed",
-      "schedule_enabled_changed",
     ]);
     expect(detached.snapshotRuntimes).toEqual([
       {
@@ -7070,15 +6882,6 @@ describe("shared engine wrappers", () => {
         sessionLimit: 2,
         reviewMode: "ninthwave-prs",
         collaborationMode: "local",
-        scheduleEnabled: false,
-      },
-      {
-        paused: true,
-        mergeStrategy: "manual",
-        sessionLimit: 4,
-        reviewMode: "all-prs",
-        collaborationMode: "shared",
-        scheduleEnabled: true,
       },
       {
         paused: true,
@@ -7086,7 +6889,6 @@ describe("shared engine wrappers", () => {
         sessionLimit: 4,
         reviewMode: "all-prs",
         collaborationMode: "shared",
-        scheduleEnabled: true,
       },
     ]);
     expect(detached.snapshotTimings[0]).toEqual({
@@ -7109,9 +6911,8 @@ describe("shared engine wrappers", () => {
         totalBlocking: 2_500,
       },
       null,
-      null,
     ]);
-    expect(detached.snapshotPollIntervals).toEqual([1200, null, 800]);
+    expect(detached.snapshotPollIntervals).toEqual([1200, 800]);
   });
 });
 
@@ -7347,7 +7148,6 @@ describe("interactive watch operator session", () => {
         sessionLimit: 2,
         reviewMode: "ninthwave-prs",
         collaborationMode: "local",
-        scheduleEnabled: false,
         ...runtimeOverrides,
       },
       ...(interactiveTiming ? { interactiveTiming } : {}),
@@ -9672,7 +9472,6 @@ describe("orchestrateLoop claims gating", () => {
       disconnect: vi.fn(),
       isConnected: vi.fn(() => brokerConnected),
       getCrewStatus: vi.fn(() => null),
-      scheduleClaim: vi.fn(async () => false),
       report: vi.fn(),
       setTelemetry: vi.fn(),
     };

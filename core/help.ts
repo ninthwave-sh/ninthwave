@@ -38,7 +38,6 @@ import { cmdInbox } from "./commands/inbox.ts";
 import { cmdLogs } from "./commands/logs.ts";
 import { cmdLineageToken } from "./commands/lineage-token.ts";
 import { cmdReviewInbox } from "./commands/review-inbox.ts";
-import { cmdSchedule } from "./commands/schedule.ts";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -302,26 +301,6 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
       "nw logs --level warn",
       "nw logs -n 100",
       "nw logs -f --item H-FOO-1 --level error",
-    ],
-  },
-
-  {
-    name: "schedule",
-    usage: "schedule [list|show <id>|validate|run <id>|history [<id>]]",
-    description: "List, inspect, validate, trigger, or view history of scheduled tasks",
-    group: "diagnostic",
-    needsRoot: true,
-    needsWork: false,
-    handler: (ctx) => cmdSchedule(ctx.args, ctx.projectRoot),
-    flags: {},
-    examples: [
-      "nw schedule",
-      "nw schedule list",
-      "nw schedule show daily-tests",
-      "nw schedule validate",
-      "nw schedule run daily-tests",
-      "nw schedule history",
-      "nw schedule history daily-tests",
     ],
   },
 

@@ -30,7 +30,6 @@ import { getBundleDir } from "./paths.ts";
 import { readLatestTokenUsage } from "./token-usage.ts";
 import { readExternalReviews, writeExternalReviews, type ExternalReviewItem } from "./daemon.ts";
 import { processExternalReviews, type ExternalReviewDeps } from "./external-review.ts";
-import { processScheduledTasks, type ScheduleLoopDeps } from "./schedule-processing.ts";
 import { AuthorCache } from "./git-author.ts";
 import { getAvailableMemory } from "./memory.ts";
 import {
@@ -643,10 +642,6 @@ export interface OrchestrateLoopDeps {
   crewBroker?: CrewBroker;
   /** Override token usage resolution for telemetry tests. */
   readTokenUsage?: (item: OrchestratorItem, action: Action, ctx: ExecutionContext) => TokenUsage | undefined;
-  /** Schedule dependencies. When present, scheduled task processing is active. */
-  scheduleDeps?: ScheduleLoopDeps;
-  /** Dynamic gate for schedule execution while keeping schedule deps wired. */
-  isScheduleExecutionEnabled?: () => boolean;
   /** Query GitHub rate limit status. Injectable for testing. */
   queryRateLimit?: (repoRoot: string) => Promise<import("../gh.ts").RateLimitInfo | null>;
   /** Injectable clock for interactive watch timing tests. Defaults to Date.now. */
@@ -852,7 +847,6 @@ export async function orchestrateLoop(
   let __lastSnapshot: PollSnapshot | undefined;
   let __lastActions: import("../orchestrator.ts").Action[] = [];
   let __lastTransitionIter = 0;
-  let lastScheduleCheckMs = 0; // Force first check immediately
   let lastMainRefreshMs = 0; // Force first refresh immediately
   const watchIntervalMs = config.watchIntervalMs ?? 30_000;
   let lastWatchScanMs = Date.now();
@@ -1059,34 +1053,6 @@ export async function orchestrateLoop(
         }));
         deps.crewBroker.sync(syncItems);
       } catch { /* best-effort -- sync failure doesn't block the orchestrator */ }
-    }
-
-    // ── Scheduled task processing ─────────────────────────────────
-    // Gated by 30s interval check to avoid excessive filesystem reads.
-      if (deps.scheduleDeps && deps.isScheduleExecutionEnabled?.() !== false) {
-      const SCHEDULE_CHECK_INTERVAL_MS = 30_000;
-      const nowMs = Date.now();
-      if (nowMs - lastScheduleCheckMs >= SCHEDULE_CHECK_INTERVAL_MS) {
-        lastScheduleCheckMs = nowMs;
-        try {
-          await processScheduledTasks(
-            ctx.projectRoot,
-            orch,
-            deps.scheduleDeps,
-            log,
-            memorySessionLimit,
-          );
-        } catch (e: unknown) {
-          // Non-fatal -- schedule processing failure shouldn't block the orchestrator
-          const msg = e instanceof Error ? e.message : String(e);
-          log({
-            ts: new Date().toISOString(),
-            level: "warn",
-            event: "schedule_error",
-            error: msg,
-          });
-        }
-      }
     }
 
     // ── Periodic main branch refresh ──────────────────────────────

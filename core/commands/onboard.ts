@@ -32,10 +32,8 @@ import {
 } from "../interactive.ts";
 import type { InteractiveResult, InteractiveDeps } from "../interactive.ts";
 import {
-  isProjectScheduleEnabled,
   loadConfig,
   loadUserConfig,
-  projectUserConfigKey,
   saveUserConfig,
 } from "../config.ts";
 import { printHelp } from "../help.ts";
@@ -413,9 +411,7 @@ export async function cmdNoArgs(
   const doLoadUserConfig = deps.loadUserConfig ?? loadUserConfig;
   const projectConfig = doLoadConfig(projectRoot);
   const userConfig = doLoadUserConfig();
-  const defaultSettings = resolveTuiSettingsDefaults(userConfig, {
-    scheduleEnabled: isProjectScheduleEnabled(userConfig, projectRoot),
-  });
+  const defaultSettings = resolveTuiSettingsDefaults(userConfig);
   const defaultReviewMode = defaultSettings.reviewMode;
   const installedTools = detectInstalledAITools();
   const doInteractive = deps.runInteractiveFlow ?? runInteractiveFlow;
@@ -438,10 +434,6 @@ export async function cmdNoArgs(
         savedToolIds: userConfig.ai_tools,
         defaults: defaultSettings,
       }),
-      schedule_enabled_projects: {
-        ...(userConfig.schedule_enabled_projects ?? {}),
-        [projectUserConfigKey(projectRoot)]: result.scheduleEnabled ?? false,
-      },
     });
   } catch {
     // best-effort persistence only

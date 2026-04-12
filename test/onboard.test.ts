@@ -556,7 +556,7 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => items,
       isDaemonRunning: () => null,
       ensureMux: async () => { ensureMuxCalled = true; },
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async () => interactiveResult,
@@ -595,7 +595,7 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => allItems,
       loadStartupItems: () => runnableItems,
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       runInteractiveFlow: async (todos) => {
         seenTodos = todos;
         return null;
@@ -630,7 +630,7 @@ describe("cmdNoArgs", () => {
       },
       isDaemonRunning: () => null,
       ensureMux: async () => {},
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       runInteractiveFlow: async (todos, _defaultSessionLimit, deps) => {
         expect(todos.map((item) => item.id)).toEqual(["H-LOCAL-1", "H-LOCAL-2"]);
         expect(refreshCalled).toBe(false);
@@ -678,7 +678,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
@@ -705,7 +705,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
@@ -735,7 +735,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
@@ -762,7 +762,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
@@ -790,7 +790,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
@@ -818,7 +818,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
@@ -846,7 +846,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async () => ({
@@ -873,7 +873,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       runInteractiveFlow: async () => null, // User cancelled
       runWatch: async () => { watchCalled = true; },
@@ -892,7 +892,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async () => {
@@ -922,7 +922,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: true, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: true } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: () => {},
       runInteractiveFlow: async (_todos, _wip, deps) => {
@@ -953,7 +953,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: true, schedule_enabled: false, ai_tools: ["claude"] }),
+      loadConfig: () => ({ review_external: true, ai_tools: ["claude"] } as any),
       loadUserConfig: () => ({ ai_tools: ["opencode", "copilot"], merge_strategy: "auto", collaboration_mode: "share" }),
       runInteractiveFlow: async (_todos, _wip, deps) => {
         expect(deps?.defaultReviewMode).toBe("off");
@@ -961,7 +961,6 @@ describe("cmdNoArgs", () => {
           mergeStrategy: "auto",
           reviewMode: "off",
           collaborationMode: "share",
-          scheduleEnabled: false,
         });
         expect(deps?.savedToolIds).toEqual(["opencode", "copilot"]);
         return null;
@@ -983,7 +982,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
       runInteractiveFlow: async () => ({
@@ -1006,9 +1005,6 @@ describe("cmdNoArgs", () => {
       session_limit: 4,
       collaboration_mode: "share",
       ai_tools: ["opencode", "copilot"],
-      schedule_enabled_projects: {
-        [projectDir.replace(/\//g, "-")]: false,
-      },
     });
     expect(watchArgs).toContain("--connect");
     expect(watchArgs).toContain("--tool");
@@ -1026,7 +1022,7 @@ describe("cmdNoArgs", () => {
       isTTY: true,
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
-      loadConfig: () => ({ review_external: false, schedule_enabled: false }),
+      loadConfig: () => ({ review_external: false } as any),
       loadUserConfig: () => ({}),
       saveUserConfig: (updates) => savedUpdates.push(updates as Record<string, unknown>),
       runInteractiveFlow: async () => ({
@@ -1048,9 +1044,6 @@ describe("cmdNoArgs", () => {
       review_mode: "mine",
       session_limit: 4,
       collaboration_mode: "join",
-      schedule_enabled_projects: {
-        [projectDir.replace(/\//g, "-")]: false,
-      },
     });
     expect(savedUpdates[0]).not.toHaveProperty("backend_mode");
     expect(savedUpdates[0]).not.toHaveProperty("merge_strategy");

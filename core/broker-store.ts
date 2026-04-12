@@ -6,11 +6,6 @@ import { join } from "path";
 
 export type BrokerSocket = ServerWebSocket<unknown> | Pick<WebSocket, "send">;
 
-export interface ScheduleClaimEntry {
-  daemonId: string;
-  expiresAt: number;
-}
-
 export interface WorkEntry {
   path: string;
   priority: number;
@@ -41,8 +36,6 @@ export interface CrewState {
   repoRef: string | null;
   items: Map<string, WorkEntry>;
   daemons: Map<string, DaemonState>;
-  /** Schedule claim deduplication: key = "taskId:scheduleTime" -> claim entry. */
-  scheduleClaims: Map<string, ScheduleClaimEntry>;
 }
 
 export interface BrokerStore {
@@ -58,7 +51,6 @@ export function createCrewState(code: string, repoRef?: string | null): CrewStat
     repoRef: repoRef ?? null,
     items: new Map(),
     daemons: new Map(),
-    scheduleClaims: new Map(),
   };
 }
 
@@ -110,18 +102,11 @@ interface SerializedDaemonState {
   released: boolean;
 }
 
-interface SerializedScheduleClaim {
-  key: string;
-  daemonId: string;
-  expiresAt: number;
-}
-
 interface SerializedCrewState {
   code: string;
   repoRef: string | null;
   items: SerializedWorkEntry[];
   daemons: SerializedDaemonState[];
-  scheduleClaims: SerializedScheduleClaim[];
 }
 
 function serializeCrewState(crew: CrewState): SerializedCrewState {
@@ -137,10 +122,6 @@ function serializeCrewState(crew: CrewState): SerializedCrewState {
       disconnectedAt: d.disconnectedAt,
       claimedItems: Array.from(d.claimedItems),
       released: d.released,
-    })),
-    scheduleClaims: Array.from(crew.scheduleClaims.entries()).map(([key, entry]) => ({
-      key,
-      ...entry,
     })),
   };
 }
@@ -165,20 +146,11 @@ function deserializeCrewState(data: SerializedCrewState): CrewState {
     });
   }
 
-  const scheduleClaims = new Map<string, ScheduleClaimEntry>();
-  for (const claim of data.scheduleClaims) {
-    scheduleClaims.set(claim.key, {
-      daemonId: claim.daemonId,
-      expiresAt: claim.expiresAt,
-    });
-  }
-
   return {
     code: data.code,
     repoRef: data.repoRef ?? null,
     items,
     daemons,
-    scheduleClaims,
   };
 }
 

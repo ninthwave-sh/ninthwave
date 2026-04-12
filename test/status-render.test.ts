@@ -1057,15 +1057,13 @@ describe("buildVisibleStatusLayoutMetadata", () => {
     expect(stripAnsi(layout.itemLines[span!.endLineIndex]!)).toContain("└ A-1");
   });
 
-  it("excludes queue chrome and schedule worker rows from selectable metadata", () => {
+  it("excludes queue chrome from selectable metadata", () => {
     const items = [
       makeStatusItem({ id: "A-1", state: "implementing" }),
       makeStatusItem({ id: "Q-2", state: "queued" }),
     ];
 
-    const layout = buildStatusLayout(items, 100, 3, false, {
-      scheduleWorkers: [{ taskId: "daily-tests", startedAt: new Date(Date.now() - 60_000).toISOString() }],
-    });
+    const layout = buildStatusLayout(items, 100, 3, false, {});
     const metadata = layout.visibleLayout!;
     const selectableStarts = new Set(
       Object.values(metadata.renderedLineSpans).map((span) => span.startLineIndex),
@@ -1074,15 +1072,12 @@ describe("buildVisibleStatusLayoutMetadata", () => {
     const queueSeparatorIndex = layout.itemLines.findIndex(
       (line, index) => index > queueHeaderIndex && /^\s*─+\s*$/.test(stripAnsi(line)),
     );
-    const scheduleWorkerIndex = layout.itemLines.findIndex((line) => stripAnsi(line).includes("[sched] daily-tests"));
 
     expect(metadata.selectableItemIds).toEqual(["A-1", "Q-2"]);
     expect(queueHeaderIndex).toBeGreaterThan(-1);
     expect(queueSeparatorIndex).toBeGreaterThan(-1);
-    expect(scheduleWorkerIndex).toBeGreaterThan(-1);
     expect(selectableStarts.has(queueHeaderIndex)).toBe(false);
     expect(selectableStarts.has(queueSeparatorIndex)).toBe(false);
-    expect(selectableStarts.has(scheduleWorkerIndex)).toBe(false);
   });
 });
 
@@ -5118,7 +5113,6 @@ describe("renderControlsOverlay", () => {
   const sessionCode = "K2F9-AB3X-7YPL-QM4N";
   const baseOpts = {
     collaborationMode: "local" as CollaborationMode,
-    scheduleEnabled: false,
     reviewMode: "off" as ReviewMode,
     mergeStrategy: "manual" as const,
     bypassEnabled: false,
@@ -5148,7 +5142,6 @@ describe("renderControlsOverlay", () => {
     const lines = renderControlsOverlay(100, 40, baseOpts);
     const text = stripAnsi(lines.join("\n"));
     expect(text).toContain("Collaboration");
-    expect(text).toContain("Scheduled tasks");
     expect(text).toContain("Reviews");
     expect(text).toContain("Merge");
   });
@@ -5217,14 +5210,6 @@ describe("renderControlsOverlay", () => {
     expect(row).toContain("All PRs");
   });
 
-  it("shows scheduled-task choices horizontally on one row", () => {
-    const lines = renderControlsOverlay(100, 40, baseOpts);
-    const row = stripAnsi(lines.find((line) => line.includes("Scheduled tasks")) ?? "");
-    expect(row).toContain("Scheduled tasks");
-    expect(row).toContain("[Off]");
-    expect(row).toContain("On");
-  });
-
   it("marks the active row separately from the active value", () => {
     const lines = renderControlsOverlay(100, 40, { ...baseOpts, activeRowIndex: 1 });
     const reviewsRow = stripAnsi(lines.find((line) => line.includes("Reviews")) ?? "");
@@ -5260,14 +5245,12 @@ describe("renderControlsOverlay", () => {
     const lines = renderControlsOverlay(100, 40, {
       ...baseOpts,
       pendingCollaborationMode: "shared",
-      pendingScheduleEnabled: true,
       pendingReviewMode: "all-prs",
       pendingMergeStrategy: "auto",
       pendingSessionLimit: 4,
     });
     const text = stripAnsi(lines.join("\n"));
     expect(text).toContain("[Share pending]");
-    expect(text).toContain("[On pending]");
     expect(text).toContain("[All PRs pending]");
     expect(text).toContain("[› Auto pending]");
     expect(text).toContain("[4 pending]");

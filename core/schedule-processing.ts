@@ -3,7 +3,7 @@
 
 import type { Orchestrator } from "./orchestrator.ts";
 import type { LogEntry } from "./types.ts";
-import type { ScheduledTask } from "./types.ts";
+import type { ScheduledTask } from "./schedule-types.ts";
 import type { ScheduleState } from "./schedule-state.ts";
 import {
   checkSchedules,

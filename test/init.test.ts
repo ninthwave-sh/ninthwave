@@ -473,7 +473,7 @@ describe("detectTestCommand", () => {
 // --- generateConfig ---
 
 describe("generateConfig", () => {
-  it("outputs valid JSON with both config keys", () => {
+  it("outputs valid JSON with the supported config keys", () => {
     const detection: DetectionResult = {
       ci: "github-actions",
       testCommand: "bun test",
@@ -488,7 +488,6 @@ describe("generateConfig", () => {
     const parsed = JSON.parse(config);
 
     expect(parsed.review_external).toBe(false);
-    expect(parsed.schedule_enabled).toBe(true);
   });
 
   it("does not include dead config keys", () => {
@@ -515,7 +514,7 @@ describe("generateConfig", () => {
     expect(parsed).not.toHaveProperty("github_token");
 
     // Only known keys
-    expect(Object.keys(parsed)).toEqual(["review_external", "schedule_enabled"]);
+    expect(Object.keys(parsed)).toEqual(["review_external"]);
   });
 
   it("includes an existing valid crew_url override when provided", () => {
@@ -537,7 +536,6 @@ describe("generateConfig", () => {
     expect(parsed.crew_url).toBe("wss://crew.example/ws");
     expect(Object.keys(parsed)).toEqual([
       "review_external",
-      "schedule_enabled",
       "crew_url",
     ]);
   });
@@ -698,9 +696,8 @@ describe("initProject", () => {
     );
     const parsed = JSON.parse(config);
     expect(parsed.review_external).toBe(false);
-    expect(parsed.schedule_enabled).toBe(true);
     expect(parsed).not.toHaveProperty("ai_tools");
-    expect(Object.keys(parsed)).toEqual(["review_external", "schedule_enabled"]);
+    expect(Object.keys(parsed)).toEqual(["review_external"]);
   });
 
   it("creates a full working setup on a fresh repo", () => {
@@ -817,7 +814,6 @@ describe("initProject", () => {
       join(projectDir, ".ninthwave/config.json"),
       JSON.stringify({
         review_external: true,
-        schedule_enabled: true,
         crew_url: "wss://crew.example/ws",
       }),
     );
@@ -835,7 +831,6 @@ describe("initProject", () => {
     ));
     // Should reflect fresh defaults (init always writes defaults)
     expect(config.review_external).toBe(false);
-    expect(config.schedule_enabled).toBe(true);
     expect(config.crew_url).toBe("wss://crew.example/ws");
   });
 
@@ -889,7 +884,6 @@ describe("initProject -- .ninthwave/.gitignore", () => {
     expect(content).toContain("*");
     expect(content).toContain("!config.json");
     expect(content).toContain("!work/");
-    expect(content).toContain("!schedules/");
     expect(content).toContain("!decisions/");
   });
 
@@ -1428,7 +1422,6 @@ describe("initProject config.json", () => {
 
     const configJson = JSON.parse(readFileSync(configJsonPath, "utf-8"));
     expect(configJson.review_external).toBe(false);
-    expect(configJson.schedule_enabled).toBe(true);
     expect(configJson).not.toHaveProperty("ai_tools");
     // No workspace data in config.json
     expect(configJson).not.toHaveProperty("workspace");
@@ -1484,7 +1477,7 @@ describe("initProject config.json", () => {
     );
     // Workspace data is no longer written to config.json
     expect(configJson).not.toHaveProperty("workspace");
-    expect(Object.keys(configJson)).toEqual(["review_external", "schedule_enabled"]);
+    expect(Object.keys(configJson)).toEqual(["review_external"]);
   });
 
   it("fresh init does not invent crew_url", () => {
@@ -1503,7 +1496,7 @@ describe("initProject config.json", () => {
     );
 
     expect(configJson).not.toHaveProperty("crew_url");
-    expect(Object.keys(configJson)).toEqual(["review_external", "schedule_enabled"]);
+    expect(Object.keys(configJson)).toEqual(["review_external"]);
   });
 });
 
@@ -2305,11 +2298,9 @@ describe("initProject -- preserves existing files", () => {
     expect(content).toContain("!.gitignore");
     expect(content).toContain("!config.json");
     expect(content).toContain("!work/");
-    expect(content).toContain("!schedules/");
     expect(content).toContain("!friction/");
     expect(content).toContain("!decisions/");
     expect(content).toContain("!work-item-format.md");
-    expect(content).toContain("!schedule-format.md");
   });
 
   it("copies core/docs/work-item-format.md from bundle into .ninthwave/work-item-format.md", () => {
@@ -2353,47 +2344,6 @@ describe("initProject -- preserves existing files", () => {
     expect(content).not.toContain("stale content");
   });
 
-  it("copies core/docs/schedule-format.md from bundle into .ninthwave/schedule-format.md", () => {
-    const projectDir = setupTempRepo();
-    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
-
-    const deps: InitDeps = {
-      commandExists: (() => false) as CommandChecker,
-      getEnv: () => undefined,
-    };
-
-    initProject(projectDir, bundleDir, deps);
-
-    const formatDoc = join(projectDir, ".ninthwave", "schedule-format.md");
-    expect(existsSync(formatDoc)).toBe(true);
-    const content = readFileSync(formatDoc, "utf-8");
-    expect(content).toContain("Schedule File Format Guide");
-  });
-
-  it("overwrites .ninthwave/schedule-format.md on re-init to stay in sync with bundle", () => {
-    const projectDir = setupTempRepo();
-    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
-
-    const deps: InitDeps = {
-      commandExists: (() => false) as CommandChecker,
-      getEnv: () => undefined,
-    };
-
-    // First init seeds the file
-    initProject(projectDir, bundleDir, deps);
-
-    // Mutate the project copy as if it drifted from the bundle
-    const formatDoc = join(projectDir, ".ninthwave", "schedule-format.md");
-    writeFileSync(formatDoc, "# stale content\n");
-
-    // Re-init should restore the bundle content
-    initProject(projectDir, bundleDir, deps);
-
-    const content = readFileSync(formatDoc, "utf-8");
-    expect(content).toContain("Schedule File Format Guide");
-    expect(content).not.toContain("stale content");
-  });
-
   it("does not modify root .gitignore", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
@@ -2411,69 +2361,6 @@ describe("initProject -- preserves existing files", () => {
     // Root .gitignore should be untouched
     const content = readFileSync(join(projectDir, ".gitignore"), "utf-8");
     expect(content).toBe("node_modules/\n");
-  });
-
-  it("creates .ninthwave/schedules/ with shipped review schedules on fresh init", () => {
-    const projectDir = setupTempRepo();
-    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
-
-    const deps: InitDeps = {
-      commandExists: (() => false) as CommandChecker,
-      getEnv: () => undefined,
-    };
-
-    initProject(projectDir, bundleDir, deps);
-
-    // Directory exists
-    expect(existsSync(join(projectDir, ".ninthwave/schedules"))).toBe(true);
-
-    const frictionPath = join(projectDir, ".ninthwave/schedules/friction--review.md");
-    const decisionsPath = join(projectDir, ".ninthwave/schedules/decisions--review.md");
-    expect(existsSync(frictionPath)).toBe(true);
-    expect(existsSync(decisionsPath)).toBe(true);
-
-    const frictionContent = readFileSync(frictionPath, "utf-8");
-    expect(frictionContent).toContain("# Review friction inbox");
-    expect(frictionContent).toContain("**Schedule:** every weekday at 09:00");
-    expect(frictionContent).toContain("**Enabled:** true");
-    expect(frictionContent).toContain("nw review-inbox friction");
-
-    const decisionsContent = readFileSync(decisionsPath, "utf-8");
-    expect(decisionsContent).toContain("# Review decisions inbox");
-    expect(decisionsContent).toContain("**Schedule:** every weekday at 13:00");
-    expect(decisionsContent).toContain("**Enabled:** true");
-    expect(decisionsContent).toContain("nw review-inbox decisions");
-  });
-
-  it("does not overwrite existing schedule files on re-init", () => {
-    const projectDir = setupTempRepo();
-    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
-
-    const deps: InitDeps = {
-      commandExists: (() => false) as CommandChecker,
-      getEnv: () => undefined,
-    };
-
-    // First init -- creates the schedules dir and seeded review schedules
-    initProject(projectDir, bundleDir, deps);
-
-    // User creates their own schedule file
-    const userSchedule = join(projectDir, ".ninthwave/schedules/deploy--nightly-deploy.md");
-    writeFileSync(userSchedule, "# Nightly Deploy\n**Enabled:** true\n");
-
-    // Overwrite a seeded review schedule with custom content
-    const seededPath = join(projectDir, ".ninthwave/schedules/friction--review.md");
-    writeFileSync(seededPath, "# Custom content\n");
-
-    // Re-init
-    initProject(projectDir, bundleDir, deps);
-
-    // User's schedule file is preserved
-    expect(existsSync(userSchedule)).toBe(true);
-    expect(readFileSync(userSchedule, "utf-8")).toBe("# Nightly Deploy\n**Enabled:** true\n");
-
-    // Seeded review schedule is NOT overwritten (directory already existed)
-    expect(readFileSync(seededPath, "utf-8")).toBe("# Custom content\n");
   });
 
   it("records version in user state directory", () => {

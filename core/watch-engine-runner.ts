@@ -14,7 +14,7 @@ import {
   type CollaborationMode,
   type ReviewMode,
 } from "./tui-settings.ts";
-import { saveProjectScheduleEnabled, saveUserConfig } from "./config.ts";
+import { saveUserConfig } from "./config.ts";
 import type { InteractiveWatchTiming } from "./orchestrate-timing.ts";
 import type {
   OrchestrateLoopConfig,
@@ -33,7 +33,6 @@ export interface WatchEngineSnapshotEvent {
     sessionLimit: number;
     reviewMode: ReviewMode;
     collaborationMode: CollaborationMode;
-    scheduleEnabled: boolean;
   };
 }
 
@@ -57,7 +56,6 @@ export type WatchEngineControlCommand =
   | { type: "set-session-limit"; limit: number; source?: string }
   | { type: "set-review-mode"; mode: ReviewMode; source?: string }
   | { type: "set-collaboration-mode"; mode: CollaborationMode; code?: string; source?: string }
-  | { type: "set-schedule-enabled"; enabled: boolean; source?: string }
   | { type: "runtime-collaboration"; requestId: string; action: RuntimeCollaborationAction; code?: string; source?: string }
   | { type: "extend-timeout"; itemId: string; source?: string }
   | { type: "shutdown"; source?: string };
@@ -68,7 +66,6 @@ export interface RuntimeControlHandlers {
   onSessionLimitChange?: (delta: number) => void;
   onReviewChange?: (mode: ReviewMode) => void;
   onCollaborationChange?: (mode: CollaborationMode) => void;
-  onScheduleEnabledChange?: (enabled: boolean) => void;
   onCollaborationLocal?: () => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
   onCollaborationShare?: () => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
   onCollaborationJoinSubmit?: (code: string) => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
@@ -79,10 +76,7 @@ export interface RuntimeControlHandlers {
 export interface RuntimeControlHandlerDeps {
   sendControl: (command: WatchEngineControlCommand) => void;
   getSessionLimit: () => number;
-  getScheduleEnabled: () => boolean;
-  projectRoot: string;
   saveUserConfigFn?: typeof saveUserConfig;
-  saveProjectScheduleEnabledFn?: typeof saveProjectScheduleEnabled;
   requestCollaborationAction?: (request: RuntimeCollaborationActionRequest) => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
 }
 
@@ -90,7 +84,6 @@ export function createRuntimeControlHandlers(
   deps: RuntimeControlHandlerDeps,
 ): RuntimeControlHandlers {
   const saveUserConfigFn = deps.saveUserConfigFn ?? saveUserConfig;
-  const saveProjectScheduleEnabledFn = deps.saveProjectScheduleEnabledFn ?? saveProjectScheduleEnabled;
 
   return {
     onPauseChange: (paused) => {
@@ -128,15 +121,6 @@ export function createRuntimeControlHandlers(
     },
     onCollaborationChange: (mode) => {
       deps.sendControl({ type: "set-collaboration-mode", mode, source: "keyboard" });
-    },
-    onScheduleEnabledChange: (enabled) => {
-      if (enabled === deps.getScheduleEnabled()) return;
-      deps.sendControl({ type: "set-schedule-enabled", enabled, source: "keyboard" });
-      try {
-        saveProjectScheduleEnabledFn(deps.projectRoot, enabled);
-      } catch {
-        // Best-effort persistence only.
-      }
     },
     onCollaborationLocal: () => {
       if (deps.requestCollaborationAction) {
@@ -197,7 +181,6 @@ export interface WatchEngineRunnerDeps {
   ) => DaemonState;
   initialReviewMode: ReviewMode;
   initialCollaborationMode: CollaborationMode;
-  initialScheduleEnabled: boolean;
   getSessionLimit: () => number;
   setSessionLimit: (limit: number) => void;
 }
@@ -230,7 +213,6 @@ export function createWatchEngineRunner(
   let paused = false;
   let reviewMode = deps.initialReviewMode;
   let collaborationMode = deps.initialCollaborationMode;
-  let scheduleEnabled = deps.initialScheduleEnabled;
   let activeAbortController: AbortController | undefined;
   let lastPollSnapshot: PollSnapshot = { items: [], readyIds: [] };
   let lastHeartbeats = new Map<string, WorkerProgress>();
@@ -255,7 +237,6 @@ export function createWatchEngineRunner(
         sessionLimit: deps.getSessionLimit(),
         reviewMode,
         collaborationMode,
-        scheduleEnabled,
       },
     });
   };
@@ -318,19 +299,6 @@ export function createWatchEngineRunner(
           ...(command.code ? { code: command.code } : {}),
           source: command.source ?? "runtime-control",
         });
-        return;
-      }
-      case "set-schedule-enabled": {
-        if (scheduleEnabled === command.enabled) return;
-        scheduleEnabled = command.enabled;
-        emitLog({
-          ts: new Date().toISOString(),
-          level: "info",
-          event: "schedule_enabled_changed",
-          enabled: scheduleEnabled,
-          source: command.source ?? "runtime-control",
-        });
-        emitSnapshot();
         return;
       }
       case "runtime-collaboration": {
@@ -397,8 +365,6 @@ export function createWatchEngineRunner(
     createRuntimeControlHandlers: (saveUserConfigFn) => createRuntimeControlHandlers({
       sendControl,
       getSessionLimit: deps.getSessionLimit,
-      getScheduleEnabled: () => scheduleEnabled,
-      projectRoot: deps.ctx.projectRoot,
       ...(saveUserConfigFn ? { saveUserConfigFn } : {}),
     }),
   };

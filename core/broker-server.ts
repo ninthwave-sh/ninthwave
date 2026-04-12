@@ -9,7 +9,6 @@ import {
   buildCrewStatusUpdate,
   checkCrewHeartbeats,
   claimNextWorkItem,
-  claimScheduleSlot,
   completeWorkItem,
   connectDaemon,
   disconnectDaemon,
@@ -17,7 +16,6 @@ import {
   syncCrewItems,
   type CrewEvent,
   type CrewStatusUpdate,
-  DEFAULT_SCHEDULE_CLAIM_EXPIRY_MS,
 } from "./broker-state.ts";
 import { FileBrokerStore, type BrokerSocket, type CrewState } from "./broker-store.ts";
 import { resolveRepoRef, type RepoRefInput } from "./repo-ref.ts";
@@ -302,9 +300,6 @@ export class BrokerServer {
       case "complete":
         this.handleComplete(crew, daemonId, msg.workItemId, ws);
         break;
-      case "schedule_claim":
-        this.handleScheduleClaim(crew, daemonId, msg.requestId, msg.taskId, msg.scheduleTime, ws);
-        break;
       case "heartbeat":
         recordHeartbeat(crew, daemonId);
         this.send(ws, { type: "heartbeat_ack", ts: msg.ts });
@@ -345,24 +340,6 @@ export class BrokerServer {
     this.send(ws, { type: "complete_ack", workItemId });
     this.broadcastCrewUpdate(crew);
     this.persistCrew(crew);
-  }
-
-  // ── Schedule claim handling ───────────────────────────────────────
-
-  private handleScheduleClaim(
-    crew: CrewState,
-    daemonId: string,
-    requestId: string,
-    taskId: string,
-    scheduleTime: string,
-    ws: BrokerSocket,
-  ): void {
-    const result = claimScheduleSlot(crew, daemonId, taskId, scheduleTime, Date.now(), DEFAULT_SCHEDULE_CLAIM_EXPIRY_MS);
-    this.writeEvents(result.events);
-    this.send(ws, { type: "schedule_claim_response", requestId, taskId, granted: result.granted });
-    if (result.changed) {
-      this.persistCrew(crew);
-    }
   }
 
   // ── Heartbeat monitoring ──────────────────────────────────────────

@@ -15,7 +15,6 @@ export interface CrewEvent {
     | "reconnect"
     | "abandon"
     | "reconcile_complete"
-    | "schedule_claim"
     | "report";
   work_item_path: string;
   metadata: { affinity: "author" | "pool" } | Record<string, unknown>;
@@ -43,15 +42,12 @@ export interface CrewStatusUpdate {
 export interface BrokerStateOptions {
   heartbeatTimeoutMs: number;
   gracePeriodMs: number;
-  scheduleClaimExpiryMs?: number;
 }
 
 export interface BrokerTransition {
   events: CrewEvent[];
   changed: boolean;
 }
-
-export const DEFAULT_SCHEDULE_CLAIM_EXPIRY_MS = 30 * 60 * 1_000;
 
 function createEvent(
   crewId: string,
@@ -295,37 +291,6 @@ export function recordHeartbeat(crew: CrewState, daemonId: string, now: number =
   return true;
 }
 
-export function claimScheduleSlot(
-  crew: CrewState,
-  daemonId: string,
-  taskId: string,
-  scheduleTime: string,
-  now: number = Date.now(),
-  expiryMs: number = DEFAULT_SCHEDULE_CLAIM_EXPIRY_MS,
-): { granted: boolean; events: CrewEvent[]; changed: boolean } {
-  const key = `${taskId}:${scheduleTime}`;
-  const existing = crew.scheduleClaims.get(key);
-
-  if (existing && existing.expiresAt > now) {
-    return {
-      granted: false,
-      events: [createEvent(crew.code, daemonId, "schedule_claim", taskId, { granted: false, key })],
-      changed: false,
-    };
-  }
-
-  crew.scheduleClaims.set(key, {
-    daemonId,
-    expiresAt: now + expiryMs,
-  });
-
-  return {
-    granted: true,
-    events: [createEvent(crew.code, daemonId, "schedule_claim", taskId, { granted: true, key })],
-    changed: true,
-  };
-}
-
 function releaseDaemonWorkItems(crew: CrewState, daemon: DaemonState): CrewEvent[] {
   const events: CrewEvent[] = [];
 
@@ -347,12 +312,6 @@ export function checkCrewHeartbeats(
 ): BrokerTransition {
   const events: CrewEvent[] = [];
   let changed = false;
-
-  for (const [key, entry] of crew.scheduleClaims) {
-    if (now >= entry.expiresAt) {
-      crew.scheduleClaims.delete(key);
-    }
-  }
 
   for (const daemon of crew.daemons.values()) {
     if (daemon.ws !== null && now - daemon.lastHeartbeat > options.heartbeatTimeoutMs) {

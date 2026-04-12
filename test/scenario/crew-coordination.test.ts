@@ -90,10 +90,6 @@ class StubCrewBroker implements CrewBroker {
     this.completes.push(workItemId);
   }
 
-  async scheduleClaim(_taskId: string, _scheduleTime: string): Promise<boolean> {
-    return true;
-  }
-
   heartbeat(): void {
     // no-op
   }

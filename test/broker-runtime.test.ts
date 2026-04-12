@@ -293,40 +293,6 @@ describe("broker-runtime", () => {
       expect(daemon!.claimedItems.has("item-A")).toBe(true);
     });
 
-    it("preserves schedule claims across restart", async () => {
-      const tmpDir = createTmpDir();
-      const dataDir = join(tmpDir, "crews");
-
-      const { server: s1, port: p1 } = startServer({ dataDir });
-      const code = await createCrew(p1);
-      const ws = await connectWs(p1, code, "d1", "worker-1");
-
-      // Claim a schedule slot
-      const reqId = "schedule-req-1";
-      ws.send(JSON.stringify({
-        type: "schedule_claim",
-        requestId: reqId,
-        daemonId: "d1",
-        taskId: "daily-test",
-        scheduleTime: "2026-04-03T10:00:00.000Z",
-      }));
-      const schedResp = await waitForMessageByType<{ granted: boolean }>(ws, "schedule_claim_response");
-      expect(schedResp.granted).toBe(true);
-
-      ws.close();
-      await tick();
-      s1.stop();
-      servers = servers.filter((s) => s !== s1);
-
-      // Restart with same data dir
-      const { server: s2 } = startServer({ dataDir });
-      const crew = s2.getCrew(code);
-      expect(crew).toBeDefined();
-      expect(crew!.scheduleClaims.size).toBe(1);
-      const claimKey = "daily-test:2026-04-03T10:00:00.000Z";
-      expect(crew!.scheduleClaims.has(claimKey)).toBe(true);
-    });
-
     it("preserves repoRef across restart", async () => {
       const tmpDir = createTmpDir();
       const dataDir = join(tmpDir, "crews");
@@ -520,10 +486,6 @@ describe("broker-runtime", () => {
         claimedItems: new Set(["item-1"]),
         released: false,
       });
-      crew.scheduleClaims.set("task:2026-01-01", {
-        daemonId: "d1",
-        expiresAt: 999999,
-      });
       store1.saveCrew(crew);
 
       // Create a new store from the same dir
@@ -544,8 +506,6 @@ describe("broker-runtime", () => {
       expect(daemon.operatorId).toBe("alice@example.com");
       expect(daemon.claimedItems.has("item-1")).toBe(true);
 
-      expect(loaded.scheduleClaims.size).toBe(1);
-      expect(loaded.scheduleClaims.get("task:2026-01-01")?.daemonId).toBe("d1");
     });
 
     it("handles empty data directory gracefully", () => {

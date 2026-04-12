@@ -3,7 +3,8 @@
 
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
-import type { ScheduledTask, Priority } from "./types.ts";
+import type { ScheduledTask } from "./schedule-types.ts";
+import type { Priority } from "./types.ts";
 import { PRIORITY_NUM } from "./types.ts";
 import { parseScheduleExpression } from "./schedule-eval.ts";
 

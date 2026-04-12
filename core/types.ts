@@ -93,21 +93,6 @@ export const LINEAGE_TOKEN_PATTERN = new RegExp(
 // Captures an uppercase start, optional hyphen-separated segments, ending with -*
 export const WILDCARD_DEP_PATTERN = /[A-Z](?:[A-Za-z0-9]*-)*\*/g;
 
-// ── Scheduled tasks ──────────────────────────────────────────────────
-
-export interface ScheduledTask {
-  id: string;           // slug-style, e.g. "daily-test-run"
-  title: string;
-  schedule: string;     // raw expression from the file, e.g. "every 2h"
-  scheduleCron: string;  // normalized 5-field cron, e.g. "0 */2 * * *"
-  priority: Priority;
-  domain: string;
-  timeout: number;      // ms, default 30 min (1_800_000)
-  prompt: string;       // body text (the task prompt)
-  filePath: string;
-  enabled: boolean;
-}
-
 // File extension patterns for path extraction
 export const CODE_EXTENSIONS =
   /\.(ex|exs|ts|tsx|js|jsx|md|yml|yaml|json|conf|sh|py|go|rs|rb|java|kt|swift)$/;

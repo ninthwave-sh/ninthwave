@@ -21,7 +21,6 @@ import {
   collaborationIntentToMode,
   reviewModeLabel,
   runtimeOptionsForSettingsRow,
-  scheduleEnabledToMode,
   type CollaborationIntent,
   type CollaborationMode,
   type ReviewMode,
@@ -41,12 +40,6 @@ export interface CrewStatusInfo {
   claimedCount: number;
   completedCount: number;
   connected: boolean;
-}
-
-/** Running schedule worker info for TUI display. */
-export interface ScheduleWorkerInfo {
-  taskId: string;
-  startedAt: string;
 }
 
 export type EmptyStateMode = "watch-armed";
@@ -90,12 +83,6 @@ export interface ViewOptions {
   collaborationError?: string;
   /** Current AI review mode for display. */
   reviewMode?: ReviewMode;
-  /** Current schedule-execution preference for display. */
-  scheduleEnabled?: boolean;
-  /** Pending schedule-execution preference awaiting engine acknowledgement. */
-  pendingScheduleEnabled?: boolean;
-  /** Active schedule workers to display in the TUI. */
-  scheduleWorkers?: ScheduleWorkerInfo[];
   /** Number of items where GitHub API returned errors. When > 0, a warning is shown in the footer. */
   apiErrorCount?: number;
   /** Optional summary of GitHub PR polling failure causes for footer copy. */
@@ -671,19 +658,6 @@ export function formatCountdown(ms: number): string {
     return `${minutes}m ${seconds}s`;
   }
   return `${seconds}s`;
-}
-
-/**
- * Format a schedule worker status line for the TUI.
- * Returns a line like: "  [sched] daily-tests -- running (2m 14s)"
- */
-export function formatScheduleWorkerLine(
-  worker: ScheduleWorkerInfo,
-  now: Date = new Date(),
-): string {
-  const elapsed = Math.max(0, now.getTime() - new Date(worker.startedAt).getTime());
-  const duration = formatAge(elapsed);
-  return `  ${CYAN}[sched]${RESET} ${worker.taskId} ${DIM}-- running (${duration})${RESET}`;
 }
 
 /** Right-pad a string to a given width. */
@@ -1412,15 +1386,6 @@ export function formatStatusTable(
     }
   }
 
-  // Schedule worker status lines
-  const schedWorkers = opts.scheduleWorkers ?? [];
-  if (schedWorkers.length > 0) {
-    lines.push("");
-    for (const sw of schedWorkers) {
-      lines.push(formatScheduleWorkerLine(sw));
-    }
-  }
-
   // Footer: unified progress line
   lines.push(sep);
   lines.push(formatUnifiedProgress(items, termWidth));
@@ -2079,15 +2044,6 @@ export function buildStatusLayout(
         }
         break;
       }
-    }
-  }
-
-  // Schedule worker status lines (shown after work items, before footer)
-  const schedWorkers = opts.scheduleWorkers ?? [];
-  if (schedWorkers.length > 0) {
-    itemLines.push("");
-    for (const sw of schedWorkers) {
-      itemLines.push(formatScheduleWorkerLine(sw));
     }
   }
 
@@ -3065,8 +3021,6 @@ export function renderControlsOverlay(
     collaborationError?: string;
     reviewMode: ReviewMode;
     pendingReviewMode?: ReviewMode;
-    scheduleEnabled?: boolean;
-    pendingScheduleEnabled?: boolean;
     mergeStrategy: MergeStrategy;
     pendingMergeStrategy?: MergeStrategy;
     bypassEnabled: boolean;
@@ -3086,8 +3040,6 @@ export function renderControlsOverlay(
     collaborationError: _collaborationError,
     reviewMode,
     pendingReviewMode,
-    scheduleEnabled = false,
-    pendingScheduleEnabled,
     mergeStrategy,
     pendingMergeStrategy,
     bypassEnabled,
@@ -3176,8 +3128,6 @@ export function renderControlsOverlay(
     if (row.kind === "choice") {
       const selectedValue = row.id === "collaboration_mode"
         ? selectedCollaborationMode
-        : row.id === "schedule_enabled"
-          ? scheduleEnabledToMode(pendingScheduleEnabled ?? scheduleEnabled)
         : row.id === "review_mode"
           ? (pendingReviewMode ?? reviewMode)
           : (pendingMergeStrategy ?? mergeStrategy);
@@ -3185,10 +3135,6 @@ export function renderControlsOverlay(
         .map((option) => {
           const pending = row.id === "collaboration_mode"
             ? option.runtimeValue === pendingCollaborationMode && pendingCollaborationMode !== collaborationMode
-            : row.id === "schedule_enabled"
-              ? option.runtimeValue === scheduleEnabledToMode(pendingScheduleEnabled ?? scheduleEnabled)
-                && pendingScheduleEnabled !== undefined
-                && pendingScheduleEnabled !== scheduleEnabled
             : row.id === "review_mode"
               ? option.runtimeValue === pendingReviewMode && pendingReviewMode !== reviewMode
               : option.runtimeValue === pendingMergeStrategy && pendingMergeStrategy !== mergeStrategy;

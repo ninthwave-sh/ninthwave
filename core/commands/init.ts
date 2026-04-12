@@ -90,43 +90,6 @@ export interface InitProjectOpts {
   resolveCommandPath?: CommandPathResolver;
 }
 
-const DEFAULT_SCHEDULE_FILES: Record<string, string> = {
-  "friction--review.md": `# Review friction inbox (friction-review)
-
-**Schedule:** every weekday at 09:00
-**Priority:** Medium
-**Domain:** friction
-**Timeout:** 10m
-**Enabled:** true
-
-Run \`nw review-inbox friction\` from the project root.
-
-- Use the first-party review-inbox command instead of manually branching,
-  editing inbox files, or creating PRs yourself.
-- If the command reports there is nothing to review, stop.
-- If the command opens or updates a review PR, stop after confirming the
-  command succeeded.
-- If the command fails, capture the error and likely cause.
-`,
-  "decisions--review.md": `# Review decisions inbox (decisions-review)
-
-**Schedule:** every weekday at 13:00
-**Priority:** Medium
-**Domain:** decisions
-**Timeout:** 10m
-**Enabled:** true
-
-Run \`nw review-inbox decisions\` from the project root.
-
-- Use the first-party review-inbox command instead of manually branching,
-  editing inbox files, or creating PRs yourself.
-- If the command reports there is nothing to review, stop.
-- If the command opens or updates a review PR, stop after confirming the
-  command succeeded.
-- If the command fails, capture the error and likely cause.
-`,
-};
-
 const defaultFileExists = (path: string): boolean => existsSync(path);
 
 const defaultReadDir = (dir: string): string[] => {
@@ -566,11 +529,9 @@ export function generateConfig(
 ): string {
   const config: {
     review_external: boolean;
-    schedule_enabled: boolean;
     crew_url?: string;
   } = {
     review_external: false,
-    schedule_enabled: true,
   };
   if (existingConfig?.crew_url) {
     config.crew_url = existingConfig.crew_url;
@@ -683,17 +644,6 @@ function scaffold(
 
   const workDir = join(projectDir, ".ninthwave", "work");
 
-  // --- .ninthwave/schedules/ directory with shipped review schedules ---
-  const schedulesDir = join(projectDir, ".ninthwave", "schedules");
-  const schedulesIsNew = !existsSync(schedulesDir);
-  mkdirSync(schedulesDir, { recursive: true });
-
-  if (schedulesIsNew) {
-    for (const [filename, content] of Object.entries(DEFAULT_SCHEDULE_FILES)) {
-      writeFileSync(join(schedulesDir, filename), content);
-    }
-  }
-
   // --- .ninthwave/work/, .ninthwave/friction/, and .ninthwave/decisions/ ---
   mkdirSync(workDir, { recursive: true });
   writeFileSync(join(workDir, ".gitkeep"), "");
@@ -720,18 +670,6 @@ function scaffold(
   const workItemFormatDest = join(projectDir, ".ninthwave", "work-item-format.md");
   if (existsSync(workItemFormatSource)) {
     writeFileSync(workItemFormatDest, readFileSync(workItemFormatSource));
-  }
-
-  // --- .ninthwave/schedule-format.md (managed copy of the canonical schedule format guide) ---
-  //
-  // Canonical reference for .ninthwave/schedules/ file authoring. Stamped into
-  // the project so anyone writing or editing schedules can cat it from the repo
-  // root without resolving NINTHWAVE_HOME. Always overwrite to track the
-  // running ninthwave version.
-  const scheduleFormatSource = join(bundleDir, "core", "docs", "schedule-format.md");
-  const scheduleFormatDest = join(projectDir, ".ninthwave", "schedule-format.md");
-  if (existsSync(scheduleFormatSource)) {
-    writeFileSync(scheduleFormatDest, readFileSync(scheduleFormatSource));
   }
 
   // --- Skill files ---
@@ -778,11 +716,8 @@ function scaffold(
 !.gitignore
 !config.json
 !work-item-format.md
-!schedule-format.md
 !work/
 !work/**
-!schedules/
-!schedules/**
 !friction/
 !friction/**
 !decisions/
@@ -857,7 +792,6 @@ export function initProject(
   console.log(`  .ninthwave/friction/ ${DIM}(friction log)${RESET}`);
   console.log(`  .ninthwave/decisions/ ${DIM}(decision inbox)${RESET}`);
   console.log(`  .ninthwave/hooks/ ${DIM}(bootstrap hooks)${RESET}`);
-  console.log(`  .ninthwave/schedules/ ${DIM}(scheduled tasks)${RESET}`);
   console.log(`  .claude/skills/ ${DIM}(managed copies)${RESET}`);
   console.log(`  .gitignore`);
   console.log();
