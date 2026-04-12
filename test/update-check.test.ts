@@ -111,6 +111,19 @@ describe("resolveCurrentInstall", () => {
       command: null,
     });
   });
+
+  it("does not infer direct install from ~/.ninthwave bundle fallback alone", () => {
+    const home = setupTempRepo();
+
+    expect(resolveCurrentInstall({
+      homeDir: () => home,
+      getBundleDir: () => join(home, ".ninthwave"),
+      getCurrentExecutablePath: () => join(home, "custom", "bin", "ninthwave"),
+    })).toEqual({
+      source: "unknown",
+      command: null,
+    });
+  });
 });
 
 describe("getPassiveUpdateStartupState", () => {

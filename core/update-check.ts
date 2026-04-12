@@ -178,10 +178,7 @@ export function resolveCurrentInstall(
   if (homeDir) {
     const directInstallRoot = join(homeDir, ".ninthwave");
     const directInstallBin = join(directInstallRoot, "bin");
-    if (
-      (bundleDir && isPathWithin(bundleDir, directInstallRoot)) ||
-      (executablePath && isPathWithin(executablePath, directInstallBin))
-    ) {
+    if (executablePath && isPathWithin(executablePath, directInstallBin)) {
       return { source: "direct", command: getUpdateCommandForSource("direct") };
     }
   }
