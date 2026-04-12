@@ -1651,7 +1651,9 @@ describe("launchAiSession agentName", () => {
     const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     expect(launchCall).toBeDefined();
     const cmd = launchCall[1] as string;
-    expect(cmd).toContain("OPENCODE_PERMISSION");
+    // Auto-approval is set via .opencode/opencode.jsonc at init time, not
+    // via a launch-time OPENCODE_PERMISSION export.
+    expect(cmd).not.toContain("OPENCODE_PERMISSION");
     expect(cmd).toContain('exec opencode run "$PROMPT" --agent ninthwave-reviewer');
   });
 
@@ -1842,11 +1844,12 @@ describe("launchAiSession agentName", () => {
     expect(wsRef).not.toBeNull();
     // No message should be sent after launch -- prompt is embedded via --prompt
     expect(mockMux.sendMessage.mock.calls.length).toBe(0);
-    // Inline command should contain --prompt and OPENCODE_PERMISSION
+    // Inline command should contain --prompt; auto-approval comes from
+    // nw init seeding .opencode/opencode.jsonc, not a launch-time env var.
     const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
     const cmd = launchCall[1] as string;
     expect(cmd).toContain("--prompt");
-    expect(cmd).toContain("OPENCODE_PERMISSION");
+    expect(cmd).not.toContain("OPENCODE_PERMISSION");
   });
 
   it("throws for an unregistered tool ID", () => {

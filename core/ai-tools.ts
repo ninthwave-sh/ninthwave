@@ -318,9 +318,6 @@ function writePromptDataFile(
   return promptDataFile;
 }
 
-const OPENCODE_ALLOW_ALL_PERMISSION =
-  `export OPENCODE_PERMISSION='{"$schema":"https://opencode.ai/config.json","permission":"allow"}'`;
-
 function shQuote(value: string): string {
   return `'${value.replace(/'/g, `'\"'\"'`)}'`;
 }
@@ -411,10 +408,13 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
       // Inline command pattern: write prompt to a plain-text data file, then
       // construct a shell command that reads it, cleans up, and execs the tool.
       // Avoids creating executable .sh scripts (which trigger EDR alerts).
+      //
+      // Per-agent auto-approval is set up by `nw init` via
+      // .opencode/opencode.jsonc (see core/opencode-config.ts); no launch-time
+      // env var is needed.
       const promptDataFile = writePromptDataFile(opts, deps);
       const cmd =
-        `${OPENCODE_ALLOW_ALL_PERMISSION}` +
-        ` && PROMPT=$(cat '${promptDataFile}')` +
+        `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
         ` && exec opencode --agent ${opts.agentName} --prompt "$PROMPT"`;
       return { cmd, initialPrompt: "" };
@@ -425,8 +425,7 @@ export const AI_TOOL_PROFILES: AiToolProfile[] = [
 
       const promptDataFile = writePromptDataFile(opts, deps);
       const cmd =
-        `${OPENCODE_ALLOW_ALL_PERMISSION}` +
-        ` && PROMPT=$(cat '${promptDataFile}')` +
+        `PROMPT=$(cat '${promptDataFile}')` +
         ` && rm -f '${promptDataFile}'` +
         ` && exec opencode run "$PROMPT" --agent ${opts.agentName}`;
       return { cmd, initialPrompt: "" };

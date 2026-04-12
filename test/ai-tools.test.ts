@@ -382,11 +382,13 @@ describe("opencode profile buildLaunchCmd", () => {
     try {
       const result = profile.buildLaunchCmd(stubOpts({ id: "H-X-OVERRIDE" }), stubDeps("OPENCODE PROMPT"));
       expect(result.cmd).toBe(
-        `export OPENCODE_PERMISSION='{"$schema":"https://opencode.ai/config.json","permission":"allow"}'` +
-        ` && PROMPT=$(cat '/fake/state/tmp/nw-prompt-H-X-OVERRIDE-1700000000000')` +
+        `PROMPT=$(cat '/fake/state/tmp/nw-prompt-H-X-OVERRIDE-1700000000000')` +
         ` && rm -f '/fake/state/tmp/nw-prompt-H-X-OVERRIDE-1700000000000'` +
         ` && exec opencode --agent ninthwave-implementer --prompt "$PROMPT"`,
       );
+      // Auto-approval is now set by nw init via .opencode/opencode.jsonc,
+      // not by an OPENCODE_PERMISSION env var export at launch time.
+      expect(result.cmd).not.toContain("OPENCODE_PERMISSION");
     } finally {
       now.mockRestore();
     }
@@ -458,13 +460,13 @@ describe("opencode profile buildLaunchCmd", () => {
     const profile = getToolProfile("opencode");
     const result = profile.buildLaunchCmd(stubOpts({ id: "H-X-3", agentName: "ninthwave-implementer", wsName: "H-X-3 My Title" }), stubDeps());
     expect(result.cmd).toContain("opencode --agent ninthwave-implementer --prompt");
-    expect(result.cmd).toContain("OPENCODE_PERMISSION");
   });
 
-  it("sets OPENCODE_PERMISSION for auto-approval in inline cmd", () => {
+  it("does not export OPENCODE_PERMISSION (auto-approval is set by nw init)", () => {
     const profile = getToolProfile("opencode");
     const result = profile.buildLaunchCmd(stubOpts({ id: "H-X-5" }), stubDeps());
-    expect(result.cmd).toContain('"permission":"allow"');
+    expect(result.cmd).not.toContain("OPENCODE_PERMISSION");
+    expect(result.cmd).not.toContain('"permission":"allow"');
   });
 
   it("does not call chmod (no executable scripts created)", () => {
@@ -537,11 +539,13 @@ describe("opencode profile buildHeadlessCmd", () => {
     expect(result.cmd).toContain("exec opencode run \"$PROMPT\" --agent ninthwave-implementer");
   });
 
-  it("sets OPENCODE_PERMISSION for non-interactive auto-approval", () => {
+  it("does not export OPENCODE_PERMISSION in headless mode", () => {
+    // Auto-approval lives in .opencode/opencode.jsonc seeded by nw init,
+    // not in a launch-time env var. Guard against regression.
     const profile = getToolProfile("opencode");
     const result = profile.buildHeadlessCmd(stubOpts({ id: "H-X-HEADLESS" }), stubDeps());
-    expect(result.cmd).toContain("OPENCODE_PERMISSION");
-    expect(result.cmd).toContain('"permission":"allow"');
+    expect(result.cmd).not.toContain("OPENCODE_PERMISSION");
+    expect(result.cmd).not.toContain('"permission":"allow"');
   });
 });
 

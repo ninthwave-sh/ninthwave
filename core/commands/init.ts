@@ -42,6 +42,7 @@ import {
 } from "./setup.ts";
 import { AI_TOOL_PROFILES } from "../ai-tools.ts";
 import { loadConfig } from "../config.ts";
+import { seedOpencodeConfig } from "../opencode-config.ts";
 
 // --- Detection types ---
 
@@ -749,6 +750,21 @@ function scaffold(
   copySkillFiles(skillsDir, bundleDir);
   const plan = buildCopyPlan(projectDir, bundleDir, selection);
   executeCopyPlan(filterCopyPlan(plan, selection));
+
+  // --- .opencode/opencode.jsonc (managed auto-approval for ninthwave agents) ---
+  //
+  // When opencode is in the selected tool dirs, seed a project-level
+  // opencode.jsonc that grants full tool permissions to our orchestrated
+  // agents. Upstream opencode's config-dir layer takes precedence over the
+  // user's global config and over project-root `opencode.json`, so this
+  // fixes the "opencode worker keeps asking for permission" regression
+  // without touching any file the user may have committed.
+  const opencodeSelected = selection.toolDirs.some(
+    (t) => t.dir === ".opencode/agents",
+  );
+  if (opencodeSelected) {
+    seedOpencodeConfig(projectDir);
+  }
 
   // --- .ninthwave/.gitignore (deny-by-default: only explicitly allowed files are committed) ---
   const nwGitignorePath = join(projectDir, ".ninthwave", ".gitignore");

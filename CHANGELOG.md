@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- opencode: stop workers pausing for permission. `nw init` now writes (or merges into) a project-level `.opencode/opencode.jsonc` that grants Ninthwave's orchestrated agents (`ninthwave-implementer`, `-reviewer`, `-rebaser`, `-forward-fixer`) full tool permissions. The previous `OPENCODE_PERMISSION` env var was the wrong shape (a full config file instead of a `Permission` value) so it silently did nothing; it has been removed.
+
 ## [0.4.3] - 2026-04-08
 
 ### Added

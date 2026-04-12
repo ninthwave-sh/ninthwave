@@ -1680,6 +1680,38 @@ describe("initProject -- agent selection", () => {
     expect(existsSync(join(projectDir, ".github/agents/ninthwave-rebaser.agent.md"))).toBe(true);
   });
 
+  it("seeds .opencode/opencode.jsonc with per-agent auto-approval when opencode is selected", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps);
+
+    const configPath = join(projectDir, ".opencode/opencode.jsonc");
+    expect(existsSync(configPath)).toBe(true);
+    const raw = readFileSync(configPath, "utf-8");
+    // Strip the managed-by-ninthwave header comment before parsing.
+    const parsed = JSON.parse(raw.replace(/^\/\/.*$/gm, "")) as {
+      agent: Record<string, { permission: Record<string, string> }>;
+    };
+    for (const name of [
+      "ninthwave-implementer",
+      "ninthwave-reviewer",
+      "ninthwave-rebaser",
+      "ninthwave-forward-fixer",
+    ]) {
+      const entry = parsed.agent[name];
+      expect(entry).toBeDefined();
+      expect(entry!.permission.edit).toBe("allow");
+      expect(entry!.permission.bash).toBe("allow");
+      expect(entry!.permission.question).toBe("allow");
+    }
+  });
+
   it("does not create copilot-instructions.md during init", () => {
     const projectDir = setupTempRepo();
     const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
