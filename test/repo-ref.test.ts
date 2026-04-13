@@ -38,7 +38,7 @@ describe("repo-ref", () => {
     const canonical = "github.com/ninthwave-io/ninthwave";
 
     expect(hashNormalizedRepoUrl(canonical)).toBe(
-      "76064f303f6a9ec8359276bdbffa695895024ba7e73b80f14e871c19bc9140fb",
+      "df2751384a603456180b71882175d3e1e925275574581256f9f5d0a39d637687",
     );
     expect(hashRepoUrl("https://github.com/ninthwave-io/ninthwave/")).toBe(
       hashNormalizedRepoUrl(canonical),

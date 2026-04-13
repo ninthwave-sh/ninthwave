@@ -2,6 +2,10 @@
 
 ## [0.4.4] - 2026-04-13
 
+### Changed
+- GitHub org renamed from `ninthwave-sh` to `ninthwave-io`. The Homebrew tap moved with it: install via `brew install ninthwave-io/tap/ninthwave`. Existing users on the old tap should migrate with `brew untap ninthwave-sh/tap && brew tap ninthwave-io/tap && brew upgrade ninthwave`. GitHub redirects handle old URLs for now, but the new paths are canonical.
+- README version badge now tracks the latest GitHub release automatically instead of being hand-bumped.
+
 ### Added
 - add interactive startup update prompt (H-UPD-3) (#649)
 - add manual nw update command (H-UPD-2) (#647)
@@ -41,9 +45,6 @@
 - respawn parked workers for PR feedback (H-CF-1) (#629)
 
 ## Unreleased
-
-### Changed
-- GitHub org renamed from `ninthwave-sh` to `ninthwave-io`. The Homebrew tap moved with it: install via `brew install ninthwave-io/tap/ninthwave`. Existing users on the old tap should migrate with `brew untap ninthwave-sh/tap && brew tap ninthwave-io/tap && brew upgrade ninthwave`. GitHub redirects handle old URLs for now, but the new paths are canonical.
 
 ### Fixed
 - opencode: stop workers pausing for permission. `nw init` now writes (or merges into) a project-level `.opencode/opencode.jsonc` that grants Ninthwave's orchestrated agents (`ninthwave-implementer`, `-reviewer`, `-rebaser`, `-forward-fixer`) full tool permissions. The previous `OPENCODE_PERMISSION` env var was the wrong shape (a full config file instead of a `Permission` value) so it silently did nothing; it has been removed.

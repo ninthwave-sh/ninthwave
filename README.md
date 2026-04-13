@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://github.com/ninthwave-io/ninthwave/stargazers"><img src="https://img.shields.io/github/stars/ninthwave-io/ninthwave?style=flat" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0 License" /></a>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.3.2-green" alt="Version" /></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/github/v/release/ninthwave-io/ninthwave?sort=semver&color=green&label=version" alt="Version" /></a>
   <a href="https://agentskills.io"><img src="https://img.shields.io/badge/Agent%20Skills-standard-purple" alt="Agent Skills" /></a>
 </p>
 
