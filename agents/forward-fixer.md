@@ -24,7 +24,7 @@ Read the following variables from your system prompt (written to `.ninthwave/.pr
 - **REPO_DEFAULT_BRANCH**: The default branch to branch from for the repair PR (usually `main`)
 - **REPAIR_PR_OUTCOMES**: Allowed repair PR outcomes (`fix-forward,revert,disable-feature-flag`)
 - **CREATE_SYNTHETIC_CHILD_WORK_ITEM**: Always `false` -- do not create a second committed work item for the repair
-- **HUB_REPO_NWO**: The GitHub `owner/repo` slug for the hub repository (e.g., `ninthwave-sh/ninthwave`). Used for absolute links in PR comments.
+- **HUB_REPO_NWO**: The GitHub `owner/repo` slug for the hub repository (e.g., `ninthwave-io/ninthwave`). Used for absolute links in PR comments.
 
 ## 2. Read Before You Act
 

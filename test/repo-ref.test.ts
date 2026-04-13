@@ -22,38 +22,38 @@ function expectRepoRefError(fn: () => unknown, code: RepoRefError["code"]): void
 
 describe("repo-ref", () => {
   it("normalizes equivalent HTTPS and SSH URLs to the same repo identity", () => {
-    const httpsUrl = "https://github.com/ninthwave-sh/ninthwave.git";
-    const sshUrl = "git@github.com:ninthwave-sh/ninthwave.git";
-    const sshProtocolUrl = "ssh://git@github.com/ninthwave-sh/ninthwave.git";
+    const httpsUrl = "https://github.com/ninthwave-io/ninthwave.git";
+    const sshUrl = "git@github.com:ninthwave-io/ninthwave.git";
+    const sshProtocolUrl = "ssh://git@github.com/ninthwave-io/ninthwave.git";
 
-    expect(normalizeRepoUrl(httpsUrl)).toBe("github.com/ninthwave-sh/ninthwave");
-    expect(normalizeRepoUrl(sshUrl)).toBe("github.com/ninthwave-sh/ninthwave");
-    expect(normalizeRepoUrl(sshProtocolUrl)).toBe("github.com/ninthwave-sh/ninthwave");
+    expect(normalizeRepoUrl(httpsUrl)).toBe("github.com/ninthwave-io/ninthwave");
+    expect(normalizeRepoUrl(sshUrl)).toBe("github.com/ninthwave-io/ninthwave");
+    expect(normalizeRepoUrl(sshProtocolUrl)).toBe("github.com/ninthwave-io/ninthwave");
 
     expect(hashRepoUrl(httpsUrl)).toBe(hashRepoUrl(sshUrl));
     expect(hashRepoUrl(httpsUrl)).toBe(hashRepoUrl(sshProtocolUrl));
   });
 
   it("keeps repo hashes stable across equivalent URL forms", () => {
-    const canonical = "github.com/ninthwave-sh/ninthwave";
+    const canonical = "github.com/ninthwave-io/ninthwave";
 
     expect(hashNormalizedRepoUrl(canonical)).toBe(
       "76064f303f6a9ec8359276bdbffa695895024ba7e73b80f14e871c19bc9140fb",
     );
-    expect(hashRepoUrl("https://github.com/ninthwave-sh/ninthwave/")).toBe(
+    expect(hashRepoUrl("https://github.com/ninthwave-io/ninthwave/")).toBe(
       hashNormalizedRepoUrl(canonical),
     );
-    expect(hashRepoUrl("git@github.com:ninthwave-sh/ninthwave.git")).toBe(
+    expect(hashRepoUrl("git@github.com:ninthwave-io/ninthwave.git")).toBe(
       hashNormalizedRepoUrl(canonical),
     );
   });
 
   it("accepts raw repoUrl, precomputed repoHash, and stored repoRef inputs", () => {
-    const repoUrl = "https://github.com/ninthwave-sh/ninthwave.git";
+    const repoUrl = "https://github.com/ninthwave-io/ninthwave.git";
     const repoHash = hashRepoUrl(repoUrl);
 
     expect(resolveRepoRef({ repoUrl })).toEqual({
-      normalizedRepoUrl: "github.com/ninthwave-sh/ninthwave",
+      normalizedRepoUrl: "github.com/ninthwave-io/ninthwave",
       repoHash,
       repoRef: repoHash,
     });
@@ -65,20 +65,20 @@ describe("repo-ref", () => {
       repoHash,
       repoRef: repoHash,
     });
-    expect(resolveRepoRef({ repoRef: "github.com/ninthwave-sh/ninthwave.git" })).toEqual({
+    expect(resolveRepoRef({ repoRef: "github.com/ninthwave-io/ninthwave.git" })).toEqual({
       repoHash,
       repoRef: repoHash,
     });
   });
 
   it("uses one canonical comparison value for equivalent inputs", () => {
-    const repoUrl = "https://github.com/ninthwave-sh/ninthwave.git";
+    const repoUrl = "https://github.com/ninthwave-io/ninthwave.git";
     const repoHash = hashRepoUrl(repoUrl);
 
     expect(compareRepoRefs({ repoUrl }, { repoHash })).toEqual({
       matches: true,
       left: {
-        normalizedRepoUrl: "github.com/ninthwave-sh/ninthwave",
+        normalizedRepoUrl: "github.com/ninthwave-io/ninthwave",
         repoHash,
         repoRef: repoHash,
       },
@@ -91,13 +91,13 @@ describe("repo-ref", () => {
 
   it("surfaces mismatch detection inputs the runtime can reject later", () => {
     const expected = compareRepoRefs(
-      { repoUrl: "https://github.com/ninthwave-sh/ninthwave.git" },
-      { repoRef: hashRepoUrl("git@github.com:ninthwave-sh/other-repo.git") },
+      { repoUrl: "https://github.com/ninthwave-io/ninthwave.git" },
+      { repoRef: hashRepoUrl("git@github.com:ninthwave-io/other-repo.git") },
     );
 
     expect(expected.matches).toBe(false);
     expect(expected.left.repoRef).not.toBe(expected.right.repoRef);
-    expect(expected.left.normalizedRepoUrl).toBe("github.com/ninthwave-sh/ninthwave");
+    expect(expected.left.normalizedRepoUrl).toBe("github.com/ninthwave-io/ninthwave");
   });
 
   it("rejects missing and invalid repo identity inputs explicitly", () => {
@@ -110,8 +110,8 @@ describe("repo-ref", () => {
   it("rejects inconsistent repoUrl and repoHash inputs explicitly", () => {
     expectRepoRefError(
       () => resolveRepoRef({
-        repoUrl: "https://github.com/ninthwave-sh/ninthwave.git",
-        repoHash: hashRepoUrl("https://github.com/ninthwave-sh/other-repo.git"),
+        repoUrl: "https://github.com/ninthwave-io/ninthwave.git",
+        repoHash: hashRepoUrl("https://github.com/ninthwave-io/other-repo.git"),
       }),
       "repo_identity_mismatch",
     );

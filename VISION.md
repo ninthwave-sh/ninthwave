@@ -79,7 +79,7 @@ The next evolution beyond the CLI. Ninthwave Cloud provides reporting and analyt
 
 ### Sandboxing -- strait
 
-Worker sandboxing is a longer-term vision being developed as a separate project: [strait](https://github.com/ninthwave-sh/strait). Sandboxing was previously shipped in ninthwave (nono integration) and removed in the 0.2.0 scope reduction. strait will provide isolation that integrates with ninthwave's worker lifecycle.
+Worker sandboxing is a longer-term vision being developed as a separate project: [strait](https://github.com/ninthwave-io/strait). Sandboxing was previously shipped in ninthwave (nono integration) and removed in the 0.2.0 scope reduction. strait will provide isolation that integrates with ninthwave's worker lifecycle.
 
 ### Deferred
 

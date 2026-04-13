@@ -1527,7 +1527,7 @@ describe("maybeRunStartupUpdatePrompt", () => {
     expect(joined).toContain("v0.3.9");
     expect(joined).toContain("v0.4.0");
     expect(joined).toContain(
-      "https://github.com/ninthwave-sh/ninthwave/releases/tag/v0.4.0",
+      "https://github.com/ninthwave-io/ninthwave/releases/tag/v0.4.0",
     );
     expect(joined).toContain("1. Update now");
     expect(joined).toContain("2. Skip");

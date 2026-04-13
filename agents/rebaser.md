@@ -22,7 +22,7 @@ Read the following variables from your system prompt (written to `.ninthwave/.pr
 - **YOUR_REBASE_ITEM_ID**: The work item identifier (e.g., `H-NTF-1`)
 - **YOUR_REBASE_PR**: The PR number with conflicts (e.g., `271`)
 - **PROJECT_ROOT**: Absolute path to your working directory (the git worktree)
-- **HUB_REPO_NWO**: The GitHub `owner/repo` slug for the hub repository (e.g., `ninthwave-sh/ninthwave`). Used for absolute links in PR comments.
+- **HUB_REPO_NWO**: The GitHub `owner/repo` slug for the hub repository (e.g., `ninthwave-io/ninthwave`). Used for absolute links in PR comments.
 
 Then read the project instruction files:
 

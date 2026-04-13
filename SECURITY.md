@@ -5,7 +5,7 @@
 **Do not open a public issue for security vulnerabilities.**
 
 Use GitHub's private vulnerability reporting:
-https://github.com/ninthwave-sh/ninthwave/security/advisories/new
+https://github.com/ninthwave-io/ninthwave/security/advisories/new
 
 Alternatively, email security@ninthwave.sh.
 

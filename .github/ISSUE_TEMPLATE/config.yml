@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Documentation
-    url: https://github.com/ninthwave-sh/ninthwave/blob/main/README.md
+    url: https://github.com/ninthwave-io/ninthwave/blob/main/README.md
     about: Read the docs before filing an issue
   - name: Discussions
-    url: https://github.com/ninthwave-sh/ninthwave/discussions
+    url: https://github.com/ninthwave-io/ninthwave/discussions
     about: Ask questions and share ideas

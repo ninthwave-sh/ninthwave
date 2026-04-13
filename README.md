@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ninthwave-sh/ninthwave/stargazers"><img src="https://img.shields.io/github/stars/ninthwave-sh/ninthwave?style=flat" alt="GitHub stars" /></a>
+  <a href="https://github.com/ninthwave-io/ninthwave/stargazers"><img src="https://img.shields.io/github/stars/ninthwave-io/ninthwave?style=flat" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue" alt="Apache 2.0 License" /></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.3.2-green" alt="Version" /></a>
   <a href="https://agentskills.io"><img src="https://img.shields.io/badge/Agent%20Skills-standard-purple" alt="Agent Skills" /></a>
@@ -53,7 +53,7 @@ For the transition states, flow diagrams, and deeper internals, see [ARCHITECTUR
 ## Install
 
 ```bash
-brew install ninthwave-sh/tap/ninthwave
+brew install ninthwave-io/tap/ninthwave
 ```
 
 Requires [gh](https://cli.github.com).
@@ -68,7 +68,7 @@ nw update
 
 `nw update` detects how your install was managed and runs the matching updater. v1 supports two install sources:
 
-- **Homebrew** (`brew install ninthwave-sh/tap/ninthwave`) -- runs `brew upgrade ninthwave`
+- **Homebrew** (`brew install ninthwave-io/tap/ninthwave`) -- runs `brew upgrade ninthwave`
 - **Direct install script** (`curl -fsSL https://ninthwave.sh/install | bash`, which places `nw` under `~/.ninthwave/bin/`) -- re-runs the install script
 
 For other installs (source clones, non-standard paths), `nw update` prints manual guidance instead of guessing. Ninthwave does not hot-reload, so restart any running `nw` sessions after a successful update. When you start `nw` and a newer version is available, Ninthwave also shows a startup prompt with Update / Skip / Skip-until-next-version options -- see the [FAQ](docs/faq.md#how-do-i-update-ninthwave) for details.
@@ -86,7 +86,7 @@ For other installs (source clones, non-standard paths), `nw update` prints manua
 1. Install Ninthwave:
 
    ```bash
-   brew install ninthwave-sh/tap/ninthwave
+   brew install ninthwave-io/tap/ninthwave
    nw init # in a repo
    ```
 

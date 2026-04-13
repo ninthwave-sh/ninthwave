@@ -53,7 +53,7 @@ Look for `YOUR_WORK_ITEM_ID`, `YOUR_PARTITION`, `PROJECT_ROOT`, `HUB_ROOT`, and 
 - **YOUR_PARTITION**: The test partition number for database and port isolation
 - **PROJECT_ROOT**: Absolute path to your working directory (the git worktree checked out to your branch). All file reads and writes should be relative to this directory.
 - **HUB_ROOT**: Absolute path to the hub repo where `.ninthwave/` lives (including `.ninthwave/work/`)
-- **HUB_REPO_NWO**: The GitHub `owner/repo` slug for the hub repository (e.g., `ninthwave-sh/ninthwave`). Used for absolute links in PR comments.
+- **HUB_REPO_NWO**: The GitHub `owner/repo` slug for the hub repository (e.g., `ninthwave-io/ninthwave`). Used for absolute links in PR comments.
 
 These variable names are part of the launched-worker contract. Keep them stable and do not rename or reinterpret them in your changes.
 

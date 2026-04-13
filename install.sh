@@ -8,7 +8,7 @@ set -euo pipefail
 
 INSTALL_DIR="${HOME}/.ninthwave"
 BIN_DIR="${INSTALL_DIR}/bin"
-REPO="ninthwave-sh/ninthwave"
+REPO="ninthwave-io/ninthwave"
 GITHUB_API="https://api.github.com"
 
 # --- Helpers ---

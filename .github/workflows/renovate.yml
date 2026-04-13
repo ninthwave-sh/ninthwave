@@ -25,4 +25,4 @@ jobs:
           LOG_LEVEL: info
           RENOVATE_ONBOARDING: 'false'
           RENOVATE_REQUIRE_CONFIG: optional
-          RENOVATE_REPOSITORIES: '["ninthwave-sh/ninthwave"]'
+          RENOVATE_REPOSITORIES: '["ninthwave-io/ninthwave"]'

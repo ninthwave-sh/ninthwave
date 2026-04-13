@@ -105,7 +105,7 @@ export const NINTHWAVE_FOOTER = "<sub>[Ninthwave](https://ninthwave.sh)</sub>";
 
 /** Link to the orchestrator state-machine docs. */
 export const ORCHESTRATOR_LINK =
-  "https://github.com/ninthwave-sh/ninthwave/blob/main/ARCHITECTURE.md#orchestrator-state-machine";
+  "https://github.com/ninthwave-io/ninthwave/blob/main/ARCHITECTURE.md#orchestrator-state-machine";
 
 /** Run a gh command in the context of a specific repo directory. */
 export function ghInRepo(repoRoot: string, args: string[]): RunResult {
@@ -310,7 +310,7 @@ export async function prChecksAsync(
   }
 }
 
-/** Get the owner/repo string (e.g., "ninthwave-sh/ninthwave"). */
+/** Get the owner/repo string (e.g., "ninthwave-io/ninthwave"). */
 export function getRepoOwner(repoRoot: string): string {
   const result = ghInRepo(repoRoot, [
     "repo",

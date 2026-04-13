@@ -30,7 +30,7 @@ ninthwave manages the pipeline, not the decisions. Every PR is reviewed before i
 
 ### 7. Isolation by default
 
-Workers get their own worktrees and partitions. Parallel sessions never share a checkout. Test databases and ports are partitioned. The blast radius of any single worker is its own branch. Sandboxing is planned via [strait](https://github.com/ninthwave-sh/strait).
+Workers get their own worktrees and partitions. Parallel sessions never share a checkout. Test databases and ports are partitioned. The blast radius of any single worker is its own branch. Sandboxing is planned via [strait](https://github.com/ninthwave-io/strait).
 
 ## Hard Boundaries
 

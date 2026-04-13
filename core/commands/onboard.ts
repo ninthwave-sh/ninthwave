@@ -222,7 +222,7 @@ export async function onboard(
     console.error(`  ${BOLD}export NINTHWAVE_HOME=/path/to/ninthwave${RESET}`);
     console.error();
     console.error("Or install via Homebrew:");
-    console.error(`  ${BOLD}brew install ninthwave-sh/tap/ninthwave${RESET}`);
+    console.error(`  ${BOLD}brew install ninthwave-io/tap/ninthwave${RESET}`);
     console.error();
     return;
   }

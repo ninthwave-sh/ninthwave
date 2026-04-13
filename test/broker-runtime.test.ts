@@ -156,7 +156,7 @@ describe("broker-runtime", () => {
 
     it("creates a crew with repo reference", async () => {
       const { server, port } = startServer();
-      const repoUrl = "https://github.com/ninthwave-sh/ninthwave";
+      const repoUrl = "https://github.com/ninthwave-io/ninthwave";
       const code = await createCrew(port, { repoUrl });
       const crew = server.getCrew(code);
       expect(crew).toBeDefined();
@@ -204,7 +204,7 @@ describe("broker-runtime", () => {
     it("rejects daemon with mismatched repoUrl", async () => {
       const { port } = startServer();
       const code = await createCrew(port, {
-        repoUrl: "https://github.com/ninthwave-sh/ninthwave",
+        repoUrl: "https://github.com/ninthwave-io/ninthwave",
       });
 
       // Try to join with a different repo
@@ -219,7 +219,7 @@ describe("broker-runtime", () => {
 
     it("allows daemon with matching repoUrl", async () => {
       const { port } = startServer();
-      const repoUrl = "https://github.com/ninthwave-sh/ninthwave";
+      const repoUrl = "https://github.com/ninthwave-io/ninthwave";
       const code = await createCrew(port, { repoUrl });
 
       const ws = await connectWs(port, code, "d1", "worker-1", { repoUrl });
@@ -229,7 +229,7 @@ describe("broker-runtime", () => {
 
     it("allows daemon with matching repoHash", async () => {
       const { port } = startServer();
-      const repoUrl = "https://github.com/ninthwave-sh/ninthwave";
+      const repoUrl = "https://github.com/ninthwave-io/ninthwave";
       const code = await createCrew(port, { repoUrl });
       const repoHash = hashRepoUrl(repoUrl);
 
@@ -241,7 +241,7 @@ describe("broker-runtime", () => {
     it("allows daemon without repo params when crew has repoRef", async () => {
       const { port } = startServer();
       const code = await createCrew(port, {
-        repoUrl: "https://github.com/ninthwave-sh/ninthwave",
+        repoUrl: "https://github.com/ninthwave-io/ninthwave",
       });
 
       // No repo params -- should be allowed (backward compat)
@@ -298,7 +298,7 @@ describe("broker-runtime", () => {
       const dataDir = join(tmpDir, "crews");
 
       const { server: s1, port: p1 } = startServer({ dataDir });
-      const repoUrl = "https://github.com/ninthwave-sh/ninthwave";
+      const repoUrl = "https://github.com/ninthwave-io/ninthwave";
       const code = await createCrew(p1, { repoUrl });
       s1.stop();
       servers = servers.filter((s) => s !== s1);

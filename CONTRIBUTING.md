@@ -5,7 +5,7 @@
 Clone the repo:
 
 ```bash
-git clone git@github.com:ninthwave-sh/ninthwave.git ~/code/ninthwave
+git clone git@github.com:ninthwave-io/ninthwave.git ~/code/ninthwave
 ```
 
 ### Prerequisites
@@ -137,7 +137,7 @@ This produces a standalone `ninthwave` binary that doesn't require Bun at runtim
 3. GitHub Actions (`.github/workflows/release.yml`) automatically:
    - Compiles binaries for macOS (arm64/x64) and Linux (x64)
    - Creates a GitHub Release with the binaries attached
-4. The Homebrew formula in [`ninthwave-sh/homebrew-tap`](https://github.com/ninthwave-sh/homebrew-tap) references the release tarball
+4. The Homebrew formula in [`ninthwave-io/homebrew-tap`](https://github.com/ninthwave-io/homebrew-tap) references the release tarball
 5. Users update via `brew upgrade ninthwave`
 
 ## Pull Requests

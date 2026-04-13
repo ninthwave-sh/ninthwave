@@ -5184,7 +5184,7 @@ describe("orchestrateLoop watch mode", () => {
       }
       return {
         status: "launch" as const,
-        targetRepo: "ninthwave-sh/ninthwave",
+        targetRepo: "ninthwave-io/ninthwave",
         branchName: `ninthwave/${workItem.id}`,
       };
     });

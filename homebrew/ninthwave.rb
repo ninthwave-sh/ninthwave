@@ -2,29 +2,29 @@
 #
 # This is the template formula kept in-repo. The release workflow
 # (.github/workflows/release.yml) substitutes version and SHA256 values,
-# then pushes the result to the ninthwave-sh/homebrew-tap repository.
+# then pushes the result to the ninthwave-io/homebrew-tap repository.
 #
-# Install: brew install ninthwave-sh/tap/ninthwave
+# Install: brew install ninthwave-io/tap/ninthwave
 # Update:  brew upgrade ninthwave
 
 class Ninthwave < Formula
   desc "Parallel AI coding orchestration — human-sized PRs"
-  homepage "https://github.com/ninthwave-sh/ninthwave"
+  homepage "https://github.com/ninthwave-io/ninthwave"
   license "Apache-2.0"
   version "__VERSION__"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/ninthwave-sh/ninthwave/releases/download/v__VERSION__/ninthwave-__VERSION__-darwin-arm64.tar.gz"
+      url "https://github.com/ninthwave-io/ninthwave/releases/download/v__VERSION__/ninthwave-__VERSION__-darwin-arm64.tar.gz"
       sha256 "__SHA_DARWIN_ARM64__"
     else
-      url "https://github.com/ninthwave-sh/ninthwave/releases/download/v__VERSION__/ninthwave-__VERSION__-darwin-x64.tar.gz"
+      url "https://github.com/ninthwave-io/ninthwave/releases/download/v__VERSION__/ninthwave-__VERSION__-darwin-x64.tar.gz"
       sha256 "__SHA_DARWIN_X64__"
     end
   end
 
   on_linux do
-    url "https://github.com/ninthwave-sh/ninthwave/releases/download/v__VERSION__/ninthwave-__VERSION__-linux-x64.tar.gz"
+    url "https://github.com/ninthwave-io/ninthwave/releases/download/v__VERSION__/ninthwave-__VERSION__-linux-x64.tar.gz"
     sha256 "__SHA_LINUX_X64__"
   end
 

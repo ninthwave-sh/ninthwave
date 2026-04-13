@@ -22,13 +22,13 @@ Instead of running one AI session at a time -- writing code, creating a PR, wait
 **Via Homebrew (recommended):**
 
 ```bash
-brew install ninthwave-sh/tap/ninthwave
+brew install ninthwave-io/tap/ninthwave
 ```
 
 **From source:**
 
 ```bash
-git clone https://github.com/ninthwave-sh/ninthwave
+git clone https://github.com/ninthwave-io/ninthwave
 cd ninthwave
 bun install
 bun run build
@@ -85,7 +85,7 @@ When you start `nw` and the passive update check has cached a newer version that
 
 ```
 Ninthwave update available  vX.Y.Z -> vA.B.C
-Release notes: https://github.com/ninthwave-sh/ninthwave/releases/tag/vA.B.C
+Release notes: https://github.com/ninthwave-io/ninthwave/releases/tag/vA.B.C
 
   1. Update now
   2. Skip

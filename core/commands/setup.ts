@@ -199,7 +199,7 @@ export function createNwSymlink(
   const ninthwavePath = resolveCommandPath("ninthwave");
   if (!ninthwavePath) {
     console.log(
-      `  nw alias: skipped (ninthwave not in PATH -- install via ${BOLD}brew install ninthwave-sh/tap/ninthwave${RESET})`,
+      `  nw alias: skipped (ninthwave not in PATH -- install via ${BOLD}brew install ninthwave-io/tap/ninthwave${RESET})`,
     );
     return false;
   }

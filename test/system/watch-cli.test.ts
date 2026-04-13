@@ -55,7 +55,7 @@ function buildCliEnv(harness: CliHarness, runId: string, scenarioPath: string): 
     [FAKE_AI_SCENARIO_ENV]: scenarioPath,
     [FAKE_AI_RUN_ID_ENV]: runId,
     NINTHWAVE_FAKE_GH_STATE_PATH: join(harness.stateDir, "fake-gh.json"),
-    NINTHWAVE_FAKE_GH_REPO: "ninthwave-sh/ninthwave-system-test",
+    NINTHWAVE_FAKE_GH_REPO: "ninthwave-io/ninthwave-system-test",
     NINTHWAVE_MUX: "headless",
   };
 }

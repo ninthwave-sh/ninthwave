@@ -43,7 +43,7 @@ const args = process.argv.slice(2);
 const repoRoot = process.cwd();
 const statePath = process.env.NINTHWAVE_FAKE_GH_STATE_PATH
   ?? join(repoRoot, ".ninthwave", "test-system", "fake-gh.json");
-const repoNameWithOwner = process.env.NINTHWAVE_FAKE_GH_REPO ?? "ninthwave-sh/test-system";
+const repoNameWithOwner = process.env.NINTHWAVE_FAKE_GH_REPO ?? "ninthwave-io/test-system";
 const defaultBranch = process.env.NINTHWAVE_FAKE_GH_DEFAULT_BRANCH ?? "main";
 const autoCreatePrs = process.env.NINTHWAVE_FAKE_GH_AUTO_CREATE_PRS !== "0";
 const defaultCommitChecks = process.env.NINTHWAVE_FAKE_GH_DEFAULT_COMMIT_CHECKS ?? "pass";

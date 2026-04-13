@@ -6,8 +6,8 @@ import { basename, dirname, join, resolve } from "path";
 import { loadUserConfig, type UserConfig } from "./config.ts";
 import { getBundleDir } from "./paths.ts";
 
-const LATEST_RELEASE_URL = "https://api.github.com/repos/ninthwave-sh/ninthwave/releases/latest";
-const RELEASE_NOTES_URL_PREFIX = "https://github.com/ninthwave-sh/ninthwave/releases/tag/v";
+const LATEST_RELEASE_URL = "https://api.github.com/repos/ninthwave-io/ninthwave/releases/latest";
+const RELEASE_NOTES_URL_PREFIX = "https://github.com/ninthwave-io/ninthwave/releases/tag/v";
 const DIRECT_INSTALL_COMMAND = "curl -fsSL https://ninthwave.sh/install | bash";
 
 /**

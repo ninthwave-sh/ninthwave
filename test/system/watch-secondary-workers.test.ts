@@ -99,7 +99,7 @@ function buildCliEnv(
     [TEST_LAUNCH_OVERRIDE_COMMAND_ENV]: DEFAULT_FAKE_AI_SCRIPT,
     [FAKE_AI_SCENARIO_ENV]: scenarioPath,
     NINTHWAVE_FAKE_GH_STATE_PATH: harness.fakeGhStatePath(),
-    NINTHWAVE_FAKE_GH_REPO: "ninthwave-sh/ninthwave-system-test",
+    NINTHWAVE_FAKE_GH_REPO: "ninthwave-io/ninthwave-system-test",
     ...(options.defaultCommitChecks
       ? { NINTHWAVE_FAKE_GH_DEFAULT_COMMIT_CHECKS: options.defaultCommitChecks }
       : {}),
