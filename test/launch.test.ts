@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import { join } from "path";
 import { writeFileSync, mkdirSync, readFileSync } from "fs";
 import { spawnSync } from "child_process";
-import { setupTempRepo, cleanupTempRepos, captureOutputAsync } from "./helpers.ts";
+import { setupTempRepo, setupTempDir, cleanupTempRepos, captureOutputAsync } from "./helpers.ts";
 import type { Multiplexer } from "../core/mux.ts";
 import { runtimeAgentNameForTool, agentTargetDirs, renderAgentArtifact } from "../core/ai-tools.ts";
 import { type LaunchGitDeps, launchSingleItem, launchAiSession, launchReviewWorker, launchRebaserWorker, launchForwardFixerWorker, sanitizeTitle, extractItemText, validatePickupCandidate } from "../core/commands/launch.ts";
@@ -80,6 +80,18 @@ function extractPromptDataFile(cmd: string): string {
   const match = cmd.match(/PROMPT=\$\(cat '([^']+)'\)/);
   expect(match?.[1]).toBeDefined();
   return match![1]!;
+}
+
+function writeUserConfig(homeDir: string, config: unknown): void {
+  const configDir = join(homeDir, ".ninthwave");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "config.json"), JSON.stringify(config, null, 2));
+}
+
+function writeRawUserConfig(homeDir: string, raw: string): void {
+  const configDir = join(homeDir, ".ninthwave");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(join(configDir, "config.json"), raw);
 }
 
 function seedCanonicalAgent(repo: string, filename: string, instructions: string): void {
@@ -1620,7 +1632,17 @@ describe("extractItemText", () => {
 });
 
 describe("launchAiSession agentName", () => {
-  afterEach(() => cleanupTempRepos());
+  const originalHome = process.env.HOME;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    cleanupTempRepos();
+  });
 
   it("dispatches to buildHeadlessCmd when mux.type is headless", () => {
     const mockMux = createMockMux("headless");
@@ -1891,6 +1913,152 @@ describe("launchAiSession agentName", () => {
     expect(cmd).toContain("NINTHWAVE_LAUNCH_WORKSPACE_NAME='T-1 Test'");
     expect(cmd).toContain("exec '/bin/echo' 'deterministic-launch'");
     expect(cmd).not.toContain("exec claude");
+  });
+
+  it("applies config-backed overrides in interactive launch mode", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const homeDir = setupTempDir("nw-home-");
+    writeUserConfig(homeDir, {
+      ai_tool_overrides: {
+        claude: {
+          command: "/custom/claude",
+          args: ["--shared"],
+          env: {
+            SHARED_ONLY: "base",
+          },
+          launch: {
+            args: ["--interactive"],
+            env: {
+              LAUNCH_ONLY: "1",
+            },
+          },
+        },
+      },
+    });
+    const promptFile = join(repo, "prompt.txt");
+    writeFileSync(promptFile, "test prompt");
+
+    launchAiSession("claude", repo, "T-1", "Test", promptFile, mockMux, {
+      agentName: "ninthwave-reviewer",
+      userConfigHome: homeDir,
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain("SHARED_ONLY='base'");
+    expect(cmd).toContain("LAUNCH_ONLY='1'");
+    expect(cmd).toContain("NINTHWAVE_LAUNCH_MODE='launch'");
+    expect(cmd).toContain("NINTHWAVE_LAUNCH_AGENT='ninthwave-reviewer'");
+    expect(cmd).toContain("exec '/custom/claude' '--shared' '--interactive'");
+    expect(cmd).not.toContain("claude --name");
+  });
+
+  it("applies config-backed overrides in headless mode", () => {
+    const mockMux = createMockMux("headless");
+    const repo = setupTempRepo();
+    const homeDir = setupTempDir("nw-home-");
+    writeUserConfig(homeDir, {
+      ai_tool_overrides: {
+        opencode: {
+          command: "/custom/opencode",
+          args: ["--shared"],
+          env: {
+            SHARED_ONLY: "base",
+          },
+          headless: {
+            command: "/custom/opencode-headless",
+            args: ["--headless"],
+            env: {
+              HEADLESS_ONLY: "1",
+            },
+          },
+        },
+      },
+    });
+    const promptFile = join(repo, "prompt.txt");
+    writeFileSync(promptFile, "test prompt");
+
+    launchAiSession("opencode", repo, "T-1", "Test", promptFile, mockMux, {
+      agentName: "ninthwave-reviewer",
+      userConfigHome: homeDir,
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain("SHARED_ONLY='base'");
+    expect(cmd).toContain("HEADLESS_ONLY='1'");
+    expect(cmd).toContain("NINTHWAVE_LAUNCH_MODE='headless'");
+    expect(cmd).toContain("NINTHWAVE_LAUNCH_AGENT='ninthwave-reviewer'");
+    expect(cmd).toContain("exec '/custom/opencode-headless' '--shared' '--headless'");
+    expect(cmd).not.toContain("exec opencode run");
+  });
+
+  it("keeps explicit launchOverride higher precedence than user config", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const homeDir = setupTempDir("nw-home-");
+    writeUserConfig(homeDir, {
+      ai_tool_overrides: {
+        claude: {
+          command: "/custom/claude",
+        },
+      },
+    });
+    const promptFile = join(repo, "prompt.txt");
+    writeFileSync(promptFile, "test prompt");
+
+    launchAiSession("claude", repo, "T-1", "Test", promptFile, mockMux, {
+      userConfigHome: homeDir,
+      launchOverride: {
+        command: "/bin/echo",
+        args: ["explicit"],
+      },
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain("exec '/bin/echo' 'explicit'");
+    expect(cmd).not.toContain("/custom/claude");
+  });
+
+  it("falls back to the built-in launch command when config is missing", () => {
+    const mockMux = createMockMux();
+    const repo = setupTempRepo();
+    const homeDir = setupTempDir("nw-home-");
+    const promptFile = join(repo, "prompt.txt");
+    writeFileSync(promptFile, "test prompt");
+
+    launchAiSession("claude", repo, "T-1", "Test", promptFile, mockMux, {
+      userConfigHome: homeDir,
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain("claude --name 'T-1 Test'");
+    expect(cmd).not.toContain("NINTHWAVE_LAUNCH_MODE");
+  });
+
+  it("falls back to the built-in headless command when config is malformed", () => {
+    const mockMux = createMockMux("headless");
+    const repo = setupTempRepo();
+    const homeDir = setupTempDir("nw-home-");
+    writeRawUserConfig(homeDir, "{ not valid json");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const promptFile = join(repo, "prompt.txt");
+    writeFileSync(promptFile, "test prompt");
+
+    launchAiSession("opencode", repo, "T-1", "Test", promptFile, mockMux, {
+      agentName: "ninthwave-reviewer",
+      userConfigHome: homeDir,
+    });
+
+    const launchCall = mockMux.launchWorkspace.mock.calls[0]!;
+    const cmd = launchCall[1] as string;
+    expect(cmd).toContain('exec opencode run "$PROMPT" --agent ninthwave-reviewer');
+    expect(cmd).not.toContain("NINTHWAVE_LAUNCH_MODE");
+    expect(errorSpy).toHaveBeenCalledWith("Warning: ~/.ninthwave/config.json contains malformed JSON, ignoring.");
+    errorSpy.mockRestore();
   });
 });
 
