@@ -32,6 +32,7 @@ No build step -- Bun executes TypeScript directly. Changes take effect immediate
 
 - **Filesystem boundary:** ninthwave operates within the project directory and `~/.ninthwave/` only. It does not write to `~/.copilot/`, `~/.claude/`, `~/.config/`, or any other tool-specific user config. If a tool requires external setup, document it -- don't automate it.
 - **Name casing:** use `Ninthwave` when referring to the product in prose. Use lowercase only for commands, package names, repo names, and filesystem paths such as `nw`, `ninthwave status`, `ninthwave-io/tap/ninthwave`, and `.ninthwave/`.
+- **External project privacy:** do not name external projects in durable artifacts such as work items, commit messages, PR titles, PR bodies, friction logs, or decision logs unless the project is public. For private projects, describe them generically.
 - Conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`
 - Tests live in `test/` using bun's native test runner (vitest-compatible API via `import { describe, it, expect, vi } from "vitest"`)
 - **Mock isolation:** `bun test` does not isolate `vi.mock` between test files -- mocks leak across files and break unrelated tests. Prefer dependency injection (pass collaborators as function arguments) over `vi.mock`. Only use `vi.mock` when the mocked module is not imported by any other test file. When in doubt, inject.
