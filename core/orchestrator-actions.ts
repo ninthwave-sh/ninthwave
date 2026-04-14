@@ -323,11 +323,14 @@ export function executeLaunch(
     }
 
     if (hasFeedback && feedbackMessage) {
+      const launchFeedbackMessage = feedbackMessage.startsWith("[ORCHESTRATOR]")
+        ? feedbackMessage
+        : `[ORCHESTRATOR] Review Feedback:\n\n${feedbackMessage}`;
       deliverToImplementerInbox(
         orch,
         item,
         "launch",
-        `[ORCHESTRATOR] Review Feedback:\n\n${feedbackMessage}`,
+        launchFeedbackMessage,
         ctx,
         deps,
       );

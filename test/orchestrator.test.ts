@@ -3502,6 +3502,7 @@ describe("Orchestrator", () => {
         const flushActions = orch.processTransitions(
           snapshotWith([{
             id: "X-1-1",
+            workerAlive: true,
             prState: "open",
             ciStatus: "pass",
             headSha: "merge-sha-1",
@@ -3559,6 +3560,7 @@ describe("Orchestrator", () => {
         const flushActions = orch.processTransitions(
           snapshotWith([{
             id: "X-1-2",
+            workerAlive: true,
             prState: "open",
             ciStatus: "pass",
             headSha: "review-sha-1",

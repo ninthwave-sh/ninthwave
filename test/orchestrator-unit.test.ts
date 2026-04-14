@@ -3525,7 +3525,7 @@ describe("processComments (via processTransitions)", () => {
     expect(actions2.filter((a) => a.type === "send-message")).toHaveLength(0);
   });
 
-  it("batches rebase comments before relaying them", () => {
+  it("flushes one aggregated feedback batch to a live worker once", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-1-1"));
     orch.getItem("H-1-1")!.reviewCompleted = true;
@@ -3540,6 +3540,7 @@ describe("processComments (via processTransitions)", () => {
         prState: "open",
         newComments: [
           { id: 401, body: "Please rebase onto main", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
+          { id: 402, body: "Also update the tests", author: "maintainer", createdAt: "2026-01-15T12:01:30Z", commentType: "review" },
         ],
       }]),
       NOW,
@@ -3547,7 +3548,7 @@ describe("processComments (via processTransitions)", () => {
 
     expect(waitingActions).toEqual([]);
     expect(orch.getItem("H-1-1")!.pendingFeedbackBatch).toEqual(
-      expect.objectContaining({ deadline: "2026-01-15T12:02:00.000Z" }),
+      expect.objectContaining({ deadline: "2026-01-15T12:02:30.000Z" }),
     );
 
     const flushedActions = orch.processTransitions(
@@ -3562,8 +3563,24 @@ describe("processComments (via processTransitions)", () => {
     const sendMessage = flushedActions.find((a) => a.type === "send-message" && a.itemId === "H-1-1");
     expect(sendMessage).toBeDefined();
     expect(sendMessage!.message).toContain("@reviewer");
+    expect(sendMessage!.message).toContain("@maintainer");
     expect(sendMessage!.message).toContain("Please rebase onto main");
+    expect(sendMessage!.message).toContain("Also update the tests");
     expect(flushedActions.find((a) => a.type === "daemon-rebase" && a.itemId === "H-1-1")).toBeUndefined();
+    expect(flushedActions.filter((a) => a.type === "send-message" && a.itemId === "H-1-1")).toHaveLength(1);
+    expect(orch.getItem("H-1-1")!.pendingFeedbackMessage).toContain("Please rebase onto main");
+    expect(orch.getItem("H-1-1")!.pendingFeedbackMessage).toContain("Also update the tests");
+
+    const repeatedPollActions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pending",
+        prState: "open",
+      }]),
+      new Date("2026-01-15T12:04:00Z"),
+    );
+
+    expect(repeatedPollActions.filter((a) => a.type === "send-message" && a.itemId === "H-1-1")).toHaveLength(0);
   });
 
   it("does not process comments for items without a prNumber", () => {
@@ -3615,7 +3632,7 @@ describe("processComments (via processTransitions)", () => {
     expect(sendMsg!.message).toContain("Fix this");
   });
 
-  it("parked review-pending item with human comments triggers respawn", () => {
+  it("parked review-pending item flushes one aggregated feedback relaunch", () => {
     const transitions: Array<[string, string]> = [];
     const orch = new Orchestrator({
       mergeStrategy: "manual",
@@ -3637,6 +3654,7 @@ describe("processComments (via processTransitions)", () => {
         headSha: "abc123",
         newComments: [
           { body: "Please tighten this wording.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+          { body: "Please cover the failed relaunch path.", author: "maintainer", createdAt: "2026-01-15T12:01:30Z" },
         ],
       }]),
       NOW,
@@ -3665,9 +3683,21 @@ describe("processComments (via processTransitions)", () => {
     expect(item.lastReviewedCommitSha).toBe("abc123");
     expect(item.needsFeedbackResponse).toBe(true);
     expect(item.pendingFeedbackMessage).toContain("Please tighten this wording.");
-    expect(item.lastCommentCheck).toBe("2026-01-15T12:01:00Z");
+    expect(item.pendingFeedbackMessage).toContain("Please cover the failed relaunch path.");
+    expect(item.lastCommentCheck).toBe("2026-01-15T12:01:30Z");
     expect(transitions).toContainEqual(["review-pending", "ready"]);
     expect(transitions).toContainEqual(["ready", "launching"]);
+
+    const repeatedPollActions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+      }]),
+      new Date("2026-01-15T12:04:00Z"),
+    );
+
+    expect(repeatedPollActions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(false);
   });
 
   it("parked item ignores bot comments", () => {
@@ -3701,6 +3731,124 @@ describe("processComments (via processTransitions)", () => {
     // lastCommentCheck is updated by processComments even for filtered bot comments
     // (prevents re-processing on next cycle)
     expect(item.lastCommentCheck).toBe("2026-01-15T12:02:00Z");
+  });
+
+  it("dead review-pending worker flushes one aggregated feedback relaunch", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = false;
+    item.workspaceRef = "workspace:1";
+    item.sessionParked = false;
+
+    const waitingActions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+        workerAlive: false,
+        newComments: [
+          { body: "Please tighten this wording.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+          { body: "Also add a regression test.", author: "maintainer", createdAt: "2026-01-15T12:01:30Z" },
+        ],
+      }]),
+      NOW,
+    );
+
+    expect(waitingActions).toEqual([]);
+    expect(item.pendingFeedbackBatch).toBeDefined();
+
+    const firstFalsePollActions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+        workerAlive: false,
+      }]),
+      FEEDBACK_FLUSH_NOW,
+    );
+
+    expect(firstFalsePollActions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(false);
+    expect(firstFalsePollActions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(false);
+    expect(item.state).toBe("review-pending");
+    expect(item.pendingFeedbackBatch).toBeDefined();
+    expect(item.needsFeedbackResponse).toBeUndefined();
+
+    let actions = firstFalsePollActions;
+    let sawRelaunch = false;
+    for (let i = 0; i < 5; i++) {
+      actions = orch.processTransitions(
+        snapshotWith([{
+          id: "H-1-1",
+          ciStatus: "pass",
+          prState: "open",
+          workerAlive: false,
+        }]),
+        FEEDBACK_FLUSH_NOW,
+      );
+      sawRelaunch = sawRelaunch || actions.some((a) => a.type === "retry" && a.itemId === "H-1-1");
+      if (sawRelaunch) break;
+    }
+
+    expect(sawRelaunch).toBe(true);
+    expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
+    expect(item.state).toBe("launching");
+    expect(item.needsFeedbackResponse).toBe(true);
+    expect(item.pendingFeedbackMessage).toContain("Please tighten this wording.");
+    expect(item.pendingFeedbackMessage).toContain("Also add a regression test.");
+
+    const repeatedPollActions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+        workerAlive: false,
+      }]),
+      new Date("2026-01-15T12:04:00Z"),
+    );
+
+    expect(repeatedPollActions.some((a) => a.type === "retry" && a.itemId === "H-1-1")).toBe(false);
+  });
+
+  it("does not relaunch aggregated feedback on a single false liveness poll", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = false;
+    item.workspaceRef = "workspace:1";
+
+    orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+        workerAlive: true,
+        newComments: [
+          { body: "Please tighten this wording.", author: "reviewer", createdAt: "2026-01-15T12:01:00Z" },
+        ],
+      }]),
+      NOW,
+    );
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+        workerAlive: false,
+      }]),
+      FEEDBACK_FLUSH_NOW,
+    );
+
+    expect(actions).toEqual([]);
+    expect(item.state).toBe("review-pending");
+    expect(item.pendingFeedbackBatch).toBeDefined();
+    expect(item.needsFeedbackResponse).toBeUndefined();
+    expect(item.pendingFeedbackMessage).toBeUndefined();
   });
 
   it("parked item detects human comment that quotes an agent comment", () => {
@@ -3809,16 +3957,31 @@ describe("processComments (via processTransitions)", () => {
       orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
       orch.getItem("H-1-1")!.ciFailCount = 0;
 
+      const waitingActions = orch.processTransitions(
+        snapshotWith([{
+          id: "H-1-1",
+          ciStatus: ciStatus as any,
+          prState: "open",
+          isMergeable: true,
+          workerAlive: true,
+          newComments: [
+            { id: 801, body: "Please address this", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
+          ],
+        }]),
+        NOW,
+      );
+
+      expect(waitingActions.filter((a) => a.type === "send-message" && a.itemId === "H-1-1")).toHaveLength(0);
+
       const actions = orch.processTransitions(
         snapshotWith([{
           id: "H-1-1",
           ciStatus: ciStatus as any,
           prState: "open",
           isMergeable: true,
-          newComments: [
-            { id: 801, body: "Please address this", author: "reviewer", createdAt: "2026-01-15T12:01:00Z", commentType: "issue" },
-          ],
+          workerAlive: true,
         }]),
+        FEEDBACK_FLUSH_NOW,
       );
 
       const sendMsg = actions.find((a) => a.type === "send-message" && a.itemId === "H-1-1");
@@ -5320,6 +5483,51 @@ describe("implementer inbox delivery resolution", () => {
     expect(writeInbox).toHaveBeenCalledTimes(1);
     expect(item.needsFeedbackResponse).toBe(false);
     expect(item.pendingFeedbackMessage).toBeUndefined();
+  });
+
+  it("executeLaunch forwards an aggregated feedback payload without double wrapping", () => {
+    const hubRepo = setupTempRepo();
+    const worktreeDir = join(hubRepo, ".ninthwave", ".worktrees");
+    const itemWorktree = join(worktreeDir, "ninthwave-H-1-1");
+    mkdirSync(itemWorktree, { recursive: true });
+
+    const { orch } = createEventCollector();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = false;
+    orch.hydrateState("H-1-1", "launching");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "[ORCHESTRATOR] Review Feedback Batch: 2 trusted human comments on PR #42.\n\n@reviewer commented on PR #42:\n\nPlease tighten this wording.\n\n@maintainer commented on PR #42:\n\nAlso add a regression test.";
+
+    const writeInbox = vi.fn();
+    const deps = makeMinimalDeps({
+      workers: {
+        validatePickupCandidate: (launchItem) => ({
+          status: "skip-with-pr",
+          branchName: `ninthwave/${launchItem.id}`,
+          existingPrNumber: 42,
+        }),
+        launchSingleItem: () => ({ worktreePath: itemWorktree, workspaceRef: "workspace:1" }),
+      },
+      io: { writeInbox },
+    });
+    const ctx: ExecutionContext = {
+      projectRoot: hubRepo,
+      worktreeDir,
+      workDir: join(hubRepo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+
+    const result = orch.executeAction({ type: "launch", itemId: "H-1-1" }, ctx, deps);
+
+    expect(result.success).toBe(true);
+    expect(writeInbox).toHaveBeenCalledWith(
+      itemWorktree,
+      "H-1-1",
+      "[ORCHESTRATOR] Review Feedback Batch: 2 trusted human comments on PR #42.\n\n@reviewer commented on PR #42:\n\nPlease tighten this wording.\n\n@maintainer commented on PR #42:\n\nAlso add a regression test.",
+    );
+    expect(writeInbox).toHaveBeenCalledTimes(1);
   });
 
   it("executeLaunch preserves feedback relaunch state when launch fails", () => {
