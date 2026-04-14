@@ -2127,6 +2127,149 @@ describe("handleReviewing", () => {
     expect(actions2.some((a) => a.type === "launch-review")).toBe(true);
   });
 
+  it("feedback-done signal clears SHA gate in implementing state", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "implementing");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = false;
+    item.lastReviewedCommitSha = "reviewed-sha";
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "Please explain X";
+
+    // Poll with feedbackDoneSignal set and same SHA as lastReviewedCommitSha
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", prNumber: 42, ciStatus: "pass", prState: "open",
+        headSha: "reviewed-sha", feedbackDoneSignal: true,
+      }]),
+      NOW,
+    );
+
+    // Should clear the feedback state and progress out of implementing
+    expect(item.lastReviewedCommitSha).toBeNull();
+    expect(item.needsFeedbackResponse).toBe(false);
+    expect(item.pendingFeedbackMessage).toBeUndefined();
+    expect(item.state).not.toBe("implementing");
+    expect(actions.some((a) => a.type === "clear-feedback-done-signal")).toBe(true);
+  });
+
+  it("feedback-done signal clears SHA gate in review-pending state", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = false;
+    item.lastReviewedCommitSha = "reviewed-sha";
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "Please explain X";
+    item.workspaceRef = "workspace:1";
+
+    // Poll with CI passing and feedbackDoneSignal
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", prNumber: 42, ciStatus: "pass", prState: "open",
+        headSha: "reviewed-sha", feedbackDoneSignal: true,
+        isMergeable: true,
+      }]),
+      NOW,
+    );
+
+    // Should clear the feedback state
+    expect(item.lastReviewedCommitSha).toBeNull();
+    expect(item.needsFeedbackResponse).toBe(false);
+    expect(item.pendingFeedbackMessage).toBeUndefined();
+    expect(actions.some((a) => a.type === "clear-feedback-done-signal")).toBe(true);
+    // Should progress (ci-passed or launch-review depending on merge strategy)
+    expect(item.state).not.toBe("review-pending");
+  });
+
+  it("feedback-done signal is ignored when no SHA gate is active", () => {
+    // feedbackDoneSignal without lastReviewedCommitSha should not trigger clearing
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "implementing");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = false;
+    item.lastReviewedCommitSha = null;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", prNumber: 42, ciStatus: "pass", prState: "open",
+        headSha: "some-sha", feedbackDoneSignal: true,
+      }]),
+      NOW,
+    );
+
+    // Should progress normally through ci-pending (no SHA gate was active)
+    expect(item.state).not.toBe("implementing");
+    // No clear-feedback-done-signal action needed since the gate wasn't active
+  });
+
+  it("repeated feedback-done signals are idempotent", () => {
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "implementing");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = false;
+    item.lastReviewedCommitSha = "reviewed-sha";
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "Please explain X";
+
+    // First signal clears the gate and progresses
+    orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", prNumber: 42, ciStatus: "pass", prState: "open",
+        headSha: "reviewed-sha", feedbackDoneSignal: true,
+      }]),
+      NOW,
+    );
+
+    const stateAfterFirst = item.state;
+
+    // Second signal (stale file not yet deleted) should not break anything
+    const actions2 = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", prNumber: 42, ciStatus: "pass", prState: "open",
+        headSha: "reviewed-sha", feedbackDoneSignal: true,
+      }]),
+      NOW,
+    );
+
+    // State should not regress
+    expect(item.lastReviewedCommitSha).toBeNull();
+    expect(item.needsFeedbackResponse).toBe(false);
+  });
+
+  it("review-pending feedback-done with CI pending transitions to ci-pending", () => {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "review-pending");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewCompleted = false;
+    item.lastReviewedCommitSha = "reviewed-sha";
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "Please explain X";
+    item.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1", prNumber: 42, ciStatus: "pending", prState: "open",
+        headSha: "reviewed-sha", feedbackDoneSignal: true,
+      }]),
+      NOW,
+    );
+
+    expect(item.state).toBe("ci-pending");
+    expect(item.lastReviewedCommitSha).toBeNull();
+    expect(actions.some((a) => a.type === "clear-feedback-done-signal")).toBe(true);
+  });
+
   it("transitions to review-pending on request-changes verdict", () => {
     const orch = new Orchestrator();
     orch.addItem(makeWorkItem("H-1-1"));
@@ -3661,6 +3804,22 @@ describe("processComments (via processTransitions)", () => {
     );
 
     expect(waitingActions).toEqual([]);
+    expect(item.pendingFeedbackBatch).toBeDefined();
+    expect(item.state).toBe("review-pending");
+    expect(item.sessionParked).toBe(true);
+
+    // Poll before the debounce deadline (12:01:30Z + 60s = 12:02:30Z) -- batch should hold
+    const waitingActions2 = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        ciStatus: "pass",
+        prState: "open",
+        headSha: "abc123",
+      }]),
+      new Date("2026-01-15T12:02:00Z"),
+    );
+
+    expect(waitingActions2).toEqual([]);
     expect(item.pendingFeedbackBatch).toBeDefined();
     expect(item.state).toBe("review-pending");
     expect(item.sessionParked).toBe(true);

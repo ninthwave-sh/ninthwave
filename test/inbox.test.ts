@@ -633,4 +633,37 @@ describe("inbox", () => {
       }
     });
   });
+
+  describe("feedback-done signal integration", () => {
+    it("worker can write and read feedback-done signal via DaemonIO", () => {
+      // Test that the feedback-done signal round-trips through DaemonIO functions,
+      // verifying the worker-side flow is compatible with the inbox/daemon layer.
+      const daemon = require("../core/daemon.ts") as typeof import("../core/daemon.ts");
+
+      const files = new Map<string, string>();
+      const daemonIO: import("../core/daemon.ts").DaemonIO = {
+        writeFileSync: (p: any, c: any) => { files.set(String(p), String(c)); },
+        readFileSync: (p: any) => {
+          const c = files.get(String(p));
+          if (c === undefined) throw new Error(`ENOENT: ${String(p)}`);
+          return c;
+        },
+        unlinkSync: (p: any) => { files.delete(String(p)); },
+        existsSync: (p: any) => files.has(String(p)),
+        mkdirSync: () => {},
+        renameSync: (a: any, b: any) => {
+          const c = files.get(String(a));
+          if (c !== undefined) { files.set(String(b), c); files.delete(String(a)); }
+        },
+      } as import("../core/daemon.ts").DaemonIO;
+
+      daemon.writeFeedbackDoneSignal("/project", "H-FOO-1", daemonIO);
+      const signal = daemon.readFeedbackDoneSignal("/project", "H-FOO-1", daemonIO);
+      expect(signal).not.toBeNull();
+      expect(signal!.id).toBe("H-FOO-1");
+
+      daemon.clearFeedbackDoneSignal("/project", "H-FOO-1", daemonIO);
+      expect(daemon.readFeedbackDoneSignal("/project", "H-FOO-1", daemonIO)).toBeNull();
+    });
+  });
 });
