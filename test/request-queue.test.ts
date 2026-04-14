@@ -92,15 +92,19 @@ describe("TokenBucket", () => {
   });
 
   it("updateBudget syncs tokens from remaining count", () => {
-    const bucket = new TokenBucket(1.0, 20);
+    let nowMs = 1000;
+    const now = () => nowMs;
+    const bucket = new TokenBucket(1.0, 20, now);
 
     // When GitHub says 100 remaining, bucket gets min(100, burstSize)
-    bucket.updateBudget(100, Math.floor(Date.now() / 1000) + 3600);
-    expect(bucket.getTokenCount()).toBe(20); // capped at burst
+    bucket.updateBudget(100, Math.floor(nowMs / 1000) + 3600);
+    expect(bucket.getTokenCount(now)).toBe(20); // capped at burst
 
-    // When GitHub says 0 remaining, bucket goes to 0
-    bucket.updateBudget(0, Math.floor(Date.now() / 1000) + 3600);
-    expect(bucket.getTokenCount()).toBe(0);
+    // When GitHub says 0 remaining, the bucket should stay at 0 even if
+    // time advances before the next read.
+    bucket.updateBudget(0, Math.floor(nowMs / 1000) + 3600);
+    nowMs += 1;
+    expect(bucket.getTokenCount(now)).toBe(0);
   });
 
   it("updateBudget restores tokens when budget exists", () => {

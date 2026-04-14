@@ -49,6 +49,7 @@ export class TokenBucket {
   private tokens: number;
   private readonly burstSize: number;
   private readonly refillRate: number; // tokens/sec
+  private readonly now: () => number;
   private lastRefillMs: number;
   private budgetRemaining: number | null = null;
   private budgetResetAt: number | null = null; // unix seconds
@@ -58,6 +59,7 @@ export class TokenBucket {
     burstSize: number = DEFAULT_BURST_SIZE,
     now: () => number = Date.now,
   ) {
+    this.now = now;
     this.refillRate = refillRate;
     this.burstSize = burstSize;
     this.tokens = burstSize;
@@ -79,6 +81,9 @@ export class TokenBucket {
     } else {
       this.tokens = 0;
     }
+
+    // Budget headers are authoritative at the time we receive them.
+    this.lastRefillMs = this.now();
   }
 
   /**
@@ -125,6 +130,17 @@ export class TokenBucket {
   private refill(nowMs: number): void {
     const elapsedMs = nowMs - this.lastRefillMs;
     if (elapsedMs <= 0) return;
+
+    if (this.budgetRemaining !== null && this.budgetRemaining <= 0) {
+      if (this.budgetResetAt !== null && nowMs < this.budgetResetAt * 1000) {
+        this.tokens = 0;
+        this.lastRefillMs = nowMs;
+        return;
+      }
+
+      this.budgetRemaining = null;
+      this.budgetResetAt = null;
+    }
 
     const newTokens = (elapsedMs / 1000) * this.refillRate;
     this.tokens = Math.min(this.burstSize, this.tokens + newTokens);
