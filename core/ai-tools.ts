@@ -369,6 +369,30 @@ export function resolveBuiltInLaunchOverride(
   };
 }
 
+function hasBuiltInOverrideFields(config?: BuiltInToolOverrideModeConfig): boolean {
+  return Boolean(
+    config && (
+      typeof config.command === "string" ||
+      (config.args?.length ?? 0) > 0 ||
+      Object.keys(config.env ?? {}).length > 0
+    ),
+  );
+}
+
+/** Resolve a mode-specific built-in launch override only when one is configured. */
+export function resolveConfiguredBuiltInLaunchOverride(
+  toolId: AiToolId,
+  mode: BuiltInToolLaunchMode,
+  overrides?: BuiltInAiToolOverrides,
+): LaunchOverride | undefined {
+  const toolOverride = overrides?.[toolId];
+  if (!toolOverride) return undefined;
+  if (!hasBuiltInOverrideFields(toolOverride) && !hasBuiltInOverrideFields(toolOverride[mode])) {
+    return undefined;
+  }
+  return resolveBuiltInLaunchOverride(toolId, mode, overrides);
+}
+
 function buildLaunchOverrideCmd(
   toolId: AiToolId,
   mode: "launch" | "headless",

@@ -5,6 +5,7 @@ import { join, basename } from "path";
 import { warn, info } from "../output.ts";
 import { run } from "../shell.ts";
 import { userStateDir } from "../daemon.ts";
+import { loadUserConfig } from "../config.ts";
 import {
   fetchOrigin as defaultFetchOrigin,
   ffMerge as defaultFfMerge,
@@ -29,6 +30,8 @@ import {
   defaultLaunchDeps,
   type LaunchDeps,
   type LaunchOverride,
+  resolveConfiguredBuiltInLaunchOverride,
+  type BuiltInToolLaunchMode,
 } from "../ai-tools.ts";
 
 /** Injectable dependencies for launch git operations, for testing. */
@@ -181,6 +184,15 @@ function resolveTestLaunchOverride(
   }
 }
 
+function resolveConfiguredLaunchOverride(
+  tool: string,
+  mode: BuiltInToolLaunchMode,
+  homeOverride?: string,
+): LaunchOverride | undefined {
+  if (!isAiToolId(tool)) return undefined;
+  return resolveConfiguredBuiltInLaunchOverride(tool, mode, loadUserConfig(homeOverride).ai_tool_overrides);
+}
+
 /**
  * Sanitize a title for safe shell interpolation.
  * Uses an allowlist: only [a-zA-Z0-9 _-] are kept; everything else becomes _.
@@ -266,7 +278,7 @@ export function launchAiSession(
   safeTitle: string,
   promptFile: string,
   mux: Multiplexer,
-  options: { projectRoot?: string; agentName?: string; launchOverride?: LaunchOverride } = {},
+  options: { projectRoot?: string; agentName?: string; launchOverride?: LaunchOverride; userConfigHome?: string } = {},
   deps: LaunchDeps = defaultLaunchDeps,
 ): string | null {
   const agentName = options.agentName ?? "ninthwave-implementer";
@@ -278,8 +290,12 @@ export function launchAiSession(
   const profile = getToolProfile(tool);
   const projectRoot = options.projectRoot ?? worktreePath;
   const stateDir = userStateDir(projectRoot);
-  const buildCmd = mux.type === "headless" ? profile.buildHeadlessCmd : profile.buildLaunchCmd;
-  const launchOverride = options.launchOverride ?? resolveTestLaunchOverride();
+  const launchMode: BuiltInToolLaunchMode = mux.type === "headless" ? "headless" : "launch";
+  const buildCmd = launchMode === "headless" ? profile.buildHeadlessCmd : profile.buildLaunchCmd;
+  const launchOverride =
+    options.launchOverride ??
+    resolveTestLaunchOverride() ??
+    resolveConfiguredLaunchOverride(tool, launchMode, options.userConfigHome);
   const { cmd } = buildCmd({ wsName, projectRoot, worktreePath, agentName, promptFile, id, stateDir, launchOverride }, deps);
 
   const wsRef = mux.launchWorkspace(worktreePath, cmd, id);
