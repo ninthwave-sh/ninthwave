@@ -69,6 +69,16 @@ describe("makeBrokerHasher", () => {
     }
   });
 
+  it("produces a known digest for a known input (regression vector)", () => {
+    // Pinned test vector. Regenerate with:
+    //   node -e "console.log(require('crypto').createHmac('sha256',Buffer.alloc(32)).update('H-BAJ-2').digest('base64url').slice(0,22))"
+    // Any change to encoding, key construction, or truncation length will
+    // break this assertion even if the other stability tests still pass
+    // (they compare digest-to-digest, which shifts together under a bug).
+    const hash = makeBrokerHasher(SECRET_A);
+    expect(hash("H-BAJ-2")).toBe("iQ_0ZkX1oVsd1md_gOjogY");
+  });
+
   it("throws at factory time when the secret is not canonical base64-encoded 32 bytes", () => {
     // Wrong type.
     expect(() => makeBrokerHasher(undefined as unknown as string)).toThrow(TypeError);
