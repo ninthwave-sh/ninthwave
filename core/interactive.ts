@@ -11,11 +11,6 @@ import type { WorkItem } from "./types.ts";
 import { PRIORITY_NUM } from "./types.ts";
 import type { MergeStrategy } from "./orchestrator.ts";
 import { hasAgentFiles, isAiToolId } from "./ai-tools.ts";
-
-// Connection action: "connect" opts into broker auto-join.
-// The "join" variant has been retired; broker membership is now derived
-// from `project_id` + `broker_secret` in the project config.
-export type ConnectionAction = { type: "connect" };
 import type { AiToolProfile } from "./ai-tools.ts";
 import type { StartupItemsRefreshResult } from "./startup-items.ts";
 import {
@@ -31,6 +26,11 @@ import {
   type WidgetIO,
   type SelectionScreenResult,
 } from "./tui-widgets.ts";
+
+// Connection action: "connect" opts into broker auto-join.
+// The "join" variant has been retired; broker membership is now derived
+// from `project_id` + `broker_secret` in the project config.
+export type ConnectionAction = { type: "connect" };
 
 // ── Types ────────────────────────────────────────────────────────────
 
