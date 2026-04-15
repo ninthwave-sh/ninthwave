@@ -527,7 +527,7 @@ describe("runInteractiveFlow", () => {
     expect(result!.mergeStrategy).toBe("manual");
   });
 
-  it("always returns reviews on", async () => {
+  it("readline fallback always returns reviews on regardless of defaultReviewMode", async () => {
     const prompt = makePrompt(["1", "", ""]);
     const result = await runInteractiveFlow(items, 3, {
       prompt,

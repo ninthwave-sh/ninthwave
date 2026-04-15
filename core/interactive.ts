@@ -74,7 +74,15 @@ export interface InteractiveDeps {
 export interface StartupPersistenceOptions {
   savedToolIds?: string[];
   defaults?: TuiSettingsDefaults;
-  /** Resolved default session limit (from user config or computeDefaultSessionLimit). */
+  /**
+   * Resolved default session limit (from user config or computeDefaultSessionLimit).
+   *
+   * `session_limit` is persisted only when `result.sessionLimit` differs from this
+   * value. Callers MUST pass this option whenever they want session-limit edits
+   * to be saved -- omitting it causes `session_limit` to be silently skipped, even
+   * if the user explicitly changed it. This keeps pressing Enter on startup from
+   * cementing an untouched default.
+   */
   defaultSessionLimit?: number;
 }
 
