@@ -93,17 +93,31 @@ describe("system: watch runtime controls", () => {
     });
 
     try {
-      await harness.waitForOrchestratorState((state) => {
-        const first = state.items.find((entry) => entry.id === "H-WRC-1");
-        const second = state.items.find((entry) => entry.id === "H-WRC-2");
-        // Accept any state that indicates the first item has been picked up from the ready queue.
-        // The fake worker heartbeats at progress=1.0 with prNumber=1 and exits in 2.5s, so it can
-        // race past implementing/ci-pending into ci-passed/review-pending (with --review) before
-        // the first poll observes the state. The invariant we care about is "first was picked up,
-        // second wasn't yet" -- session-limit=1 guarantees second stays in ready/queued.
-        const firstPickedUp = first && first.state !== "queued" && first.state !== "ready";
-        return firstPickedUp && second?.state === "ready" ? state : false;
-      }, 60_000);
+      try {
+        await harness.waitForOrchestratorState((state) => {
+          const first = state.items.find((entry) => entry.id === "H-WRC-1");
+          const second = state.items.find((entry) => entry.id === "H-WRC-2");
+          // Accept any state that indicates the first item has been picked up from the ready queue.
+          // The fake worker heartbeats at progress=1.0 with prNumber=1 and exits in 2.5s, so it can
+          // race past implementing/ci-pending into ci-passed/review-pending (with --review) before
+          // the first poll observes the state. The invariant we care about is "first was picked up,
+          // second wasn't yet" -- session-limit=1 guarantees second stays in ready/queued.
+          const firstPickedUp = first && first.state !== "queued" && first.state !== "ready";
+          return firstPickedUp && second?.state === "ready" ? state : false;
+        }, 60_000);
+      } catch (err) {
+        const state = harness.readOrchestratorState();
+        const log = harness.readOrchestratorLog();
+        const stdout = processHandle.stdout.slice(-4000);
+        const stderr = processHandle.stderr.slice(-4000);
+        // eslint-disable-next-line no-console
+        console.error("[diagnostic] first waitForOrchestratorState failed.\n" +
+          `state=${JSON.stringify(state, null, 2)}\n` +
+          `orchestrator.log tail:\n${log.slice(-4000)}\n` +
+          `stdout tail:\n${stdout}\n` +
+          `stderr tail:\n${stderr}\n`);
+        throw err;
+      }
 
       expect(existsSync(join(harness.worktreeDir, "ninthwave-H-WRC-1"))).toBe(true);
       expect(existsSync(join(harness.worktreeDir, "ninthwave-H-WRC-2"))).toBe(false);
@@ -132,20 +146,33 @@ describe("system: watch runtime controls", () => {
       });
 
       const secondWorktreePath = join(harness.worktreeDir, "ninthwave-H-WRC-2");
-      const concurrentState = await harness.waitForOrchestratorState((state) => {
-        const first = state.items.find((entry) => entry.id === "H-WRC-1");
-        const second = state.items.find((entry) => entry.id === "H-WRC-2");
-        // H-WRC-1 may be in any post-launch active state by this point (review-pending while
-        // waiting for the review-mode flip to apply, ci-passed/merging while auto-merge runs,
-        // or merged after). We just need first to still be picked up, not done/stuck.
-        const firstActive = first
-          && first.state !== "queued"
-          && first.state !== "ready"
-          && first.state !== "stuck"
-          && first.state !== "blocked";
-        const secondActive = second && ["launching", "implementing"].includes(second.state);
-        return firstActive && secondActive && existsSync(secondWorktreePath) ? state : false;
-      }, 60_000);
+      let concurrentState;
+      try {
+        concurrentState = await harness.waitForOrchestratorState((state) => {
+          const first = state.items.find((entry) => entry.id === "H-WRC-1");
+          const second = state.items.find((entry) => entry.id === "H-WRC-2");
+          // H-WRC-1 may be in any post-launch active state by this point (review-pending while
+          // waiting for the review-mode flip to apply, ci-passed/merging while auto-merge runs,
+          // or merged after). We just need first to still be picked up, not done/stuck.
+          const firstActive = first
+            && first.state !== "queued"
+            && first.state !== "ready"
+            && first.state !== "stuck"
+            && first.state !== "blocked";
+          const secondActive = second && ["launching", "implementing"].includes(second.state);
+          return firstActive && secondActive && existsSync(secondWorktreePath) ? state : false;
+        }, 60_000);
+      } catch (err) {
+        const state = harness.readOrchestratorState();
+        const log = harness.readOrchestratorLog();
+        // eslint-disable-next-line no-console
+        console.error("[diagnostic] concurrent waitForOrchestratorState failed.\n" +
+          `state=${JSON.stringify(state, null, 2)}\n` +
+          `orchestrator.log tail:\n${log.slice(-4000)}\n` +
+          `stdout tail:\n${processHandle.stdout.slice(-4000)}\n` +
+          `stderr tail:\n${processHandle.stderr.slice(-4000)}\n`);
+        throw err;
+      }
       expect(concurrentState.sessionLimit).toBe(2);
       expect(existsSync(secondWorktreePath)).toBe(true);
 
