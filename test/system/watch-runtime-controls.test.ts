@@ -85,8 +85,12 @@ describe("system: watch runtime controls", () => {
       "--session-limit", "1",
       "--review",
       "--skip-preflight",
-      "--poll-interval", "0",
-      "--watch-interval", "0",
+      // Use 1-second intervals rather than 0 to avoid busy-loop behavior in CI.
+      // Under GitHub Actions load, --watch-interval 0 appears to starve the main
+      // event loop enough that state writes stall and the orchestrator can't
+      // persist runtime-control changes before the next wait predicate polls.
+      "--poll-interval", "1",
+      "--watch-interval", "1",
     ], {
       env: buildCliEnv(harness, run.runId, run.scenarioPath),
       keepStdinOpen: true,
