@@ -881,6 +881,8 @@ describe("initProject -- .ninthwave/.gitignore", () => {
     expect(content).toContain("!config.json");
     expect(content).toContain("!work/");
     expect(content).toContain("!decisions/");
+    // User-specific overlay must be excluded even if deny-by-default is relaxed
+    expect(content).toMatch(/^config\.local\.json$/m);
   });
 
   it("does not create a root .gitignore when projectDir equals bundleDir", () => {

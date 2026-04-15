@@ -4,6 +4,10 @@
 # Committed project files
 !.gitignore
 !config.json
+
+# User-specific config overlay -- explicitly excluded even if the
+# deny-by-default pattern above is ever relaxed.
+config.local.json
 # work-item-format.md is intentionally NOT allowlisted in this dogfood repo:
 # the canonical source lives at core/docs/work-item-format.md, and the copy
 # under .ninthwave/ is a scaffold-generated mirror that `nw init` writes.

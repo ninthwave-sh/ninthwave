@@ -724,6 +724,10 @@ function scaffold(
 !decisions/**
 !hooks/
 !hooks/**
+
+# User-specific config overlay -- explicitly excluded even if the
+# deny-by-default pattern above is ever relaxed.
+config.local.json
 `,
     );
   }
