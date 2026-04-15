@@ -229,7 +229,7 @@ nw
 nw H-AUTH-1 H-AUTH-2 H-API-1
 ```
 
-The session limit (`--session-limit`) controls how many sessions run simultaneously (default is auto-computed from available memory):
+The session limit (`--session-limit`) controls how many sessions run simultaneously. The default is `1` unless you change it at runtime (via `+`/`-` on the live status page) or pass `--session-limit` explicitly:
 
 ```bash
 nw --items H-AUTH-1,H-AUTH-2 --session-limit 3
@@ -237,7 +237,9 @@ nw --items H-AUTH-1,H-AUTH-2 --session-limit 3
 
 ### What happens when I run `nw`?
 
-After you pick work items (and choose an AI tool if more than one is configured), `nw` shows one startup settings screen before the live status UI. That screen lets you set merge strategy, review mode, collaboration mode, session limit, and backend selection in one place.
+After you pick work items (and choose an AI tool if more than one is configured), `nw` shows one startup settings screen before the live status UI. That screen lets you confirm review mode, collaboration mode, and backend selection.
+
+Merge strategy and session limit are not on the startup screen. Startup begins in manual merge mode with a session limit of `1` (or your persisted preference if you have one). Both stay adjustable from the live status UI -- open the runtime controls overlay to change merge strategy, and press `+`/`-` to change the session limit.
 
 There is no separate arming step after that screen. Once you confirm the startup settings, orchestration starts and the live status UI takes over.
 

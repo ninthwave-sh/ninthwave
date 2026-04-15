@@ -38,7 +38,7 @@ flowchart TD
     I -->|Yes| J["Live status view<br/><code>cmdStatusWatch()</code>"]
     I -->|No| K[Display items summary]
     K --> L{Mode prompt}
-    L -->|Orchestrate| M["Item selection + merge strategy + session limit + backend<br/>→ <code>runInteractiveFlow()</code> → orchestration"]
+    L -->|Orchestrate| M["Item selection + reviews + collaboration + backend<br/>→ <code>runInteractiveFlow()</code> → orchestration"]
     L -->|Launch subset| N["Item selection<br/>→ <code>cmdRunItems()</code>"]
     L -->|Quit| O[Exit]
 
@@ -93,7 +93,8 @@ sequenceDiagram
 
     Note over O,S: Step 4: Startup settings
     O->>S: runInteractiveFlow()
-    S->>U: Choose items, merge strategy, and session limit
+    S->>U: Confirm reviews (default on) and collaboration (default local)
+    Note over S: Merge defaults to manual and session limit defaults to 1.<br/>Both can be changed from the live status UI after startup.
     Note over S: Backend is auto-detected from session env ($TMUX, $CMUX_WORKSPACE_ID)
     Note over S: NINTHWAVE_MUX env var can override for a single launch
 
