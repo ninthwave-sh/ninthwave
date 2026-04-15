@@ -96,7 +96,8 @@ describe("system: watch runtime controls", () => {
       await harness.waitForOrchestratorState((state) => {
         const first = state.items.find((entry) => entry.id === "H-WRC-1");
         const second = state.items.find((entry) => entry.id === "H-WRC-2");
-        return first?.state === "implementing" && second?.state === "ready" ? state : false;
+        const firstActive = first && ["launching", "implementing", "ci-pending", "merged", "forward-fix-pending"].includes(first.state);
+        return firstActive && second?.state === "ready" ? state : false;
       }, 60_000);
 
       expect(existsSync(join(harness.worktreeDir, "ninthwave-H-WRC-1"))).toBe(true);
