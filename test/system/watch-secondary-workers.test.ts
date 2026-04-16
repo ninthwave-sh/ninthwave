@@ -15,6 +15,7 @@ import {
   createFakeAiRun,
   fakeAiArtifactDir,
   fakeAiDefaultRunId,
+  fakeAiHangScenario,
   fakeAiSuccessScenario,
   readFakeAiContext,
   readFakeAiPrompt,
@@ -147,6 +148,17 @@ function waitForItemState(
   return harness.waitForOrchestratorState((state) => {
     const item = state.items.find((entry) => entry.id === itemId);
     return item?.state === expectedState ? item : false;
+  }, timeoutMs);
+}
+
+function waitForReviewingItem(
+  harness: CliHarness,
+  itemId: string,
+  timeoutMs = 10_000,
+) {
+  return harness.waitForOrchestratorState((state) => {
+    const item = state.items.find((entry) => entry.id === itemId);
+    return item?.state === "reviewing" && item.reviewWorkspaceRef ? item : false;
   }, timeoutMs);
 }
 
@@ -284,9 +296,11 @@ function seedOpenPr(
   const prNumber = options.prNumber ?? 1;
   const item = harness.findItem(itemId);
   const now = "2026-04-02T12:00:00Z";
-  harness.writeFakeGhState({
-    nextPrNumber: prNumber + 1,
-    prs: [{
+  const state = harness.readFakeGhState();
+  state.nextPrNumber = Math.max(state.nextPrNumber, prNumber + 1);
+  state.prs = [
+    ...state.prs.filter((entry) => entry.number !== prNumber),
+    {
       number: prNumber,
       branch,
       state: "open",
@@ -299,8 +313,9 @@ function seedOpenPr(
       reviewDecision: "",
       checks: defaultPrChecks(options.checks ?? "pass"),
       baseRefName: "main",
-    }],
-  });
+    },
+  ];
+  harness.writeFakeGhState(state);
   return prNumber;
 }
 
@@ -315,11 +330,15 @@ function seedPrLifecycleState(
 ): void {
   const item = harness.findItem(itemId);
   const now = "2026-04-02T12:00:00.000Z";
+  const existing = harness.readOrchestratorState();
+  const otherItems = (existing?.items ?? []).filter((entry) => entry.id !== itemId);
   harness.writeOrchestratorState({
-    pid: 1,
-    startedAt: now,
+    pid: existing?.pid ?? 1,
+    startedAt: existing?.startedAt ?? now,
     updatedAt: now,
-    items: [{
+    items: [
+      ...otherItems,
+      {
       id: itemId,
       state,
       prNumber: options.prNumber ?? 1,
@@ -328,7 +347,8 @@ function seedPrLifecycleState(
       ciFailCount: 0,
       retryCount: 0,
       worktreePath: options.worktreePath,
-    }],
+      },
+    ],
   });
 }
 
@@ -419,17 +439,19 @@ describe("system: watch secondary workers", () => {
       prNumber: requestedPrNumber,
       worktreePath: requested.worktreePath,
     });
+    const reviewerRun = createFakeAiRun(
+      harness.projectRoot,
+      fakeAiHangScenario({ stdout: ["review worker hanging"] }),
+      { runId: fakeAiDefaultRunId("H-SWW-1", "ninthwave-reviewer") },
+    );
 
     const processHandle = harness.start(
       watchArgs(["H-SWW-1", "H-SWW-2"], { mergeStrategy: "manual" }),
-      { env: buildCliEnv(harness, "/dev/null") },
+      { env: buildCliEnv(harness, reviewerRun.scenarioPath) },
     );
 
     try {
-      const reviewing = await harness.waitForOrchestratorState((state) => {
-        const item = state.items.find((entry) => entry.id === "H-SWW-1");
-        return item?.state === "reviewing" && item.reviewWorkspaceRef ? item : false;
-      }, 30_000);
+      const reviewing = await waitForReviewingItem(harness, "H-SWW-1", 30_000);
       expect(reviewing.prNumber).toBeGreaterThan(0);
       expect(reviewing.reviewWorkspaceRef).toBeDefined();
 

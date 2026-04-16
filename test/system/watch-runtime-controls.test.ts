@@ -99,6 +99,7 @@ describe("system: watch runtime controls", () => {
     const secondWorktreePath = join(harness.worktreeDir, "ninthwave-H-WRC-2");
 
     try {
+      const firstWorktreePath = join(harness.worktreeDir, "ninthwave-H-WRC-1");
       try {
         await harness.waitForOrchestratorState((state) => {
           const first = state.items.find((entry) => entry.id === "H-WRC-1");
