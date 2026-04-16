@@ -5,7 +5,7 @@
 // defaults when stdin is not a TTY.
 
 import { createInterface } from "readline";
-import { BOLD, DIM, GREEN, RESET } from "./output.ts";
+import { BOLD, DIM, GREEN, RESET, YELLOW } from "./output.ts";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -156,6 +156,96 @@ export async function confirmPrompt(
       else resolve(trimmed === "y" || trimmed === "yes");
     });
   });
+}
+
+// ── Broker secret prompt ─────────────────────────────────────────────
+
+/**
+ * Outcome of the broker secret prompt in `nw init`.
+ *
+ * - `generate` -- init should create a new 32-byte base64 secret and write it
+ *   to `.ninthwave/config.local.json`.
+ * - `enter` -- the user pasted a pre-existing team secret; `value` is already
+ *   validated and ready to save.
+ * - `skip` -- no secret should be provisioned; the project stays local-only
+ *   until the user opts in later.
+ */
+export type BrokerSecretAction =
+  | { action: "generate" }
+  | { action: "enter"; value: string }
+  | { action: "skip" };
+
+/** Injectable broker-secret prompt signature (used by tests). */
+export type BrokerSecretPromptFn = (
+  validate: (value: string) => boolean,
+) => Promise<BrokerSecretAction>;
+
+/**
+ * Core state machine for the broker secret prompt. Accepts any async `ask`
+ * function so tests can drive the three paths (generate / enter / skip)
+ * without needing a real TTY or readline instance.
+ *
+ * The `enter` branch re-prompts on invalid input so a mistyped or partial
+ * paste never lands in `.ninthwave/config.local.json`.
+ */
+export async function resolveBrokerSecretAction(
+  ask: (question: string) => Promise<string>,
+  validate: (value: string) => boolean,
+): Promise<BrokerSecretAction> {
+  // Outer loop: menu selection. Inner loop (inside the "enter" branch):
+  // re-prompt the value on validation failure.
+  while (true) {
+    const raw = (await ask("Choice [G/e/s]: ")).trim().toLowerCase();
+    if (raw === "" || raw === "g" || raw === "generate") {
+      return { action: "generate" };
+    }
+    if (raw === "s" || raw === "skip") {
+      return { action: "skip" };
+    }
+    if (raw === "e" || raw === "enter") {
+      while (true) {
+        const pasted = (await ask("Paste broker secret (32-byte base64): "))
+          .trim();
+        if (validate(pasted)) {
+          return { action: "enter", value: pasted };
+        }
+        console.log(
+          `${YELLOW}Invalid broker secret${RESET} ${DIM}-- expected 32 bytes base64-encoded. Try again.${RESET}`,
+        );
+      }
+    }
+    console.log(`${YELLOW}Please enter g, e, or s.${RESET}`);
+  }
+}
+
+/**
+ * Ask the user how the project's broker secret should be provisioned.
+ * Thin readline wrapper around `resolveBrokerSecretAction` -- the state
+ * machine is separated so it can be unit-tested without a real stdin.
+ */
+export async function brokerSecretPrompt(
+  validate: (value: string) => boolean,
+): Promise<BrokerSecretAction> {
+  console.log(`${BOLD}Broker secret${RESET}`);
+  console.log(
+    `  ${DIM}Authenticates this project to teammates via the crew/broker.${RESET}`,
+  );
+  console.log(`  ${BOLD}g${RESET} ${DIM}-- generate a random 32-byte secret (default)${RESET}`);
+  console.log(`  ${BOLD}e${RESET} ${DIM}-- enter an existing team secret${RESET}`);
+  console.log(`  ${BOLD}s${RESET} ${DIM}-- skip (local-only setup)${RESET}`);
+
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  const ask = (question: string): Promise<string> =>
+    new Promise((resolve) => rl.question(question, resolve));
+
+  try {
+    return await resolveBrokerSecretAction(ask, validate);
+  } finally {
+    rl.close();
+  }
 }
 
 /**

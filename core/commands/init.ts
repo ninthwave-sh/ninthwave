@@ -45,8 +45,14 @@ import {
   generateProjectIdentity,
   loadConfig,
   loadLocalConfig,
-  loadOrGenerateProjectIdentity,
+  parseBrokerSecret,
+  saveLocalConfig,
 } from "../config.ts";
+import {
+  brokerSecretPrompt as defaultBrokerSecretPrompt,
+  type BrokerSecretAction,
+  type BrokerSecretPromptFn,
+} from "../prompt.ts";
 import { seedOpencodeConfig } from "../opencode-config.ts";
 
 // --- Detection types ---
@@ -85,6 +91,14 @@ export interface InitDeps {
 export interface InitProjectOpts {
   /** Agent selection -- bypasses prompts. Defaults to all agents + all detected tools. */
   agentSelection?: AgentSelection;
+  /**
+   * Pre-resolved broker secret decision. When omitted, `initProject` defaults
+   * to `{ action: "generate" }` so non-interactive callers and tests continue
+   * to get a fresh secret written into `.ninthwave/config.local.json`. When
+   * an existing secret is already present in either config file this option
+   * is ignored (we never rotate a committed team identity silently).
+   */
+  brokerSecretAction?: BrokerSecretAction;
   /** Command checker for prerequisite checks. Falls back to InitDeps.commandExists. */
   commandExists?: CommandChecker;
   /** GitHub auth checker for prerequisite checks. */
@@ -817,19 +831,42 @@ export function initProject(
   const existingConfig = loadConfig(projectDir);
   mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
   writeFileSync(configPath, generateConfig(detection, existingConfig));
-  // Provision the broker_secret into .ninthwave/config.local.json so the
-  // sensitive half of the identity never lands in version control. If the
-  // project already has a secret in either file (e.g. a team that chose to
-  // commit it deliberately), this no-ops.
-  const localBefore = loadLocalConfig(projectDir).broker_secret;
-  loadOrGenerateProjectIdentity(projectDir);
-  const localAfter = loadLocalConfig(projectDir).broker_secret;
-  const wroteLocalSecret = localBefore === undefined && localAfter !== undefined;
+  // Apply the caller's broker secret decision. An existing secret in either
+  // file counts as already-provisioned and short-circuits the action, so
+  // re-running `nw init` never rotates a committed team identity. The old
+  // silent auto-generation via `loadOrGenerateProjectIdentity` is gone --
+  // `cmdInit` resolves the action (prompt, --yes default, or pre-set opts)
+  // before we get here.
+  const existingBrokerSecret =
+    loadLocalConfig(projectDir).broker_secret ?? existingConfig.broker_secret;
+  let wroteLocalSecret = false;
+  let generatedSecretToShow: string | undefined;
+  if (existingBrokerSecret === undefined) {
+    const action: BrokerSecretAction =
+      opts?.brokerSecretAction ?? { action: "generate" };
+    if (action.action === "generate") {
+      const identity = generateProjectIdentity();
+      saveLocalConfig(projectDir, { broker_secret: identity.broker_secret });
+      wroteLocalSecret = true;
+      generatedSecretToShow = identity.broker_secret;
+    } else if (action.action === "enter") {
+      saveLocalConfig(projectDir, { broker_secret: action.value });
+      wroteLocalSecret = true;
+    }
+    // action === "skip" -- do not touch config.local.json.
+  }
   console.log("Configured:");
   console.log(`  .ninthwave/config.json ${DIM}(project settings)${RESET}`);
   if (wroteLocalSecret) {
     console.log(
       `  .ninthwave/config.local.json ${DIM}(local-only; contains broker_secret)${RESET}`,
+    );
+  }
+  if (generatedSecretToShow !== undefined) {
+    console.log();
+    console.log(`${BOLD}Broker secret:${RESET} ${generatedSecretToShow}`);
+    console.log(
+      `  ${DIM}Share this with teammates via password manager or secure chat.${RESET}`,
     );
   }
 
@@ -871,7 +908,10 @@ export function initProject(
  *   --global  Set up global skills only
  *   --yes     Skip interactive prompts, accept defaults
  */
-export async function cmdInit(args: string[] = []): Promise<void> {
+export async function cmdInit(
+  args: string[] = [],
+  deps?: { brokerSecretPrompt?: BrokerSecretPromptFn },
+): Promise<void> {
   const isGlobal = args.includes("--global");
   const autoYes = args.includes("--yes") || args.includes("-y");
   const bundleDir = getBundleDir();
@@ -913,5 +953,26 @@ export async function cmdInit(args: string[] = []): Promise<void> {
     agentSelection = selection ?? { agents: [], toolDirs: [] };
   }
 
-  initProject(projectDir, bundleDir, undefined, { agentSelection });
+  // Resolve the broker secret decision. If a secret already exists, we
+  // never re-prompt or regenerate. Otherwise `--yes`/non-TTY default to
+  // generate (matches the old silent behavior) and interactive runs prompt.
+  const existingSecret =
+    loadLocalConfig(projectDir).broker_secret ??
+    loadConfig(projectDir).broker_secret;
+  let brokerSecretAction: BrokerSecretAction | undefined;
+  if (existingSecret === undefined) {
+    if (autoYes || !isTTY) {
+      brokerSecretAction = { action: "generate" };
+    } else {
+      const prompt = deps?.brokerSecretPrompt ?? defaultBrokerSecretPrompt;
+      brokerSecretAction = await prompt(
+        (value) => parseBrokerSecret(value) !== undefined,
+      );
+    }
+  }
+
+  initProject(projectDir, bundleDir, undefined, {
+    agentSelection,
+    brokerSecretAction,
+  });
 }

@@ -89,8 +89,12 @@ function parseProjectId(value: unknown): string | undefined {
  * Validate a `broker_secret` string. Only accepts the canonical (non-URL)
  * base64 encoding of exactly 32 random bytes. Anything shorter, longer, or
  * mis-encoded is treated as absent.
+ *
+ * Exported for interactive init flows that let the user paste a pre-existing
+ * team secret: callers can use this as a strict round-trip validator before
+ * saving the value into `.ninthwave/config.local.json`.
  */
-function parseBrokerSecret(value: unknown): string | undefined {
+export function parseBrokerSecret(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   // 32 bytes base64-encoded is 44 chars including a single trailing '='.
   if (!/^[A-Za-z0-9+/]{43}=$/.test(value)) return undefined;
