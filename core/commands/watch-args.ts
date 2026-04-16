@@ -26,7 +26,16 @@ export interface ParsedWatchArgs {
   watchIntervalSecs?: number;
   jsonFlag: boolean;
   skipPreflight: boolean;
-  connectMode: boolean;
+  /**
+   * Explicit user intent for broker connection, from CLI flags.
+   * - `"connect"`: `--connect` was the last flag -- force auto-connect regardless of config.
+   * - `"local"`:   `--local`   was the last flag -- force local mode regardless of config.
+   * - `undefined`: neither flag was passed -- `cmdOrchestrate` falls back to the
+   *   config-based default (auto-connect when `broker_secret` is present, local otherwise).
+   *
+   * Last flag wins when both are passed, matching the `--review` / `--no-review` convention.
+   */
+  connectFlag: "connect" | "local" | undefined;
   bypassEnabled: boolean;
   toolOverride?: string;
 }
@@ -52,7 +61,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
   let watchIntervalSecs: number | undefined;
   let jsonFlag = false;
   let skipPreflight = false;
-  let connectMode = false;
+  let connectFlag: "connect" | "local" | undefined;
   let bypassEnabled = false;
   let toolOverride: string | undefined;
 
@@ -178,7 +187,11 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
         i += 1;
         break;
       case "--connect":
-        connectMode = true;
+        connectFlag = "connect";
+        i += 1;
+        break;
+      case "--local":
+        connectFlag = "local";
         i += 1;
         break;
       case "--dangerously-bypass":
@@ -205,7 +218,7 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
     daemonMode, isDaemonChild, isInteractiveEngineChild, clickupListId, remoteFlag,
     reviewAutoFix, reviewMaxInflight,
     fixForward, skipReview, watchMode, futureOnlyStartup, noWatch, watchIntervalSecs,
-    jsonFlag, skipPreflight, connectMode,
+    jsonFlag, skipPreflight, connectFlag,
     bypassEnabled, toolOverride,
   };
 }
@@ -216,4 +229,26 @@ export function parseWatchArgs(args: string[]): ParsedWatchArgs {
  */
 export function validateItemIds(itemIds: string[], workItemMap: Map<string, WorkItem>): string[] {
   return itemIds.filter(id => !workItemMap.has(id));
+}
+
+/**
+ * Resolve the effective broker `connectMode` from the parsed CLI flag and the
+ * merged project config.
+ *
+ * Precedence (highest → lowest):
+ *   1. `--connect`   → `true`  (explicit opt-in, regardless of config)
+ *   2. `--local`     → `false` (explicit opt-out, regardless of config)
+ *   3. config-based default: `true` when `broker_secret` is configured,
+ *      `false` otherwise.
+ *
+ * This is the "auto-connect when crew is configured" policy that replaces the
+ * old "local-first: never auto-connect" default.
+ */
+export function resolveConnectMode(
+  connectFlag: "connect" | "local" | undefined,
+  brokerSecret: string | undefined,
+): boolean {
+  if (connectFlag === "connect") return true;
+  if (connectFlag === "local") return false;
+  return typeof brokerSecret === "string" && brokerSecret.length > 0;
 }

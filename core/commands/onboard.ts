@@ -598,9 +598,13 @@ export async function cmdNoArgs(
   }
   // "on" → default behavior, no extra flag
 
-  // Connection action → CLI flags
+  // Connection action → CLI flags. Forwarding explicit intent prevents the
+  // orchestrator's config-based default (auto-connect when `broker_secret`
+  // is present) from flipping a user who chose local mode in onboarding.
   if (result.connectionAction) {
     watchArgs.push("--connect");
+  } else {
+    watchArgs.push("--local");
   }
 
   // AI tool(s) → --tool flag (comma-separated for multi-select)

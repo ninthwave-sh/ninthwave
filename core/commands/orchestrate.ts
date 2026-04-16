@@ -50,6 +50,7 @@ import {
 import type { WorkItem, LogEntry } from "../types.ts";
 import {
   loadConfig,
+  loadMergedProjectConfig,
   loadLocalConfig,
   loadUserConfig,
   saveConfig,
@@ -115,7 +116,7 @@ import {
   getWorktreeLastCommitTimeAsync,
 } from "../snapshot.ts";
 import { reconstructState } from "../reconstruct.ts";
-import { parseWatchArgs, validateItemIds, type ParsedWatchArgs } from "./watch-args.ts";
+import { parseWatchArgs, resolveConnectMode, validateItemIds, type ParsedWatchArgs } from "./watch-args.ts";
 import {
   setupKeyboardShortcuts,
   applyRuntimeSnapshotToTuiState,
@@ -212,7 +213,7 @@ export {
   type StartupItemsRefreshChange,
   type StartupItemsRefreshResult,
 } from "../startup-items.ts";
-export { parseWatchArgs, validateItemIds, type ParsedWatchArgs } from "./watch-args.ts";
+export { parseWatchArgs, resolveConnectMode, validateItemIds, type ParsedWatchArgs } from "./watch-args.ts";
 export { setupKeyboardShortcuts, applyRuntimeSnapshotToTuiState, isTuiPaused, filterLogsByLevel, pushLogBuffer, applyLogFollowMode, LOG_BUFFER_MAX, REVIEW_MODE_CYCLE, COLLABORATION_MODE_CYCLE, type TuiState, type TuiRuntimeSnapshot, type LogLevelFilter, type CollaborationMode, type ReviewMode } from "../tui-keyboard.ts";
 export { forkDaemon } from "../daemon.ts";
 export {
@@ -663,7 +664,10 @@ export function buildInteractiveEngineChildArgs(
   if (resolved.futureOnlyStartup) childArgs.push("--future-only-startup");
   if (parsed.noWatch) childArgs.push("--no-watch");
   if (parsed.watchIntervalSecs !== undefined) childArgs.push("--watch-interval", String(parsed.watchIntervalSecs));
-  if (resolved.connectMode) childArgs.push("--connect");
+  // Forward explicit collaboration intent to the child so it does not
+  // re-apply the config-based default (which could flip local→connect when
+  // `broker_secret` is present).
+  childArgs.push(resolved.connectMode ? "--connect" : "--local");
   if (resolved.bypassEnabled) childArgs.push("--dangerously-bypass");
   if (resolved.toolOverride) childArgs.push("--tool", resolved.toolOverride);
   if (parsed.frictionDir) childArgs.push("--friction-log", parsed.frictionDir);
@@ -1360,7 +1364,10 @@ export async function cmdOrchestrate(
   let watchMode = parsed.watchMode;
   let futureOnlyStartup = parsed.futureOnlyStartup;
   let crewUrl: string | undefined;
-  let connectMode = parsed.connectMode;
+  // connectMode is resolved below once the merged project config is loaded:
+  // --connect / --local flags win; otherwise default is "auto-connect when
+  // broker_secret is configured." See the resolution block further down.
+  let connectMode = false;
   let usedInteractiveOperatorParentSession = false;
 
   try {
@@ -1496,8 +1503,16 @@ export async function cmdOrchestrate(
   // Pass projectRoot to filter to only items pushed to origin/main
   const workItems = loadDiscoveryWorkItems("startup");
   const preConfig = loadConfig(projectRoot);
+  const mergedConfig = loadMergedProjectConfig(projectRoot);
   crewUrl = resolveConfiguredCrewUrl(crewUrl, preConfig.crew_url);
   const interactiveStartupConfig = resolveInteractiveStartupConfig(preConfig, persistedUserCfg, projectRoot, toolOverride);
+
+  // ── Broker auto-connect default ────────────────────────────────────
+  // When `broker_secret` is present in the merged project config (shared +
+  // local), auto-connect by default. When no secret is configured, stay
+  // local. Explicit flags override: `--connect` forces connect, `--local`
+  // forces local; last flag wins (same convention as --review / --no-review).
+  connectMode = resolveConnectMode(parsed.connectFlag, mergedConfig.broker_secret);
 
   // Interactive mode: no --items and stdin is a TTY
   let interactiveSkipReview = false;
@@ -1865,9 +1880,12 @@ export async function cmdOrchestrate(
   // ── Broker auto-join setup ──────────────────────────────────────
   let crewBroker: CrewBroker | undefined;
 
-  // Local-first: never auto-connect on plain startup. Explicit --connect is
-  // required to enter collaboration mode. The broker session id is derived
-  // from project_id + broker_secret in the project config.
+  // Auto-connect when configured: `connectMode` is already resolved above
+  // from CLI flags and the merged project config -- when `broker_secret` is
+  // present, we default to connected mode; `--local` opts out for a single
+  // session, and `--connect` is still accepted as an explicit override. The
+  // broker session id is derived from project_id + broker_secret in the
+  // project config.
 
   const collaborationState: CollaborationSessionState = {
     mode: connectMode ? "connected" : "local",

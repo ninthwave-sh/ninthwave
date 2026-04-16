@@ -839,6 +839,38 @@ describe("cmdNoArgs", () => {
     expect(watchArgs).not.toContain("--review-max-inflight");
   });
 
+  it("passes --local when onboarding result has no connectionAction (explicit local intent)", async () => {
+    // H-BS-4: orchestrator now auto-connects when broker_secret is configured.
+    // Onboarding must forward the user's "local" choice explicitly so the
+    // config-based default does not flip them into connect mode.
+    const projectDir = setupTempRepo();
+    mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
+
+    let watchArgs: string[] = [];
+
+    await cmdNoArgs(projectDir, {
+      isTTY: true,
+      ...NO_UPDATE_PROMPT,
+      parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
+      isDaemonRunning: () => null,
+      loadConfig: () => ({ review_external: false } as any),
+      loadUserConfig: () => ({}),
+      saveUserConfig: () => {},
+      runInteractiveFlow: async () => ({
+        itemIds: ["H-1"],
+        mergeStrategy: "auto" as MergeStrategy,
+        maxInflight: 4,
+        allSelected: false,
+        reviewMode: "on" as const,
+        connectionAction: null,
+      }),
+      runWatch: async (args) => { watchArgs = args; },
+    });
+
+    expect(watchArgs).toContain("--local");
+    expect(watchArgs).not.toContain("--connect");
+  });
+
   it("passes --connect for crew join action (auto-join via project config)", async () => {
     const projectDir = setupTempRepo();
     mkdirSync(join(projectDir, ".ninthwave", "work"), { recursive: true });
