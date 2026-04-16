@@ -453,11 +453,17 @@ Use `nw repos` to see discovered sibling repositories.
 Crew mode allows multiple operators (each running their own `nw` orchestration session) to collaborate on the same set of work items. A shared broker coordinates task distribution so items aren't double-claimed.
 
 ```bash
-# Opt into the shared broker session
+# Auto-connect when a broker_secret is configured (the default)
+nw
+
+# Force local-only mode for a single session
+nw --local
+
+# Explicit opt-in (useful for CI scripts or when a secret is not configured)
 nw --connect
 ```
 
-Membership is derived from the project config: `project_id` lives in committed `.ninthwave/config.json`, and `broker_secret` lives in gitignored `.ninthwave/config.local.json`. Two daemons with the same pair of values land in the same crew automatically -- no codes to share. Teammates who want a shared namespace pass the `broker_secret` out of band and paste it into their own `config.local.json`.
+Membership is derived from the project config: `project_id` lives in committed `.ninthwave/config.json`, and `broker_secret` lives in gitignored `.ninthwave/config.local.json`. When `broker_secret` is present, `nw` auto-connects so every daemon with the same pair of values lands in the same crew -- no codes to share. Teammates who want a shared namespace pass the `broker_secret` out of band and paste it into their own `config.local.json`. Operators without a secret stay local by default.
 
 The broker handles session-bounded scheduling with author-affinity (tasks route to the operator who created them when possible).
 
@@ -489,7 +495,7 @@ The self-hosted broker is an explicit opt-in alternative. Most users never need 
    { "crew_url": "ws://broker-host:4444" }
    ```
 
-3. Opt into the shared broker session with `nw --connect`. Membership is derived from `project_id` + `broker_secret`, so every daemon on the same project lands in the same crew automatically.
+3. Run `nw` as usual. Because `broker_secret` is configured, the daemon auto-connects to the crew; `--local` opts out of broker mode for a single session, and `--connect` still works as an explicit override.
 
 The `crew_url` resolution order is: `crew_url` in `.ninthwave/config.json` > hosted default (`wss://ninthwave.sh`).
 

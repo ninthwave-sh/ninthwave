@@ -22,6 +22,7 @@ import {
   cleanOrphanedWorktrees,
   buildSessionEndedMetadata,
   parseWatchArgs,
+  resolveConnectMode,
   validateItemIds,
   pushLogBuffer,
   filterLogsByLevel,
@@ -8463,6 +8464,73 @@ describe("parseWatchArgs", () => {
     const result = parseWatchArgs(["--items", "H-FOO-1"]);
     expect(result.toolOverride).toBeUndefined();
   });
+
+  it("defaults connectFlag to undefined when neither --connect nor --local passed", () => {
+    // Absence of an explicit flag lets cmdOrchestrate fall back to the
+    // config-based default (auto-connect when broker_secret is configured).
+    const result = parseWatchArgs(["--items", "H-FOO-1"]);
+    expect(result.connectFlag).toBeUndefined();
+  });
+
+  it('--connect sets connectFlag to "connect"', () => {
+    const result = parseWatchArgs(["--items", "H-FOO-1", "--connect"]);
+    expect(result.connectFlag).toBe("connect");
+  });
+
+  it('--local sets connectFlag to "local"', () => {
+    const result = parseWatchArgs(["--items", "H-FOO-1", "--local"]);
+    expect(result.connectFlag).toBe("local");
+  });
+
+  it("--local overrides an earlier --connect (last flag wins)", () => {
+    const result = parseWatchArgs(["--items", "H-FOO-1", "--connect", "--local"]);
+    expect(result.connectFlag).toBe("local");
+  });
+
+  it("--connect overrides an earlier --local (last flag wins)", () => {
+    const result = parseWatchArgs(["--items", "H-FOO-1", "--local", "--connect"]);
+    expect(result.connectFlag).toBe("connect");
+  });
+});
+
+// ── resolveConnectMode ─────────────────────────────────────────────────
+
+describe("resolveConnectMode", () => {
+  // The auto-connect policy: broker_secret presence in the merged config
+  // decides the default. Explicit --connect / --local flags win.
+  const SECRET = Buffer.alloc(32, 7).toString("base64");
+
+  it("auto-connects when broker_secret is present and no flag was passed", () => {
+    expect(resolveConnectMode(undefined, SECRET)).toBe(true);
+  });
+
+  it("stays local when broker_secret is absent and no flag was passed", () => {
+    expect(resolveConnectMode(undefined, undefined)).toBe(false);
+  });
+
+  it("treats an empty-string broker_secret as absent (local default)", () => {
+    // Guards against a malformed config where the key is present but blank.
+    expect(resolveConnectMode(undefined, "")).toBe(false);
+  });
+
+  it("--local forces local mode even when broker_secret is configured", () => {
+    expect(resolveConnectMode("local", SECRET)).toBe(false);
+  });
+
+  it("--connect forces connect mode even without a broker_secret (CI/legacy use)", () => {
+    // Preserves the pre-H-BS-4 behavior for scripts that explicitly opt in.
+    // The downstream connect step may still fail if no secret is available,
+    // but the flag contract is preserved.
+    expect(resolveConnectMode("connect", undefined)).toBe(true);
+  });
+
+  it("--connect wins when broker_secret is present", () => {
+    expect(resolveConnectMode("connect", SECRET)).toBe(true);
+  });
+
+  it("--local wins when no broker_secret is present", () => {
+    expect(resolveConnectMode("local", undefined)).toBe(false);
+  });
 });
 
 // ── buildInteractiveEngineChildArgs ────────────────────────────────────
@@ -8494,6 +8562,29 @@ describe("buildInteractiveEngineChildArgs", () => {
     const parsed = parseWatchArgs(["--items", "H-1"]);
     const childArgs = buildInteractiveEngineChildArgs(parsed, resolved);
     expect(childArgs).not.toContain("--review-external");
+  });
+
+  it("emits --connect when resolved.connectMode is true", () => {
+    const parsed = parseWatchArgs(["--items", "H-1"]);
+    const childArgs = buildInteractiveEngineChildArgs(parsed, {
+      ...resolved,
+      connectMode: true,
+    });
+    expect(childArgs).toContain("--connect");
+    expect(childArgs).not.toContain("--local");
+  });
+
+  it("emits --local when resolved.connectMode is false (preserves explicit local intent)", () => {
+    // The parent already resolved to local mode (either via --local or because
+    // no broker_secret was configured). Forwarding --local to the child prevents
+    // it from re-applying the config-based default and flipping to connect.
+    const parsed = parseWatchArgs(["--items", "H-1"]);
+    const childArgs = buildInteractiveEngineChildArgs(parsed, {
+      ...resolved,
+      connectMode: false,
+    });
+    expect(childArgs).toContain("--local");
+    expect(childArgs).not.toContain("--connect");
   });
 });
 
