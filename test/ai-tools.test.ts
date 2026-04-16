@@ -19,6 +19,7 @@ import {
   type LaunchOpts,
   type BuiltInAiToolOverrides,
 } from "../core/ai-tools.ts";
+import { setupTempDir, cleanupTempRepos } from "./helpers.ts";
 
 const IMPLEMENTER_AGENT_SOURCE = `---
 name: ninthwave-implementer
@@ -788,6 +789,34 @@ describe("resolveBuiltInLaunchOverride", () => {
         HEADLESS_ONLY: "1",
       },
     });
+  });
+
+  it("drops rotation keys whose picked value is null", () => {
+    const home = setupTempDir("rot-home-");
+    try {
+      const overrides: BuiltInAiToolOverrides = {
+        claude: {
+          env_rotation: {
+            CLAUDE_CONFIG_DIR: [null, "/pool/profile-2"],
+          },
+        },
+      };
+
+      const first = resolveBuiltInLaunchOverride("claude", "launch", overrides, {
+        rotationHome: home,
+      });
+      expect(first).toEqual({ command: "claude" });
+
+      const second = resolveBuiltInLaunchOverride("claude", "launch", overrides, {
+        rotationHome: home,
+      });
+      expect(second).toEqual({
+        command: "claude",
+        env: { CLAUDE_CONFIG_DIR: "/pool/profile-2" },
+      });
+    } finally {
+      cleanupTempRepos();
+    }
   });
 
   it("returns copied data without mutating overrides or profile metadata", () => {

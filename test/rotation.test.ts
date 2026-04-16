@@ -78,6 +78,38 @@ describe("pickRotatedEnv", () => {
     }
   });
 
+  it("omits a key from the picked env when the rotation entry is null", () => {
+    const home = setupTempDir("rot-home-");
+    try {
+      const rotation = { CLAUDE_CONFIG_DIR: [null, "/b"] };
+      const first = pickRotatedEnv("claude", rotation, home);
+      expect(first).toEqual({});
+      expect(readCounters(home)["claude:CLAUDE_CONFIG_DIR"]).toBe(1);
+
+      const second = pickRotatedEnv("claude", rotation, home);
+      expect(second).toEqual({ CLAUDE_CONFIG_DIR: "/b" });
+      expect(readCounters(home)["claude:CLAUDE_CONFIG_DIR"]).toBe(2);
+
+      // Counter wraps modulo list length, so after 2 picks it's back to 1.
+      const third = pickRotatedEnv("claude", rotation, home);
+      expect(third).toEqual({});
+      expect(readCounters(home)["claude:CLAUDE_CONFIG_DIR"]).toBe(1);
+    } finally {
+      cleanupTempRepos();
+    }
+  });
+
+  it("treats an all-null rotation list as empty", () => {
+    const home = setupTempDir("rot-home-");
+    try {
+      const picked = pickRotatedEnv("claude", { CLAUDE_CONFIG_DIR: [null, null] }, home);
+      expect(picked).toEqual({});
+      expect(existsSync(rotationStateFile(home))).toBe(false);
+    } finally {
+      cleanupTempRepos();
+    }
+  });
+
   it("recovers from a corrupt state file by starting at 0", () => {
     const home = setupTempDir("rot-home-");
     try {

@@ -60,6 +60,11 @@ function writeCounters(path: string, counters: Counters, deps: RotationDeps): vo
  * Pick one value from each rotation list, round-robin, and advance the
  * persisted counter.
  *
+ * A `null` entry in a list advances the counter but is omitted from the
+ * returned picks, letting the caller fall back to the tool's default
+ * (e.g. leave CLAUDE_CONFIG_DIR unset to use native/Keychain credentials).
+ * Lists containing only `null` are treated as empty and skipped.
+ *
  * @param toolId Tool id the rotation belongs to (used in the counter key).
  * @param rotation Map of envKey -> candidate values.
  * @param home Override the home dir (for tests). Defaults to os.homedir().
@@ -67,11 +72,13 @@ function writeCounters(path: string, counters: Counters, deps: RotationDeps): vo
  */
 export function pickRotatedEnv(
   toolId: string,
-  rotation: Record<string, string[]>,
+  rotation: Record<string, Array<string | null>>,
   home?: string,
   deps: RotationDeps = defaultRotationDeps,
 ): Record<string, string> {
-  const entries = Object.entries(rotation).filter(([, values]) => values.length > 0);
+  const entries = Object.entries(rotation).filter(
+    ([, values]) => values.length > 0 && values.some((v) => v !== null),
+  );
   if (entries.length === 0) return {};
 
   const path = rotationStateFile(home);
@@ -82,7 +89,8 @@ export function pickRotatedEnv(
   for (const [envKey, values] of entries) {
     const counterKey = `${toolId}:${envKey}`;
     const index = (counters[counterKey] ?? 0) % values.length;
-    picked[envKey] = values[index]!;
+    const value = values[index];
+    if (value !== null) picked[envKey] = value!;
     counters[counterKey] = index + 1;
     mutated = true;
   }

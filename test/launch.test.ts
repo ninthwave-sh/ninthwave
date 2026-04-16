@@ -2157,6 +2157,36 @@ describe("launchAiSession agentName", () => {
     expect(captured[6]).toContain("CLAUDE_CONFIG_DIR='/a/profile-1'");
   });
 
+  it("env_rotation null entry leaves CLAUDE_CONFIG_DIR unset for that launch", () => {
+    const homeDir = setupTempDir("nw-home-");
+    writeUserConfig(homeDir, {
+      ai_tool_overrides: {
+        claude: {
+          env_rotation: {
+            CLAUDE_CONFIG_DIR: [null, "/rot/profile-2"],
+          },
+        },
+      },
+    });
+
+    const captured: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const mockMux = createMockMux();
+      const repo = setupTempRepo();
+      const promptFile = join(repo, "prompt.txt");
+      writeFileSync(promptFile, "test prompt");
+      launchAiSession("claude", repo, `T-${i}`, "Test", promptFile, mockMux, {
+        userConfigHome: homeDir,
+      });
+      captured.push(mockMux.launchWorkspace.mock.calls[0]![1] as string);
+    }
+
+    expect(captured[0]).not.toContain("CLAUDE_CONFIG_DIR=");
+    expect(captured[0]).not.toContain("export ");
+    expect(captured[1]).toContain("CLAUDE_CONFIG_DIR='/rot/profile-2'");
+    expect(captured[2]).not.toContain("CLAUDE_CONFIG_DIR=");
+  });
+
   it("project config.local.json overrides user config per env key", () => {
     const mockMux = createMockMux();
     const repo = setupTempRepo();

@@ -348,7 +348,7 @@ Round-robin across a pool (useful for dodging the Claude 5-hour session limit --
     "claude": {
       "env_rotation": {
         "CLAUDE_CONFIG_DIR": [
-          "/Users/you/.claude",
+          null,
           "/Users/you/.claude-alt"
         ]
       }
@@ -356,6 +356,8 @@ Round-robin across a pool (useful for dodging the Claude 5-hour session limit --
   }
 }
 ```
+
+A `null` entry means "leave the variable unset for this launch" -- Ninthwave won't export `CLAUDE_CONFIG_DIR`, so Claude Code falls back to its native default (e.g. your regular `claude` login in the macOS Keychain). Use `null` to keep your default profile in the rotation pool without having to create and log into a redundant explicit `~/.claude` profile. Setting `CLAUDE_CONFIG_DIR=~/.claude` explicitly is *not* the same as leaving it unset: Claude Code treats the explicit path as a separate profile with its own credential store.
 
 Precedence is `.ninthwave/config.local.json` > `.ninthwave/config.json` > `~/.ninthwave/config.json`, per env key. Rotation counters are persisted to `~/.ninthwave/state/rotation.json`, keyed by tool + env variable, so separate repos sharing a pool advance together.
 

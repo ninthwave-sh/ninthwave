@@ -47,11 +47,13 @@ export interface BuiltInToolOverrideModeConfig {
   /**
    * Optional per-env-key rotation pools. For each entry, one value is picked
    * round-robin from the list per launch and merged into `env` (with rotation
-   * winning on conflicts). Counter state is persisted globally so separate
-   * projects sharing the same pool advance together -- useful for spreading
-   * session-hour load across e.g. multiple CLAUDE_CONFIG_DIR profiles.
+   * winning on conflicts). A `null` entry advances the counter but does not
+   * contribute a value, letting that launch fall back to the tool's default
+   * profile (e.g. leave `CLAUDE_CONFIG_DIR` unset to use the native Keychain
+   * login). Counter state is persisted globally so separate projects sharing
+   * the same pool advance together.
    */
-  env_rotation?: Record<string, string[]>;
+  env_rotation?: Record<string, Array<string | null>>;
 }
 
 /** User-configurable built-in tool override with optional per-mode patches. */

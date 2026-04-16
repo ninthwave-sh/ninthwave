@@ -418,13 +418,17 @@ function parseOverrideEnv(value: unknown): Record<string, string> | undefined {
   return envEntries.length > 0 ? Object.fromEntries(envEntries) : undefined;
 }
 
-function parseOverrideEnvRotation(value: unknown): Record<string, string[]> | undefined {
+function parseOverrideEnvRotation(
+  value: unknown,
+): Record<string, Array<string | null>> | undefined {
   if (!isPlainObject(value)) return undefined;
 
-  const result: Record<string, string[]> = {};
+  const result: Record<string, Array<string | null>> = {};
   for (const [key, listValue] of Object.entries(value)) {
     if (!Array.isArray(listValue)) continue;
-    const items = listValue.filter((entry): entry is string => typeof entry === "string");
+    const items = listValue.filter(
+      (entry): entry is string | null => entry === null || typeof entry === "string",
+    );
     if (items.length > 0) result[key] = items;
   }
   return Object.keys(result).length > 0 ? result : undefined;
