@@ -320,6 +320,37 @@ export interface BulkCheckRun {
   completedAt?: string;
 }
 
+/** Raw shape from GitHub GraphQL statusCheckRollup (no synthesized `state`). */
+interface RawCheckRollupEntry {
+  __typename?: string;
+  name: string;
+  conclusion?: string;
+  status?: string;
+  state?: string;
+  completedAt?: string;
+  detailsUrl?: string;
+  startedAt?: string;
+  workflowName?: string;
+}
+
+/**
+ * Normalize a raw statusCheckRollup entry into a BulkCheckRun.
+ *
+ * `gh pr list --json statusCheckRollup` returns raw GraphQL fields
+ * (conclusion + status) while `gh pr checks --json state` synthesizes
+ * a unified `state`. This function bridges the gap so downstream code
+ * (processChecks, filterRelevantChecks) sees the expected `state` field.
+ */
+function normalizeCheckRollup(raw: RawCheckRollupEntry): BulkCheckRun {
+  let state = raw.state;
+  if (!state) {
+    state = raw.status === "COMPLETED"
+      ? (raw.conclusion ?? "UNKNOWN").toUpperCase()
+      : "PENDING";
+  }
+  return { state, name: raw.name, completedAt: raw.completedAt };
+}
+
 /** Shape of a PR returned by bulk fetch, keyed by headRefName. */
 export interface BulkPrEntry {
   number: number;
@@ -383,7 +414,11 @@ export function fetchAllNinthwavePRs(repoRoot: string): PrBulkCache | null {
     if (mergedResult.exitCode !== 0) return null;
 
     const allOpen = (JSON.parse(openResult.stdout || "[]") as BulkPrEntry[])
-      .filter(pr => pr.headRefName.startsWith("ninthwave/"));
+      .filter(pr => pr.headRefName.startsWith("ninthwave/"))
+      .map(pr => ({
+        ...pr,
+        statusCheckRollup: pr.statusCheckRollup?.map(normalizeCheckRollup),
+      }));
     const allMerged = (JSON.parse(mergedResult.stdout || "[]") as BulkPrEntry[])
       .filter(pr => pr.headRefName.startsWith("ninthwave/"));
     return buildPrBulkCache(allOpen, allMerged);
@@ -411,7 +446,11 @@ export async function fetchAllNinthwavePRsAsync(repoRoot: string): Promise<PrBul
     if (openResult.exitCode !== 0 || mergedResult.exitCode !== 0) return null;
 
     const allOpen = (JSON.parse(openResult.stdout || "[]") as BulkPrEntry[])
-      .filter(pr => pr.headRefName.startsWith("ninthwave/"));
+      .filter(pr => pr.headRefName.startsWith("ninthwave/"))
+      .map(pr => ({
+        ...pr,
+        statusCheckRollup: pr.statusCheckRollup?.map(normalizeCheckRollup),
+      }));
     const allMerged = (JSON.parse(mergedResult.stdout || "[]") as BulkPrEntry[])
       .filter(pr => pr.headRefName.startsWith("ninthwave/"));
     return buildPrBulkCache(allOpen, allMerged);

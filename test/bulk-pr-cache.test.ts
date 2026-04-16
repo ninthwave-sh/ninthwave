@@ -8,6 +8,7 @@ import { buildSnapshotAsync } from "../core/commands/orchestrate.ts";
 import {
   checkPrStatusDetailed,
   checkPrStatusDetailedAsync,
+  processChecks,
 } from "../core/commands/pr-monitor.ts";
 import { reconstructState } from "../core/reconstruct.ts";
 import { RequestQueue } from "../core/request-queue.ts";
@@ -68,6 +69,26 @@ function buildCache(
 }
 
 function makeOpenPr(id: string, prNumber: number, opts: Partial<BulkPrEntry> = {}): BulkPrEntry {
+  return {
+    number: prNumber,
+    title: `PR for ${id}`,
+    body: "",
+    headRefName: `ninthwave/${id}`,
+    reviewDecision: "APPROVED",
+    mergeable: "MERGEABLE",
+    updatedAt: "2026-01-01T00:00:00Z",
+    createdAt: "2026-01-01T00:00:00Z",
+    statusCheckRollup: [{ state: "SUCCESS", name: "ci", completedAt: "2026-01-01T00:01:00Z" }],
+    ...opts,
+  };
+}
+
+/**
+ * makeOpenPr variant using the real GitHub GraphQL statusCheckRollup shape
+ * (conclusion + status, no synthesized state field). After normalizeCheckRollup
+ * runs in the fetch path, these should produce identical BulkCheckRun objects.
+ */
+function makeOpenPrRaw(id: string, prNumber: number, opts: Partial<BulkPrEntry> = {}): BulkPrEntry {
   return {
     number: prNumber,
     title: `PR for ${id}`,
@@ -417,6 +438,86 @@ describe("buildSnapshotAsync with bulk PR cache", () => {
       expect(item.prNumber).toBeGreaterThan(100);
       expect(item.prState).toBe("open");
     }
+  });
+});
+
+// ── Regression: raw statusCheckRollup shape (conclusion/status, no state) ──
+
+describe("processChecks with raw statusCheckRollup data", () => {
+  // These tests verify that data which has been through normalizeCheckRollup
+  // (as happens in fetchAllNinthwavePRs/Async) is correctly processed.
+  // They also catch regression if the normalization boundary is ever bypassed.
+
+  it("returns pass when all non-skipped checks have conclusion SUCCESS", () => {
+    // Real shape from `gh pr list --json statusCheckRollup` after normalization
+    const checks = [
+      { state: "SUCCESS", name: "build", completedAt: "2026-01-01T00:01:00Z" },
+      { state: "SUCCESS", name: "test", completedAt: "2026-01-01T00:02:00Z" },
+      { state: "SKIPPED", name: "deploy", completedAt: "2026-01-01T00:00:30Z" },
+    ];
+    const result = processChecks(checks);
+    expect(result.ciStatus).toBe("pass");
+  });
+
+  it("returns fail when any check has conclusion FAILURE", () => {
+    const checks = [
+      { state: "SUCCESS", name: "build", completedAt: "2026-01-01T00:01:00Z" },
+      { state: "FAILURE", name: "test", completedAt: "2026-01-01T00:02:00Z" },
+    ];
+    const result = processChecks(checks);
+    expect(result.ciStatus).toBe("fail");
+  });
+
+  it("returns pending when checks are still in progress", () => {
+    const checks = [
+      { state: "SUCCESS", name: "build", completedAt: "2026-01-01T00:01:00Z" },
+      { state: "PENDING", name: "test" },
+    ];
+    const result = processChecks(checks);
+    expect(result.ciStatus).toBe("pending");
+  });
+
+  it("returns unknown when state is undefined (pre-normalization bug)", () => {
+    // Simulates the old bug: raw statusCheckRollup without normalization
+    const checks = [
+      { state: undefined as unknown as string, name: "build", completedAt: "2026-01-01T00:01:00Z" },
+    ];
+    const result = processChecks(checks);
+    expect(result.ciStatus).toBe("unknown");
+  });
+});
+
+describe("checkPrStatusDetailedAsync with raw statusCheckRollup shape", () => {
+  const failAsyncDeps: PrMonitorAsyncDeps = {
+    prListAsync: async () => { throw new Error("prListAsync should not be called"); },
+    prViewAsync: async () => { throw new Error("prViewAsync should not be called"); },
+    prChecksAsync: async () => { throw new Error("prChecksAsync should not be called"); },
+    isAvailable: () => true,
+  };
+
+  it("resolves pass from normalized statusCheckRollup with multiple checks", async () => {
+    const cache = buildCache([
+      makeOpenPrRaw("RAW-1", 100, { statusCheckRollup: [
+        { state: "SUCCESS", name: "build", completedAt: "2026-01-01T00:01:00Z" },
+        { state: "SUCCESS", name: "test", completedAt: "2026-01-01T00:02:00Z" },
+        { state: "SKIPPED", name: "deploy", completedAt: "2026-01-01T00:00:30Z" },
+      ] }),
+    ]);
+
+    const result = await checkPrStatusDetailedAsync("RAW-1", "/repo", failAsyncDeps, cache);
+    expect(result.statusLine).toContain("ready");
+  });
+
+  it("resolves fail from normalized statusCheckRollup with failed check", async () => {
+    const cache = buildCache([
+      makeOpenPrRaw("RAW-2", 101, { statusCheckRollup: [
+        { state: "SUCCESS", name: "build", completedAt: "2026-01-01T00:01:00Z" },
+        { state: "FAILURE", name: "test", completedAt: "2026-01-01T00:02:00Z" },
+      ] }),
+    ]);
+
+    const result = await checkPrStatusDetailedAsync("RAW-2", "/repo", failAsyncDeps, cache);
+    expect(result.statusLine).toContain("failing");
   });
 });
 
