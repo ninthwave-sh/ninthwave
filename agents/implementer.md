@@ -78,6 +78,14 @@ The project instruction file is the source of truth for project-specific convent
 In session-limited batches, your worktree may have been created minutes or hours ago. Rebase onto the latest base before starting work.
 
 **If `BASE_BRANCH` is set** (stacked on a dependency):
+
+First, check whether the dependency has already merged:
+```bash
+gh pr list --head "$BASE_BRANCH" --state merged --json number --limit 1
+```
+If that returns a merged PR, the dependency landed while your worktree was waiting. Treat this as a non-stacked item -- rebase onto main instead of the stale branch and ignore `--base` in Phase 9.
+
+Otherwise, rebase onto the dependency branch:
 ```bash
 git fetch origin $BASE_BRANCH --quiet
 git rebase origin/$BASE_BRANCH --quiet
@@ -283,13 +291,18 @@ nw heartbeat --progress 0.85 --label "Checked diff"
 
 Before creating the PR, delete your work item file so that merging the PR automatically marks the item as done.
 
+Your CWD may have drifted to a subdirectory (e.g., `apps/web/`) during testing. Return to the worktree root first:
+```bash
+cd ${PROJECT_ROOT}
+```
+
 1. Delete the file: `rm .ninthwave/work/*--YOUR_WORK_ITEM_ID.md`
 2. Verify it's gone: `ls .ninthwave/work/*--YOUR_WORK_ITEM_ID.md` should return "No such file"
 3. Commit: `git add .ninthwave/work/ && git commit -m "chore: remove YOUR_WORK_ITEM_ID"`
 
 If `git diff origin/main -- .ninthwave/work/` shows unrelated work item drift, do not create or restore other work item files by hand just to make the diff clean. Only remove your own file and leave the unrelated drift alone.
 
-> **Why?** The work item file exists in your worktree (branched from main). Use relative paths and stay in your worktree -- do not use `${HUB_ROOT}` absolute paths here. Committing the deletion on your branch means merging the PR removes it from main. Each work item is a separate file, so this cannot conflict with other workers.
+> **Why?** The work item file exists in your worktree (branched from main). Use paths relative to `${PROJECT_ROOT}` and stay in your worktree -- do not use `${HUB_ROOT}` absolute paths here. Committing the deletion on your branch means merging the PR removes it from main. Each work item is a separate file, so this cannot conflict with other workers.
 
 ## 9. Create the PR
 
