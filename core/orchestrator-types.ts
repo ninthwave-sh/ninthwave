@@ -60,7 +60,7 @@ export interface OrchestratorItem {
   partition?: number;
   /** Multiplexer workspace reference (e.g., "workspace:1" or "session:nw:H-1-1"). */
   workspaceRef?: string;
-  /** Stashed workspace ref from stuckOrRetry -- executeRetry uses this to close the old workspace after workspaceRef is cleared for session slot freeing. */
+  /** Stashed workspace ref from stuckOrRetry -- executeRetry uses this to close the old workspace after workspaceRef is cleared on the transition to `ready`. */
   pendingRetryWorkspaceRef?: string;
   /** SHA of the last reviewed commit. Used by the SHA gate to prevent re-review on unchanged code after review feedback. */
   lastReviewedCommitSha?: string | null;

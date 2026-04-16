@@ -232,10 +232,16 @@ export class Orchestrator {
     item.lastTransition = new Date().toISOString();
   }
 
-  /** Count of items with active worker sessions (counts toward limit). Items waiting for external CI with no local worker don't consume a session slot. When an item is parked, its workspace is closed (clearing workspaceRef), which naturally frees the slot. */
+  /** Count of items in active states (counts toward maxInflight). An item counts
+   *  if its state is in `ACTIVE_SESSION_STATES` -- regardless of whether a live
+   *  worker / workspace ref is attached. Rationale: an item in an active state
+   *  with a dead worker is still a commitment the orchestrator will recover, so
+   *  it must hold its slot. Conversely, an item in a non-active state (queued,
+   *  ready, done, stuck, blocked, merged) does not hold a slot even if a stale
+   *  workspace ref lingers. */
   get activeItemCount(): number {
     return this.getAllItems().filter((item) =>
-      !!(item.workspaceRef || item.reviewWorkspaceRef || item.rebaserWorkspaceRef || item.fixForwardWorkspaceRef),
+      ACTIVE_SESSION_STATES.has(item.state),
     ).length;
   }
 
@@ -522,8 +528,9 @@ export class Orchestrator {
     }
 
     this.transition(item, "merged", snap?.eventTime);
-    // Clear workspace ref so the session slot is freed immediately (activeItemCount
-    // is workspace-based). The clean action still runs to close the actual workspace.
+    // Transitioning to `merged` (non-active) already frees the inflight slot.
+    // We still clear the workspace ref here so the field reflects reality; the
+    // clean action runs below to close the actual workspace.
     item.workspaceRef = undefined;
     const actions: Action[] = [{ type: "clean", itemId: item.id }];
 
@@ -920,8 +927,9 @@ export class Orchestrator {
       item.lastAliveAt = undefined;
       item.notAliveCount = 0;
       item.lastCommitTime = undefined;
-      // Stash the workspace ref for executeRetry to close, then clear it so
-      // the session slot is freed immediately (activeItemCount is workspace-based).
+      // Stash the workspace ref for executeRetry to close later. The transition
+      // to `ready` (non-active) already frees the inflight slot; clearing the
+      // ref just keeps the field in sync with the closed workspace.
       item.pendingRetryWorkspaceRef = item.workspaceRef;
       item.workspaceRef = undefined;
       this.transition(item, "ready");
@@ -954,7 +962,8 @@ export class Orchestrator {
     // re-sending a notification on this same cycle. The launch action writes
     // the CI fix message to the inbox AFTER cleanInbox runs.
     item.ciNotifyWallAt = undefined;
-    // Stash workspace ref for executeRetry, clear for session slot freeing
+    // Stash workspace ref for executeRetry; the transition to `ready` (non-active)
+    // frees the inflight slot on its own.
     item.pendingRetryWorkspaceRef = item.workspaceRef;
     item.workspaceRef = undefined;
     this.transition(item, "ready");
@@ -969,7 +978,8 @@ export class Orchestrator {
     item.pendingFeedbackLiveDeliveryArmed = undefined;
     item.notAliveCount = 0;
     item.lastAliveAt = undefined;
-    // Stash workspace ref for executeRetry, clear for session slot freeing
+    // Stash workspace ref for executeRetry; the transition to `ready` (non-active)
+    // frees the inflight slot on its own.
     item.pendingRetryWorkspaceRef = item.workspaceRef;
     item.workspaceRef = undefined;
     this.transition(item, "ready");
@@ -1007,8 +1017,9 @@ export class Orchestrator {
     item.notAliveCount = 0;
     item.lastAliveAt = undefined;
     item.lastCommitTime = undefined;
-    // Stash workspace ref for executeRetry to close (closeWorkspace cleans
-    // the phase file), then clear for session slot freeing.
+    // Stash workspace ref for executeRetry to close (closeWorkspace cleans the
+    // phase file). The transition to `ready` (non-active) frees the inflight
+    // slot on its own.
     item.pendingRetryWorkspaceRef = item.workspaceRef;
     item.workspaceRef = undefined;
     this.transition(item, "ready");
@@ -1950,10 +1961,11 @@ export class Orchestrator {
           item.failureReason = `review-stuck: exceeded max review rounds (${this.config.maxReviewRounds})`;
           return actions;
         }
-        // The review worker gets a reviewWorkspaceRef, which counts toward the session limit.
-        // Reviews for in-pipeline items are always prioritized: transitionItem runs
-        // before launchReadyItems, so the review occupies its session slot first,
-        // leaving fewer slots for new launches.
+        // Entering `reviewing` keeps the item in an active state, so it continues
+        // to occupy the same inflight slot it held as `ci-passed`. Reviews for
+        // in-pipeline items are always prioritized: transitionItem runs before
+        // launchReadyItems, so the review takes its slot first, leaving fewer
+        // slots for new launches.
         item.reviewRound = currentRound;
         this.config.onEvent?.(item.id, "review-round", { reviewRound: currentRound });
         this.transition(item, "reviewing", eventTime);

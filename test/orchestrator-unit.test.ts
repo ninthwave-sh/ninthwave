@@ -7105,37 +7105,40 @@ describe("session parking (H-SP-2)", () => {
     expect(actions.some((a) => a.type === "workspace-close")).toBe(true);
   });
 
-  it("activeItemCount excludes parked items whose workspaces are being closed", () => {
+  it("activeItemCount counts parked review-pending items (still a commitment)", () => {
     const orch = new Orchestrator({ mergeStrategy: "manual", maxInflight: 3 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.addItem(makeWorkItem("H-1-2"));
     orch.hydrateState("H-1-1", "review-pending");
     orch.getItem("H-1-1")!.sessionParked = true;
-    // H-1-1 parked: workspace closed (no workspaceRef) -> doesn't count
+    // H-1-1 parked in review-pending: workspace closed (no workspaceRef) but
+    // review-pending is an ACTIVE_SESSION_STATE, so the slot is still held.
     orch.hydrateState("H-1-2", "implementing");
     orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
-    // H-1-2: active workspace -> counts
+    // H-1-2: active state -> counts
 
-    expect(orch.activeItemCount).toBe(1);
-    expect(orch.availableInflightSlots).toBe(2);
+    expect(orch.activeItemCount).toBe(2);
+    expect(orch.availableInflightSlots).toBe(1);
   });
 
-  it("activeItemCount includes stuck parked items with a live workspace", () => {
+  it("activeItemCount excludes stuck items even with a live workspace", () => {
     const orch = new Orchestrator({ maxInflight: 2 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.addItem(makeWorkItem("H-1-2"));
     orch.hydrateState("H-1-1", "stuck");
     orch.getItem("H-1-1")!.sessionParked = true;
     orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
-    // stuck + parked but workspace still alive -> counts
+    // stuck is NOT in ACTIVE_SESSION_STATES -- the stale workspace ref does
+    // not keep the slot held. The orchestrator won't auto-recover stuck
+    // items, so they should not block new work.
     orch.hydrateState("H-1-2", "implementing");
     orch.getItem("H-1-2")!.workspaceRef = "workspace:2";
 
-    expect(orch.activeItemCount).toBe(2);
-    expect(orch.availableInflightSlots).toBe(0);
+    expect(orch.activeItemCount).toBe(1);
+    expect(orch.availableInflightSlots).toBe(1);
   });
 
-  it("live parked stuck worker does not free a launch slot", () => {
+  it("stuck items do not block new launches (state-based counting)", () => {
     const orch = new Orchestrator({ maxInflight: 1 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.addItem(makeWorkItem("H-1-2"));
@@ -7143,21 +7146,24 @@ describe("session parking (H-SP-2)", () => {
     orch.hydrateState("H-1-1", "stuck");
     orch.getItem("H-1-1")!.sessionParked = true;
     orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+    // stuck is not in ACTIVE_SESSION_STATES; a stale workspace ref does not
+    // hold the slot. H-1-2 is free to launch.
 
     orch.hydrateState("H-1-2", "ready");
 
     const actions = orch.processTransitions(emptySnapshot());
 
-    expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-2")).toBe(false);
-    expect(orch.getItem("H-1-2")!.state).toBe("ready");
+    expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-2")).toBe(true);
+    expect(orch.getItem("H-1-2")!.state).toBe("launching");
   });
 
-  it("queued item can launch after another item is parked (session slot freed)", () => {
+  it("parked review-pending item blocks new launches (commitment still open)", () => {
     const orch = new Orchestrator({ mergeStrategy: "manual", maxInflight: 1 });
     orch.addItem(makeWorkItem("H-1-1"));
     orch.addItem(makeWorkItem("H-1-2"));
 
-    // H-1-1 is parked in review-pending
+    // H-1-1 is parked in review-pending -- still an ACTIVE_SESSION_STATE,
+    // so the slot remains held until a human acts.
     orch.hydrateState("H-1-1", "review-pending");
     orch.getItem("H-1-1")!.sessionParked = true;
     orch.getItem("H-1-1")!.prNumber = 42;
@@ -7168,9 +7174,41 @@ describe("session parking (H-SP-2)", () => {
 
     const actions = orch.processTransitions(emptySnapshot());
 
-    // Parked item frees the slot, allowing H-1-2 to launch
-    expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-2")).toBe(true);
-    expect(orch.getItem("H-1-2")!.state).toBe("launching");
+    // Parked review-pending still counts, so no slot is available
+    expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-2")).toBe(false);
+    expect(orch.getItem("H-1-2")!.state).toBe("ready");
+  });
+
+  it("active state with dead worker (no workspace ref) still counts", () => {
+    // An item in an active state whose worker died but has not yet been
+    // transitioned out of the active state is still a commitment the
+    // orchestrator will recover. It must keep its inflight slot.
+    const orch = new Orchestrator({ maxInflight: 2 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.addItem(makeWorkItem("H-1-2"));
+    orch.hydrateState("H-1-1", "implementing");
+    // NOTE: no workspaceRef -- worker died
+    orch.hydrateState("H-1-2", "ci-failed");
+    // NOTE: no workspaceRef -- worker died
+
+    expect(orch.activeItemCount).toBe(2);
+    expect(orch.availableInflightSlots).toBe(0);
+  });
+
+  it("non-active state with stale workspace ref does NOT count", () => {
+    // If an item has been transitioned to a non-active state but a workspace
+    // ref still lingers (e.g., cleanup hasn't run yet), the slot is already
+    // free. State drives counting, not workspace presence.
+    const orch = new Orchestrator({ maxInflight: 2 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.addItem(makeWorkItem("H-1-2"));
+    orch.hydrateState("H-1-1", "queued");
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:stale-1";
+    orch.hydrateState("H-1-2", "ready");
+    orch.getItem("H-1-2")!.workspaceRef = "workspace:stale-2";
+
+    expect(orch.activeItemCount).toBe(0);
+    expect(orch.availableInflightSlots).toBe(2);
   });
 
   it("does NOT park when reviewCompleted=false (AI request-changes)", () => {

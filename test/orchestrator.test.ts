@@ -870,7 +870,7 @@ describe("Orchestrator", () => {
 
   // ── 15. Session count and slots ────────────────────────────────────
 
-  it("activeItemCount reflects items with active workspaces", () => {
+  it("activeItemCount reflects items in active states", () => {
     orch = new Orchestrator({ maxInflight: 5 });
 
     orch.addItem(makeWorkItem("H-1-1"));

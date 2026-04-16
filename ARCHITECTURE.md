@@ -85,9 +85,9 @@ stateDiagram-v2
 
 ### Max Inflight
 
-`activeItemCount` counts items that hold an active worker session -- specifically, items with any workspace ref (`workspaceRef`, `reviewWorkspaceRef`, `rebaserWorkspaceRef`, or `fixForwardWorkspaceRef`). Items waiting for external CI with no local worker don't consume an inflight slot. Review workers share the unified `maxInflight` pool.
+`activeItemCount` counts items whose state is in `ACTIVE_SESSION_STATES` -- the states that represent an in-flight commitment: `launching`, `implementing`, `ci-pending`, `ci-passed`, `ci-failed`, `rebasing`, `reviewing`, `review-pending`, and `merging`. An item in any other state (queued, ready, done, stuck, blocked, merged) does not hold a slot. Review workers share the unified `maxInflight` pool.
 
-Clearing a workspace ref immediately frees the slot. This happens on merge, session parking (review-pending), and retry preparation (stuckOrRetry stashes the ref in `pendingRetryWorkspaceRef` for later cleanup). The freed slot is available for new launches in the same poll cycle.
+Counting is deliberately state-based, not workspace-based. An item whose worker has died but is still in an active state continues to count -- the orchestrator will recover that commitment (respawn a worker, rebase, etc.). Conversely, a parked `review-pending` item still holds its slot even though its workspace was closed to free RAM: the commitment is still open until a human acts. Leaving active states (to `ready`, `merged`, `stuck`, etc.) is what frees the inflight slot -- the freed slot is available for new launches in the same poll cycle.
 
 ### Runtime Transition Enforcement
 

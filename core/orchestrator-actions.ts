@@ -594,9 +594,9 @@ export function executeMerge(
   // This ensures the item reflects reality even if subsequent steps
   // (getMergeCommitSha, audit trail) throw.
   orch.transition(item, "merged");
-  // Close the workspace and free the session slot immediately after merge.
-  // activeItemCount is workspace-based, so clearing workspaceRef is
-  // required to let queued items launch in the same cycle.
+  // Transitioning to `merged` (non-active) already frees the inflight slot.
+  // Close the workspace and clear the ref here so workspace resources are
+  // released immediately and the field reflects reality.
   if (item.workspaceRef) {
     deps.mux.closeWorkspace(item.workspaceRef, item.id);
     item.workspaceRef = undefined;
@@ -838,9 +838,10 @@ export function executeClean(
   const workspaceClosed = item.workspaceRef
     ? deps.mux.closeWorkspace(item.workspaceRef, item.id)
     : null; // null = not attempted (no workspace to close)
-  // Clear workspace ref after closing so the session slot is freed
-  // (activeItemCount is workspace-based). Also clears the ref for
-  // items that bypassed executeMerge (e.g., interceptExternalMerge path).
+  // Items reaching this cleanup path are already in a non-active state
+  // (done/stuck/blocked/merged), so the inflight slot is already freed.
+  // Clear the workspace ref so the field reflects reality; this also
+  // covers items that bypassed executeMerge (e.g., interceptExternalMerge).
   if (item.workspaceRef) item.workspaceRef = undefined;
 
   const worktreeCleaned = deps.cleanup.cleanSingleWorktree(item.id, ctx.worktreeDir, ctx.projectRoot);
