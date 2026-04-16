@@ -95,6 +95,8 @@ describe("system: watch runtime controls", () => {
       env: buildCliEnv(harness, run.runId, run.scenarioPath),
       keepStdinOpen: true,
     });
+    const firstWorktreePath = join(harness.worktreeDir, "ninthwave-H-WRC-1");
+    const secondWorktreePath = join(harness.worktreeDir, "ninthwave-H-WRC-2");
 
     try {
       const firstWorktreePath = join(harness.worktreeDir, "ninthwave-H-WRC-1");
@@ -108,7 +110,10 @@ describe("system: watch runtime controls", () => {
           // the first poll observes the state. The invariant we care about is "first was picked up,
           // second wasn't yet" -- session-limit=1 guarantees second stays in ready/queued.
           const firstPickedUp = first && first.state !== "queued" && first.state !== "ready";
-          return firstPickedUp && second?.state === "ready" && existsSync(firstWorktreePath)
+          return firstPickedUp
+            && second?.state === "ready"
+            && existsSync(firstWorktreePath)
+            && !existsSync(secondWorktreePath)
             ? state
             : false;
         }, 60_000);
@@ -127,7 +132,7 @@ describe("system: watch runtime controls", () => {
       }
 
       expect(existsSync(firstWorktreePath)).toBe(true);
-      expect(existsSync(join(harness.worktreeDir, "ninthwave-H-WRC-2"))).toBe(false);
+      expect(existsSync(secondWorktreePath)).toBe(false);
 
       harness.writeToProcess(processHandle, `${JSON.stringify({
         type: "set-session-limit",
@@ -152,7 +157,6 @@ describe("system: watch runtime controls", () => {
         timeoutMs: 30_000,
       });
 
-      const secondWorktreePath = join(harness.worktreeDir, "ninthwave-H-WRC-2");
       let concurrentState;
       try {
         concurrentState = await harness.waitForOrchestratorState((state) => {
