@@ -267,18 +267,34 @@ export function collaborationLabel(mode: CollaborationMode): string {
   return getByRuntimeValue(COLLABORATION_MODE_OPTIONS, mode).runtimeLabel;
 }
 
-export function resolveTuiSettingsDefaults(userConfig: {
-  merge_strategy?: unknown;
-  review_mode?: unknown;
-  collaboration_mode?: unknown;
-}): TuiSettingsDefaults {
+export function resolveTuiSettingsDefaults(
+  userConfig: {
+    merge_strategy?: unknown;
+    review_mode?: unknown;
+    collaboration_mode?: unknown;
+  },
+  localProjectConfig?: {
+    merge_strategy?: unknown;
+    review_mode?: unknown;
+    collaboration_mode?: unknown;
+  },
+): TuiSettingsDefaults {
+  const localMerge = localProjectConfig && isPersistedMergeStrategy(localProjectConfig.merge_strategy)
+    ? localProjectConfig.merge_strategy : undefined;
+  const localReview = localProjectConfig
+    ? normalizePersistedReviewMode(localProjectConfig.review_mode) : undefined;
+  const localCollab = localProjectConfig
+    ? normalizePersistedCollaborationMode(localProjectConfig.collaboration_mode) : undefined;
+
   return {
-    mergeStrategy: isPersistedMergeStrategy(userConfig.merge_strategy)
-      ? userConfig.merge_strategy
-      : TUI_SETTINGS_DEFAULTS.mergeStrategy,
-    reviewMode: normalizePersistedReviewMode(userConfig.review_mode)
+    mergeStrategy: localMerge
+      ?? (isPersistedMergeStrategy(userConfig.merge_strategy) ? userConfig.merge_strategy : undefined)
+      ?? TUI_SETTINGS_DEFAULTS.mergeStrategy,
+    reviewMode: localReview
+      ?? normalizePersistedReviewMode(userConfig.review_mode)
       ?? TUI_SETTINGS_DEFAULTS.reviewMode,
-    collaborationMode: normalizePersistedCollaborationMode(userConfig.collaboration_mode)
+    collaborationMode: localCollab
+      ?? normalizePersistedCollaborationMode(userConfig.collaboration_mode)
       ?? TUI_SETTINGS_DEFAULTS.collaborationMode,
   };
 }

@@ -11,10 +11,11 @@ import type { LogEntry } from "./types.ts";
 import {
   mergeStrategyToPersisted,
   reviewModeToPersisted,
+  collaborationModeToPersisted,
   type CollaborationMode,
   type ReviewMode,
 } from "./tui-settings.ts";
-import { saveUserConfig } from "./config.ts";
+import { saveUserConfig, saveLocalConfig } from "./config.ts";
 import type { InteractiveWatchTiming } from "./orchestrate-timing.ts";
 import type {
   OrchestrateLoopConfig,
@@ -76,6 +77,8 @@ export interface RuntimeControlHandlerDeps {
   sendControl: (command: WatchEngineControlCommand) => void;
   getSessionLimit: () => number;
   saveUserConfigFn?: typeof saveUserConfig;
+  saveLocalConfigFn?: typeof saveLocalConfig;
+  projectRoot?: string;
   requestCollaborationAction?: (request: RuntimeCollaborationActionRequest) => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
 }
 
@@ -83,6 +86,17 @@ export function createRuntimeControlHandlers(
   deps: RuntimeControlHandlerDeps,
 ): RuntimeControlHandlers {
   const saveUserConfigFn = deps.saveUserConfigFn ?? saveUserConfig;
+  const saveLocalConfigFn = deps.saveLocalConfigFn ?? saveLocalConfig;
+
+  const dualWriteLocal = (updates: Record<string, unknown>) => {
+    if (deps.projectRoot) {
+      try {
+        saveLocalConfigFn(deps.projectRoot, updates);
+      } catch {
+        // Best-effort persistence only.
+      }
+    }
+  };
 
   return {
     onPauseChange: (paused) => {
@@ -97,6 +111,7 @@ export function createRuntimeControlHandlers(
         } catch {
           // Best-effort persistence only.
         }
+        dualWriteLocal({ merge_strategy: persisted });
       }
     },
     onSessionLimitChange: (delta) => {
@@ -112,14 +127,23 @@ export function createRuntimeControlHandlers(
     },
     onReviewChange: (mode) => {
       deps.sendControl({ type: "set-review-mode", mode, source: "keyboard" });
+      const persisted = reviewModeToPersisted(mode);
       try {
-        saveUserConfigFn({ review_mode: reviewModeToPersisted(mode) });
+        saveUserConfigFn({ review_mode: persisted });
       } catch {
         // Best-effort persistence only.
       }
+      dualWriteLocal({ review_mode: persisted });
     },
     onCollaborationChange: (mode) => {
       deps.sendControl({ type: "set-collaboration-mode", mode, source: "keyboard" });
+      const persisted = collaborationModeToPersisted(mode);
+      try {
+        saveUserConfigFn({ collaboration_mode: persisted });
+      } catch {
+        // Best-effort persistence only.
+      }
+      dualWriteLocal({ collaboration_mode: persisted });
     },
     onCollaborationLocal: () => {
       if (deps.requestCollaborationAction) {

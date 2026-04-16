@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import {
+  isPersistedCollaborationMode,
   isPersistedMergeStrategy,
   isPersistedReviewMode,
   normalizePersistedCollaborationMode,
@@ -48,6 +49,13 @@ export interface ProjectConfig {
    * one so consumers don't need to know which file holds which field.
    */
   ai_tool_overrides?: BuiltInAiToolOverrides;
+  /**
+   * Per-repo mode settings. These live only in the gitignored
+   * `.ninthwave/config.local.json` and override the global user defaults.
+   */
+  merge_strategy?: PersistedMergeStrategy;
+  review_mode?: PersistedReviewMode;
+  collaboration_mode?: PersistedCollaborationMode;
 }
 
 function parseProjectCrewUrl(value: unknown): string | undefined {
@@ -282,6 +290,9 @@ function loadProjectConfigFile<T extends boolean>(
     if (brokerSecret !== undefined) result.broker_secret = brokerSecret;
     const overrides = parseBuiltInAiToolOverrides(parsed.ai_tool_overrides);
     if (overrides) result.ai_tool_overrides = overrides;
+    if (isPersistedMergeStrategy(parsed.merge_strategy)) result.merge_strategy = parsed.merge_strategy;
+    if (isPersistedReviewMode(parsed.review_mode)) result.review_mode = parsed.review_mode;
+    if (isPersistedCollaborationMode(parsed.collaboration_mode)) result.collaboration_mode = parsed.collaboration_mode;
     return result as T extends true ? ProjectConfig : Partial<ProjectConfig>;
   } catch {
     return fallback;

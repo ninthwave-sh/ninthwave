@@ -6,9 +6,11 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import {
   generateProjectIdentity,
   loadConfig,
+  loadLocalConfig,
   loadMergedProjectConfig,
   loadOrGenerateProjectIdentity,
   saveConfig,
+  saveLocalConfig,
   loadUserConfig,
   saveUserConfig,
 } from "../core/config.ts";
@@ -1174,5 +1176,88 @@ describe("saveUserConfig", () => {
 
     const content = JSON.parse(readFileSync(join(configDir, "config.json"), "utf-8"));
     expect(content.session_limit).toBe(3);
+  });
+});
+
+describe("loadLocalConfig with mode settings", () => {
+  it("parses mode settings from config.local.json", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.local.json"),
+      JSON.stringify({
+        merge_strategy: "auto",
+        review_mode: "off",
+        collaboration_mode: "connect",
+      }),
+    );
+
+    const config = loadLocalConfig(repo);
+    expect(config.merge_strategy).toBe("auto");
+    expect(config.review_mode).toBe("off");
+    expect(config.collaboration_mode).toBe("connect");
+  });
+
+  it("ignores invalid mode settings values", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.local.json"),
+      JSON.stringify({
+        merge_strategy: "bogus",
+        review_mode: 42,
+        collaboration_mode: null,
+      }),
+    );
+
+    const config = loadLocalConfig(repo);
+    expect(config.merge_strategy).toBeUndefined();
+    expect(config.review_mode).toBeUndefined();
+    expect(config.collaboration_mode).toBeUndefined();
+  });
+
+  it("returns empty config when file is missing", () => {
+    const repo = setupTempRepo();
+    const config = loadLocalConfig(repo);
+    expect(config.merge_strategy).toBeUndefined();
+    expect(config.review_mode).toBeUndefined();
+    expect(config.collaboration_mode).toBeUndefined();
+  });
+});
+
+describe("saveLocalConfig with mode settings", () => {
+  it("persists mode settings to config.local.json", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+
+    saveLocalConfig(repo, {
+      merge_strategy: "auto",
+      review_mode: "on",
+      collaboration_mode: "local",
+    });
+
+    const raw = JSON.parse(readFileSync(join(configDir, "config.local.json"), "utf-8"));
+    expect(raw.merge_strategy).toBe("auto");
+    expect(raw.review_mode).toBe("on");
+    expect(raw.collaboration_mode).toBe("local");
+  });
+
+  it("preserves existing fields on partial update", () => {
+    const repo = setupTempRepo();
+    const configDir = join(repo, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.local.json"),
+      JSON.stringify({ merge_strategy: "manual", review_mode: "on" }),
+    );
+
+    saveLocalConfig(repo, { merge_strategy: "auto" });
+
+    const raw = JSON.parse(readFileSync(join(configDir, "config.local.json"), "utf-8"));
+    expect(raw.merge_strategy).toBe("auto");
+    expect(raw.review_mode).toBe("on");
   });
 });

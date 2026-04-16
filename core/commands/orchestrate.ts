@@ -52,8 +52,10 @@ import {
 import type { WorkItem, LogEntry } from "../types.ts";
 import {
   loadConfig,
+  loadLocalConfig,
   loadUserConfig,
   saveConfig,
+  saveLocalConfig,
   saveUserConfig,
 } from "../config.ts";
 import type { ProjectConfig, UserConfig } from "../config.ts";
@@ -449,11 +451,12 @@ export interface InteractiveStartupConfig {
 export function resolveInteractiveStartupConfig(
   _projectConfig: ProjectConfig,
   userConfig: UserConfig,
-  _projectRoot: string,
+  projectRoot: string,
   toolOverride?: string,
 ): InteractiveStartupConfig {
+  const localConfig = loadLocalConfig(projectRoot);
   return {
-    defaults: resolveTuiSettingsDefaults(userConfig),
+    defaults: resolveTuiSettingsDefaults(userConfig, localConfig),
     savedToolIds: userConfig.ai_tools,
   };
 }
@@ -1228,6 +1231,7 @@ async function runInteractiveOperatorParentSession(
       sendRuntimeControl(command);
     },
     getSessionLimit: () => tuiState.pendingSessionLimit ?? tuiState.sessionLimit ?? operatorLastSnapshot.runtime.sessionLimit,
+    projectRoot: opts.projectRoot,
     requestCollaborationAction: async (request) => {
       return requestCollaborationFromEngine(request);
     },
@@ -1524,13 +1528,21 @@ export async function cmdOrchestrate(
     interactiveReviewMode = result.reviewMode;
     interactiveSkipReview = result.reviewMode === "off";
     try {
-      saveUserConfig({
-        ...buildStartupPersistenceUpdates(result, {
-          savedToolIds: interactiveStartupConfig.savedToolIds,
-          defaults: interactiveStartupConfig.defaults,
-          defaultSessionLimit: startupDefaultSessionLimit,
-        }),
+      const persistenceUpdates = buildStartupPersistenceUpdates(result, {
+        savedToolIds: interactiveStartupConfig.savedToolIds,
+        defaults: interactiveStartupConfig.defaults,
+        defaultSessionLimit: startupDefaultSessionLimit,
       });
+      saveUserConfig({ ...persistenceUpdates });
+      // Dual-write mode settings to per-repo local config
+      const { merge_strategy, review_mode, collaboration_mode } = persistenceUpdates;
+      if (merge_strategy || review_mode || collaboration_mode) {
+        saveLocalConfig(projectRoot, {
+          ...(merge_strategy ? { merge_strategy } : {}),
+          ...(review_mode ? { review_mode } : {}),
+          ...(collaboration_mode ? { collaboration_mode } : {}),
+        });
+      }
       persistedUserCfg = loadUserConfig();
     } catch {
       // best-effort persistence only
@@ -2008,6 +2020,7 @@ export async function cmdOrchestrate(
       sendRuntimeControl(command);
     },
     getSessionLimit: () => tuiState.pendingSessionLimit ?? sessionLimit,
+    projectRoot,
     requestCollaborationAction: (request) => requestRuntimeCollaborationAction(request),
   });
   const tuiState: TuiState = {
