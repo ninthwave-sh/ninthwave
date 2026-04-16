@@ -16,6 +16,8 @@ import {
   ghInRepo,
   IGNORED_CHECK_NAMES,
   type GhFailureKind,
+  type PrBulkCache,
+  type BulkCheckRun,
 } from "../gh.ts";
 import { parseWorkItemReferenceBlock } from "../work-item-files.ts";
 import { detectWorkflowPresence } from "../workflow-detect.ts";
@@ -309,20 +311,47 @@ export function checkPrStatusDetailed(
   id: string,
   repoRoot: string,
   deps: PrMonitorDeps = defaultPrMonitorDeps,
+  prCache?: PrBulkCache,
 ): PrStatusPollResult {
   const branch = `ninthwave/${id}`;
 
   if (!deps.isAvailable()) return pollFailure("availability", "missing-cli", "gh CLI unavailable");
 
-  // Check for open PR -- distinguish API error from "no PRs"
-  const openResult = deps.prList(repoRoot, branch, "open");
-  if (!openResult.ok) return pollFailure("prList-open", openResult.kind, openResult.error);
-  const openPrs = openResult.data;
+  // Resolve open/merged PRs from cache or per-item API call
+  let openPrs: Array<{ number: number; title: string; body?: string }>;
+  let cachedPrView: { reviewDecision?: string; mergeable?: string; updatedAt?: string; createdAt?: string } | undefined;
+  let cachedChecks: BulkCheckRun[] | undefined;
+
+  if (prCache) {
+    const cachedOpen = prCache.open.get(branch) ?? [];
+    openPrs = cachedOpen.map(pr => ({ number: pr.number, title: pr.title, body: pr.body }));
+    if (cachedOpen.length > 0) {
+      const entry = cachedOpen[0]!;
+      cachedPrView = {
+        reviewDecision: entry.reviewDecision,
+        mergeable: entry.mergeable,
+        updatedAt: entry.updatedAt,
+        createdAt: entry.createdAt,
+      };
+      cachedChecks = entry.statusCheckRollup;
+    }
+  } else {
+    const openResult = deps.prList(repoRoot, branch, "open");
+    if (!openResult.ok) return pollFailure("prList-open", openResult.kind, openResult.error);
+    openPrs = openResult.data;
+  }
+
   if (openPrs.length === 0) {
     // Check if merged
-    const mergedResult = deps.prList(repoRoot, branch, "merged");
-    if (!mergedResult.ok) return pollFailure("prList-merged", mergedResult.kind, mergedResult.error);
-    const mergedPrs = mergedResult.data;
+    let mergedPrs: Array<{ number: number; title: string; body?: string }>;
+    if (prCache) {
+      const cachedMerged = prCache.merged.get(branch) ?? [];
+      mergedPrs = cachedMerged.map(pr => ({ number: pr.number, title: pr.title, body: pr.body }));
+    } else {
+      const mergedResult = deps.prList(repoRoot, branch, "merged");
+      if (!mergedResult.ok) return pollFailure("prList-merged", mergedResult.kind, mergedResult.error);
+      mergedPrs = mergedResult.data;
+    }
     if (mergedPrs.length > 0) {
       const pr = mergedPrs[0]!;
       const prTitle = pr.title ?? "";
@@ -334,20 +363,44 @@ export function checkPrStatusDetailed(
 
   const prNumber = openPrs[0]!.number;
 
-  // Check CI and review status (include updatedAt for detection latency, createdAt for CI grace period)
-  const prViewResult = deps.prView(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt", "createdAt"]);
-  if (!prViewResult.ok) return pollFailure("prView", prViewResult.kind, prViewResult.error, formatOpenPrStatus(id, prNumber));
-  const prData = prViewResult.data;
-  const reviewDecision = (prData.reviewDecision as string) ?? "";
-  const isMergeable = (prData.mergeable as string) ?? "";
-  const prUpdatedAt = (prData.updatedAt as string) ?? "";
-  const prCreatedAt = (prData.createdAt as string) ?? "";
+  // Use cached prView + statusCheckRollup from bulk fetch when available.
+  let reviewDecision: string;
+  let isMergeable: string;
+  let prUpdatedAt: string;
+  let prCreatedAt: string;
+  let checksData: { state: string; name: string; completedAt?: string }[];
+  let checksFailure: { kind: GhFailureKind; stage: PrPollFailureStage; error: string } | undefined;
 
-  const checksResult = deps.prChecks(repoRoot, prNumber);
-  // Treat prChecks failure as zero checks. Some gh versions return exit code 1
-  // for repos with no CI workflows. Fall through to processChecks so the grace
-  // period logic handles it correctly instead of losing CI status entirely.
-  const checksData = checksResult.ok ? checksResult.data : [];
+  if (cachedPrView && cachedChecks) {
+    reviewDecision = cachedPrView.reviewDecision ?? "";
+    isMergeable = cachedPrView.mergeable ?? "";
+    prUpdatedAt = cachedPrView.updatedAt ?? "";
+    prCreatedAt = cachedPrView.createdAt ?? "";
+    checksData = cachedChecks;
+  } else if (cachedPrView) {
+    reviewDecision = cachedPrView.reviewDecision ?? "";
+    isMergeable = cachedPrView.mergeable ?? "";
+    prUpdatedAt = cachedPrView.updatedAt ?? "";
+    prCreatedAt = cachedPrView.createdAt ?? "";
+    const checksResult = deps.prChecks(repoRoot, prNumber);
+    checksData = checksResult.ok ? checksResult.data : [];
+    if (!checksResult.ok) {
+      checksFailure = { kind: checksResult.kind, stage: "prChecks", error: checksResult.error };
+    }
+  } else {
+    const prViewResult = deps.prView(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt", "createdAt"]);
+    if (!prViewResult.ok) return pollFailure("prView", prViewResult.kind, prViewResult.error, formatOpenPrStatus(id, prNumber));
+    const prData = prViewResult.data;
+    reviewDecision = (prData.reviewDecision as string) ?? "";
+    isMergeable = (prData.mergeable as string) ?? "";
+    prUpdatedAt = (prData.updatedAt as string) ?? "";
+    prCreatedAt = (prData.createdAt as string) ?? "";
+    const checksResult = deps.prChecks(repoRoot, prNumber);
+    checksData = checksResult.ok ? checksResult.data : [];
+    if (!checksResult.ok) {
+      checksFailure = { kind: checksResult.kind, stage: "prChecks", error: checksResult.error };
+    }
+  }
 
   // When zero relevant checks, detect workflows to set appropriate grace period.
   let gracePeriodMs = CI_GRACE_PERIOD_MS;
@@ -364,14 +417,14 @@ export function checkPrStatusDetailed(
   const result: PrStatusPollResult = {
     statusLine: `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`,
   };
-  if (!checksResult.ok) {
-    result.failure = { kind: checksResult.kind, stage: "prChecks", error: checksResult.error };
+  if (checksFailure) {
+    result.failure = checksFailure;
   }
   return result;
 }
 
-export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps = defaultPrMonitorDeps): string {
-  return checkPrStatusDetailed(id, repoRoot, deps).statusLine;
+export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps = defaultPrMonitorDeps, prCache?: PrBulkCache): string {
+  return checkPrStatusDetailed(id, repoRoot, deps, prCache).statusLine;
 }
 
 /**
@@ -379,27 +432,54 @@ export function checkPrStatus(id: string, repoRoot: string, deps: PrMonitorDeps 
  * network call yields to the event loop, keeping the TUI responsive.
  * Returns the same tab-separated string format as the sync version.
  */
-export async function checkPrStatusAsync(id: string, repoRoot: string, deps: PrMonitorAsyncDeps = defaultPrMonitorAsyncDeps): Promise<string> {
-  return (await checkPrStatusDetailedAsync(id, repoRoot, deps)).statusLine;
+export async function checkPrStatusAsync(id: string, repoRoot: string, deps: PrMonitorAsyncDeps = defaultPrMonitorAsyncDeps, prCache?: PrBulkCache): Promise<string> {
+  return (await checkPrStatusDetailedAsync(id, repoRoot, deps, prCache)).statusLine;
 }
 
 export async function checkPrStatusDetailedAsync(
   id: string,
   repoRoot: string,
   deps: PrMonitorAsyncDeps = defaultPrMonitorAsyncDeps,
+  prCache?: PrBulkCache,
 ): Promise<PrStatusPollResult> {
   const branch = `ninthwave/${id}`;
 
   if (!deps.isAvailable()) return pollFailure("availability", "missing-cli", "gh CLI unavailable");
 
-  // Check for open PR -- distinguish API error from "no PRs"
-  const openResult = await deps.prListAsync(repoRoot, branch, "open");
-  if (!openResult.ok) return pollFailure("prList-open", openResult.kind, openResult.error);
-  const openPrs = openResult.data;
+  // Resolve open/merged PRs from cache or per-item API call
+  let openPrs: Array<{ number: number; title: string; body?: string }>;
+  let cachedPrView: { reviewDecision?: string; mergeable?: string; updatedAt?: string; createdAt?: string } | undefined;
+  let cachedChecks: BulkCheckRun[] | undefined;
+
+  if (prCache) {
+    const cachedOpen = prCache.open.get(branch) ?? [];
+    openPrs = cachedOpen.map(pr => ({ number: pr.number, title: pr.title, body: pr.body }));
+    if (cachedOpen.length > 0) {
+      const entry = cachedOpen[0]!;
+      cachedPrView = {
+        reviewDecision: entry.reviewDecision,
+        mergeable: entry.mergeable,
+        updatedAt: entry.updatedAt,
+        createdAt: entry.createdAt,
+      };
+      cachedChecks = entry.statusCheckRollup;
+    }
+  } else {
+    const openResult = await deps.prListAsync(repoRoot, branch, "open");
+    if (!openResult.ok) return pollFailure("prList-open", openResult.kind, openResult.error);
+    openPrs = openResult.data;
+  }
+
   if (openPrs.length === 0) {
-    const mergedResult = await deps.prListAsync(repoRoot, branch, "merged");
-    if (!mergedResult.ok) return pollFailure("prList-merged", mergedResult.kind, mergedResult.error);
-    const mergedPrs = mergedResult.data;
+    let mergedPrs: Array<{ number: number; title: string; body?: string }>;
+    if (prCache) {
+      const cachedMerged = prCache.merged.get(branch) ?? [];
+      mergedPrs = cachedMerged.map(pr => ({ number: pr.number, title: pr.title, body: pr.body }));
+    } else {
+      const mergedResult = await deps.prListAsync(repoRoot, branch, "merged");
+      if (!mergedResult.ok) return pollFailure("prList-merged", mergedResult.kind, mergedResult.error);
+      mergedPrs = mergedResult.data;
+    }
     if (mergedPrs.length > 0) {
       const pr = mergedPrs[0]!;
       const prTitle = pr.title ?? "";
@@ -411,16 +491,50 @@ export async function checkPrStatusDetailedAsync(
 
   const prNumber = openPrs[0]!.number;
 
-  const prViewResult = await deps.prViewAsync(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt", "createdAt"]);
-  if (!prViewResult.ok) return pollFailure("prView", prViewResult.kind, prViewResult.error, formatOpenPrStatus(id, prNumber));
-  const prData = prViewResult.data;
-  const reviewDecision = (prData.reviewDecision as string) ?? "";
-  const isMergeable = (prData.mergeable as string) ?? "";
-  const prUpdatedAt = (prData.updatedAt as string) ?? "";
-  const prCreatedAt = (prData.createdAt as string) ?? "";
+  // Use cached prView + statusCheckRollup from bulk fetch when available.
+  // This eliminates per-item prView AND prChecks calls entirely.
+  let reviewDecision: string;
+  let isMergeable: string;
+  let prUpdatedAt: string;
+  let prCreatedAt: string;
+  let checksData: { state: string; name: string; completedAt?: string }[];
+  let checksFailure: { kind: string; stage: string; error: string } | undefined;
 
-  const checksResult = await deps.prChecksAsync(repoRoot, prNumber);
-  const checksData = checksResult.ok ? checksResult.data : [];
+  if (cachedPrView && cachedChecks) {
+    // Full cache hit: all data from bulk fetch, zero per-item API calls
+    reviewDecision = cachedPrView.reviewDecision ?? "";
+    isMergeable = cachedPrView.mergeable ?? "";
+    prUpdatedAt = cachedPrView.updatedAt ?? "";
+    prCreatedAt = cachedPrView.createdAt ?? "";
+    checksData = cachedChecks;
+  } else if (cachedPrView) {
+    // Partial cache: prView from cache, prChecks per-item (statusCheckRollup missing)
+    reviewDecision = cachedPrView.reviewDecision ?? "";
+    isMergeable = cachedPrView.mergeable ?? "";
+    prUpdatedAt = cachedPrView.updatedAt ?? "";
+    prCreatedAt = cachedPrView.createdAt ?? "";
+    const checksResult = await deps.prChecksAsync(repoRoot, prNumber);
+    checksData = checksResult.ok ? checksResult.data : [];
+    if (!checksResult.ok) {
+      checksFailure = { kind: checksResult.kind, stage: "prChecks", error: checksResult.error };
+    }
+  } else {
+    // No cache: prView and prChecks in parallel
+    const [prViewResult, checksResult] = await Promise.all([
+      deps.prViewAsync(repoRoot, prNumber, ["reviewDecision", "mergeable", "updatedAt", "createdAt"]),
+      deps.prChecksAsync(repoRoot, prNumber),
+    ]);
+    if (!prViewResult.ok) return pollFailure("prView", prViewResult.kind, prViewResult.error, formatOpenPrStatus(id, prNumber));
+    const prData = prViewResult.data;
+    reviewDecision = (prData.reviewDecision as string) ?? "";
+    isMergeable = (prData.mergeable as string) ?? "";
+    prUpdatedAt = (prData.updatedAt as string) ?? "";
+    prCreatedAt = (prData.createdAt as string) ?? "";
+    checksData = checksResult.ok ? checksResult.data : [];
+    if (!checksResult.ok) {
+      checksFailure = { kind: checksResult.kind, stage: "prChecks", error: checksResult.error };
+    }
+  }
 
   let gracePeriodMs = CI_GRACE_PERIOD_MS;
   if (filterRelevantChecks(checksData).length === 0) {
@@ -435,8 +549,8 @@ export async function checkPrStatusDetailedAsync(
   const result: PrStatusPollResult = {
     statusLine: `${id}\t${prNumber}\t${status}\t${isMergeable || "UNKNOWN"}\t${eventTime}`,
   };
-  if (!checksResult.ok) {
-    result.failure = { kind: checksResult.kind, stage: "prChecks", error: checksResult.error };
+  if (checksFailure) {
+    result.failure = { kind: checksFailure.kind as GhFailureKind, stage: checksFailure.stage as PrPollFailureStage, error: checksFailure.error };
   }
   return result;
 }

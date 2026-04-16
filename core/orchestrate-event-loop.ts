@@ -126,9 +126,10 @@ const PR_POLL_STATES: ReadonlySet<string> = new Set([
 
 /**
  * Adaptive poll interval that scales with the number of active items.
- * Each active item requires ~3 GitHub API calls per cycle (prList, prView, prChecks).
- * Targets ~50% of GitHub's 5000/hr rate limit for multi-item polling budget,
- * leaving headroom for action calls (comments, merges, status checks).
+ * With bulk PR fetching, each cycle costs 2 constant API calls (open + merged)
+ * regardless of item count -- individual items resolved from the cached result.
+ * Interval still scales with active count to pace overall system load and give
+ * headroom for action calls (comments, merges, status checks).
  * Floor 2s single-item, 10s multi-item, cap 30s. Override with --poll-interval.
  */
 export function adaptivePollInterval(orch: Orchestrator): number {

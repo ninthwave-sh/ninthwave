@@ -310,6 +310,116 @@ export async function prChecksAsync(
   }
 }
 
+// ── Bulk PR fetching ────────────────────────────────────────────────
+// Fetch all ninthwave/* PRs in two calls (open + merged) instead of N per-item calls.
+
+/** Shape of a check run from statusCheckRollup in bulk PR fetch. */
+export interface BulkCheckRun {
+  state: string;
+  name: string;
+  completedAt?: string;
+}
+
+/** Shape of a PR returned by bulk fetch, keyed by headRefName. */
+export interface BulkPrEntry {
+  number: number;
+  title: string;
+  body?: string;
+  headRefName: string;
+  reviewDecision?: string;
+  mergeable?: string;
+  updatedAt?: string;
+  createdAt?: string;
+  statusCheckRollup?: BulkCheckRun[];
+}
+
+/** Cache of all ninthwave PRs, keyed by branch name (e.g., "ninthwave/WI-1"). */
+export interface PrBulkCache {
+  open: Map<string, BulkPrEntry[]>;
+  merged: Map<string, BulkPrEntry[]>;
+}
+
+function buildPrBulkCache(
+  openPrs: BulkPrEntry[],
+  mergedPrs: BulkPrEntry[],
+): PrBulkCache {
+  const open = new Map<string, BulkPrEntry[]>();
+  const merged = new Map<string, BulkPrEntry[]>();
+  for (const pr of openPrs) {
+    const existing = open.get(pr.headRefName) ?? [];
+    existing.push(pr);
+    open.set(pr.headRefName, existing);
+  }
+  for (const pr of mergedPrs) {
+    const existing = merged.get(pr.headRefName) ?? [];
+    existing.push(pr);
+    merged.set(pr.headRefName, existing);
+  }
+  return { open, merged };
+}
+
+const BULK_PR_FIELDS_OPEN = "number,title,body,headRefName,reviewDecision,mergeable,updatedAt,createdAt,statusCheckRollup";
+const BULK_PR_FIELDS_MERGED = "number,title,body,headRefName";
+
+/**
+ * Fetch all ninthwave/* PRs in two gh calls (open + merged).
+ * Returns a PrBulkCache for O(1) per-branch lookups. Falls back to null on failure
+ * so callers can degrade to per-item fetching.
+ */
+export function fetchAllNinthwavePRs(repoRoot: string): PrBulkCache | null {
+  try {
+    const openResult = ghInRepo(repoRoot, [
+      "pr", "list", "--state", "open",
+      "--json", BULK_PR_FIELDS_OPEN,
+      "--limit", "200",
+    ]);
+    if (openResult.exitCode !== 0) return null;
+
+    const mergedResult = ghInRepo(repoRoot, [
+      "pr", "list", "--state", "merged",
+      "--json", BULK_PR_FIELDS_MERGED,
+      "--limit", "200",
+    ]);
+    if (mergedResult.exitCode !== 0) return null;
+
+    const allOpen = (JSON.parse(openResult.stdout || "[]") as BulkPrEntry[])
+      .filter(pr => pr.headRefName.startsWith("ninthwave/"));
+    const allMerged = (JSON.parse(mergedResult.stdout || "[]") as BulkPrEntry[])
+      .filter(pr => pr.headRefName.startsWith("ninthwave/"));
+    return buildPrBulkCache(allOpen, allMerged);
+  } catch {
+    return null;
+  }
+}
+
+/** Async variant of fetchAllNinthwavePRs. */
+export async function fetchAllNinthwavePRsAsync(repoRoot: string): Promise<PrBulkCache | null> {
+  try {
+    // Fetch open and merged PRs in parallel
+    const [openResult, mergedResult] = await Promise.all([
+      ghInRepoAsync(repoRoot, [
+        "pr", "list", "--state", "open",
+        "--json", BULK_PR_FIELDS_OPEN,
+        "--limit", "200",
+      ]),
+      ghInRepoAsync(repoRoot, [
+        "pr", "list", "--state", "merged",
+        "--json", BULK_PR_FIELDS_MERGED,
+        "--limit", "200",
+      ]),
+    ]);
+    if (openResult.exitCode !== 0 || mergedResult.exitCode !== 0) return null;
+
+    const allOpen = (JSON.parse(openResult.stdout || "[]") as BulkPrEntry[])
+      .filter(pr => pr.headRefName.startsWith("ninthwave/"));
+    const allMerged = (JSON.parse(mergedResult.stdout || "[]") as BulkPrEntry[])
+      .filter(pr => pr.headRefName.startsWith("ninthwave/"));
+    return buildPrBulkCache(allOpen, allMerged);
+  } catch {
+    return null;
+  }
+}
+
 /** Get the owner/repo string (e.g., "ninthwave-io/ninthwave"). */
 export function getRepoOwner(repoRoot: string): string {
   const result = ghInRepo(repoRoot, [
@@ -892,6 +1002,17 @@ export function ensureDomainLabels(repoRoot: string, domains: string[]): void {
       "--color", DOMAIN_LABEL_COLOR, "--force",
     ]);
   }
+}
+
+/** Async variant: creates all domain labels in parallel. */
+export async function ensureDomainLabelsAsync(repoRoot: string, domains: string[]): Promise<void> {
+  const unique = [...new Set(domains)];
+  await Promise.all(unique.map(domain =>
+    ghInRepoAsync(repoRoot, [
+      "label", "create", `domain:${domain}`,
+      "--color", DOMAIN_LABEL_COLOR, "--force",
+    ]),
+  ));
 }
 
 /**

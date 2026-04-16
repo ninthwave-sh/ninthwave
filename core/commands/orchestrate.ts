@@ -31,7 +31,7 @@ import { cleanStaleBranchForReuse } from "../branch-cleanup.ts";
 import { selectAiTools, detectInstalledAITools, validateAgentFiles } from "../tool-select.ts";
 import { cleanSingleWorktree } from "./clean.ts";
 import { writeInbox, type InboxSnapshot } from "./inbox.ts";
-import { prMerge, prComment, addCommentReaction, checkPrMergeable, isPrBlocked, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, getDefaultBranch as ghGetDefaultBranch, ensureDomainLabels, listPrComments, updatePrComment, ghFailureKindLabel, getPrBaseBranch as ghGetPrBaseBranch, getPrBaseAndState as ghGetPrBaseAndState, retargetPrBase as ghRetargetPrBase, queryRateLimitAsync as ghQueryRateLimitAsync } from "../gh.ts";
+import { prMerge, prComment, addCommentReaction, checkPrMergeable, isPrBlocked, getRepoOwner, applyGithubToken, fetchTrustedPrCommentsAsync, upsertOrchestratorComment, setCommitStatus as ghSetCommitStatus, prHeadSha, getMergeCommitSha as ghGetMergeCommitSha, checkCommitCI as ghCheckCommitCI, checkCommitCIAsync as ghCheckCommitCIAsync, getDefaultBranch as ghGetDefaultBranch, ensureDomainLabels, ensureDomainLabelsAsync, listPrComments, updatePrComment, ghFailureKindLabel, getPrBaseBranch as ghGetPrBaseBranch, getPrBaseAndState as ghGetPrBaseAndState, retargetPrBase as ghRetargetPrBase, queryRateLimitAsync as ghQueryRateLimitAsync } from "../gh.ts";
 import { fetchOrigin, ffMerge, gitAdd, gitCommit, gitPush, daemonRebase, rebaseOnto, forcePush, resolveRef, autoSaveWorktree } from "../git.ts";
 import { run } from "../shell.ts";
 import { type Multiplexer, createMux, muxTypeForWorkspaceRef, resolveBackend } from "../mux.ts";
@@ -1630,7 +1630,7 @@ export async function cmdOrchestrate(
   emitInteractiveEngineStartupOverlay(isInteractiveEngineChild, INTERACTIVE_STARTUP_OVERLAYS.preparingQueue);
   const domainSet = new Set(itemIds.map(id => workItemMap.get(id)!.domain));
   if (fixForward) domainSet.add("verify");
-  ensureDomainLabels(projectRoot, [...domainSet]);
+  await ensureDomainLabelsAsync(projectRoot, [...domainSet]);
 
   // Real action dependencies -- create mux before state reconstruction so
   // workspace refs can be recovered from live workspaces.
@@ -2431,7 +2431,7 @@ export async function cmdOrchestrate(
             nextItems.push(wi);
             newDomains.add(wi.domain);
           }
-          if (newDomains.size > 0) ensureDomainLabels(projectRoot, [...newDomains]);
+          if (newDomains.size > 0) await ensureDomainLabelsAsync(projectRoot, [...newDomains]);
           if (nextItems.length === 0) {
             cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);
             break;
@@ -2513,7 +2513,7 @@ export async function cmdOrchestrate(
             newDomains.add(wi.domain);
           }
         }
-        if (newDomains.size > 0) ensureDomainLabels(projectRoot, [...newDomains]);
+        if (newDomains.size > 0) await ensureDomainLabelsAsync(projectRoot, [...newDomains]);
         // Local-first: keep current session's merge/review/session-limit policy.
         // The interactive flow only selects items and AI tools.
 

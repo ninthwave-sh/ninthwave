@@ -9,6 +9,7 @@ import { checkPrStatus } from "./commands/pr-monitor.ts";
 import { classifyPrMetadataMatch } from "./work-item-files.ts";
 import type { Multiplexer } from "./mux.ts";
 import { RESTART_RECOVERY_HOLD_REASON } from "./orchestrator-types.ts";
+import { fetchAllNinthwavePRs, type PrBulkCache } from "./gh.ts";
 
 // ── State reconstruction (crash recovery) ──────────────────────────
 
@@ -166,8 +167,17 @@ export function reconstructState(
   mux?: Multiplexer,
   checkPr: (id: string, root: string) => string | null = checkPrStatus,
   daemonState?: DaemonState | null,
+  prCache?: PrBulkCache | null,
 ): ReconstructionResult {
   const result: ReconstructionResult = { unresolvedImplementations: [] };
+
+  // Batch-fetch all ninthwave PRs in 2 API calls instead of 2N per-item calls.
+  // Only auto-fetch when using the default checkPr (tests inject their own).
+  const isDefaultCheckPr = checkPr === checkPrStatus;
+  const bulkCache = prCache !== undefined ? prCache : (isDefaultCheckPr ? fetchAllNinthwavePRs(projectRoot) : null);
+  const effectiveCheckPr = bulkCache && isDefaultCheckPr
+    ? (id: string, root: string) => checkPrStatus(id, root, undefined, bulkCache)
+    : checkPr;
   // Build a lookup map from saved daemon state for restoring persisted counters and review fields
   const savedItems = new Map<string, {
     state: string;
@@ -285,7 +295,7 @@ export function reconstructState(
 
     // Preserve merged waiting state across restart even when the clean action
     // already removed the worktree and mergeCommitSha was not captured yet.
-    if (saved?.state === "merged" && restoreMergedWaitingState(orch, item, projectRoot, checkPr)) {
+    if (saved?.state === "merged" && restoreMergedWaitingState(orch, item, projectRoot, effectiveCheckPr)) {
       continue;
     }
 
@@ -312,7 +322,7 @@ export function reconstructState(
       if (savedState === "verify-failed") savedState = "fix-forward-failed";
       if (savedState === "repairing-main") savedState = "fixing-forward";
       if (savedState === "fixing-forward") {
-        if (restoreRepairPrTrackingState(orch, item, projectRoot, checkPr, "fixing-forward")) {
+        if (restoreRepairPrTrackingState(orch, item, projectRoot, effectiveCheckPr, "fixing-forward")) {
           continue;
         }
         orch.hydrateState(item.id, "fixing-forward");
@@ -325,7 +335,7 @@ export function reconstructState(
     }
 
     if (saved && saved.priorPrNumbers?.length && isRepairReentryState(saved.state)) {
-      if (restoreRepairPrTrackingState(orch, item, projectRoot, checkPr, saved.state)) {
+      if (restoreRepairPrTrackingState(orch, item, projectRoot, effectiveCheckPr, saved.state)) {
         continue;
       }
     }
@@ -347,7 +357,7 @@ export function reconstructState(
     item.worktreePath = wtPath;
 
     // Item has a worktree -- check PR status
-    const statusLine = resolveTrackedPrStatus(item, projectRoot, checkPr);
+    const statusLine = resolveTrackedPrStatus(item, projectRoot, effectiveCheckPr);
     if (!statusLine) {
       hydrateKnownPrTrackingOrImplementing(orch, item.id);
       const workspaceRecovery = recoverWorkspaceRef(orch, item.id, workspaceList, savedWorkspaceRef);

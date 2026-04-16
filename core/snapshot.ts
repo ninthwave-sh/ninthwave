@@ -25,7 +25,9 @@ import {
   getDefaultBranch as defaultGetDefaultBranch,
   getDefaultBranchAsync as defaultGetDefaultBranchAsync,
   getMergeCommitSha as defaultGetMergeCommitSha,
+  fetchAllNinthwavePRsAsync as defaultFetchAllPRsAsync,
   type PrComment,
+  type PrBulkCache,
 } from "./gh.ts";
 import { detectWorkflowPresence } from "./workflow-detect.ts";
 import { resolveRef as defaultResolveRef } from "./git.ts";
@@ -668,6 +670,7 @@ export async function buildSnapshotAsync(
   getDefaultBranch: (repoRoot: string) => string | null | Promise<string | null> = defaultGetDefaultBranchAsync,
   queue?: RequestQueue,
   getHeadSha: (repoRoot: string, ref: string) => string | null | Promise<string | null> = defaultResolveRef,
+  fetchAllPRs: (repoRoot: string) => Promise<PrBulkCache | null> = defaultFetchAllPRsAsync,
 ): Promise<PollSnapshot> {
   const items: ItemSnapshot[] = [];
   const readyIds: string[] = [];
@@ -679,6 +682,12 @@ export async function buildSnapshotAsync(
 
   // Cache workspace listing once for all isWorkerAlive checks in this snapshot
   const cachedWorkspaces = mux.listWorkspaces();
+
+  // Batch-fetch all ninthwave PRs in 2 API calls instead of 2N per-item calls.
+  // Only auto-fetch when using the default checkPr (tests inject their own).
+  // Falls back to null on failure; per-item calls will be used as fallback.
+  const isDefaultCheckPr = checkPr === checkPrStatusDetailedAsync;
+  const prCache = isDefaultCheckPr ? await fetchAllPRs(projectRoot) : null;
 
   // First pass: compute readyIds for queued items, collect active items for polling
   const activeItems: OrchestratorItem[] = [];
@@ -724,8 +733,12 @@ export async function buildSnapshotAsync(
     let errorKind: string | undefined;
     let errorMessage: string | undefined;
 
-    // Check PR status via async gh -- yields to event loop per call
-    const prResult = await pollTrackedPrStatusAsync(orchItem, projectRoot, checkPr);
+    // Check PR status via async gh -- yields to event loop per call.
+    // When a bulk PR cache is available, wrap checkPr to pass it through.
+    const effectiveCheckPr = prCache
+      ? (id: string, root: string) => checkPrStatusDetailedAsync(id, root, undefined, prCache) as Promise<string | null | PrStatusPollResult>
+      : checkPr;
+    const prResult = await pollTrackedPrStatusAsync(orchItem, projectRoot, effectiveCheckPr);
     const statusLine = prResult.statusLine;
     // Only count critical API errors (availability, prList, prView) toward the
     // error backoff. prChecks failures are handled gracefully (treated as zero
