@@ -97,6 +97,7 @@ describe("system: watch runtime controls", () => {
     });
 
     try {
+      const firstWorktreePath = join(harness.worktreeDir, "ninthwave-H-WRC-1");
       try {
         await harness.waitForOrchestratorState((state) => {
           const first = state.items.find((entry) => entry.id === "H-WRC-1");
@@ -107,7 +108,9 @@ describe("system: watch runtime controls", () => {
           // the first poll observes the state. The invariant we care about is "first was picked up,
           // second wasn't yet" -- session-limit=1 guarantees second stays in ready/queued.
           const firstPickedUp = first && first.state !== "queued" && first.state !== "ready";
-          return firstPickedUp && second?.state === "ready" ? state : false;
+          return firstPickedUp && second?.state === "ready" && existsSync(firstWorktreePath)
+            ? state
+            : false;
         }, 60_000);
       } catch (err) {
         const state = harness.readOrchestratorState();
@@ -123,7 +126,7 @@ describe("system: watch runtime controls", () => {
         throw err;
       }
 
-      expect(existsSync(join(harness.worktreeDir, "ninthwave-H-WRC-1"))).toBe(true);
+      expect(existsSync(firstWorktreePath)).toBe(true);
       expect(existsSync(join(harness.worktreeDir, "ninthwave-H-WRC-2"))).toBe(false);
 
       harness.writeToProcess(processHandle, `${JSON.stringify({
