@@ -1622,6 +1622,169 @@ describe("initProject config.json", () => {
   });
 });
 
+// --- initProject broker secret action ---
+
+describe("initProject -- broker secret action", () => {
+  it("generate path writes a new secret and prints sharing instructions", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    try {
+      initProject(projectDir, bundleDir, deps, {
+        brokerSecretAction: { action: "generate" },
+      });
+    } finally {
+      console.log = origLog;
+    }
+
+    // Secret written to local overlay, not committed config.
+    const configJson = parseConfigJson(
+      readFileSync(join(projectDir, ".ninthwave/config.json"), "utf-8"),
+    );
+    expect(configJson).not.toHaveProperty("broker_secret");
+
+    const localParsed = JSON.parse(
+      readFileSync(
+        join(projectDir, ".ninthwave/config.local.json"),
+        "utf-8",
+      ),
+    );
+    expect(localParsed.broker_secret).toMatch(BROKER_SECRET_PATTERN);
+
+    // Stdout contains the secret body and sharing instructions.
+    const output = logs.join("\n");
+    expect(output).toContain(localParsed.broker_secret);
+    expect(output).toContain("Share this with teammates");
+  });
+
+  it("enter path saves the provided validated secret and does not print it", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    // 32 random bytes -> canonical base64. Use a fixed, syntactically-valid
+    // test value; validation happens in the prompt layer before we get here.
+    const pasted = Buffer.from(new Uint8Array(32).fill(7)).toString("base64");
+    expect(pasted).toMatch(BROKER_SECRET_PATTERN);
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.join(" "));
+
+    try {
+      initProject(projectDir, bundleDir, deps, {
+        brokerSecretAction: { action: "enter", value: pasted },
+      });
+    } finally {
+      console.log = origLog;
+    }
+
+    const localParsed = JSON.parse(
+      readFileSync(
+        join(projectDir, ".ninthwave/config.local.json"),
+        "utf-8",
+      ),
+    );
+    expect(localParsed.broker_secret).toBe(pasted);
+
+    // We never echo a user-entered secret back to stdout (avoids
+    // surprising shoulder-surfing leaks during replay).
+    const output = logs.join("\n");
+    expect(output).not.toContain(pasted);
+  });
+
+  it("skip path does not create config.local.json", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    initProject(projectDir, bundleDir, deps, {
+      brokerSecretAction: { action: "skip" },
+    });
+
+    const localPath = join(projectDir, ".ninthwave/config.local.json");
+    expect(existsSync(localPath)).toBe(false);
+
+    // Committed config still has project_id but no broker_secret.
+    const configJson = parseConfigJson(
+      readFileSync(join(projectDir, ".ninthwave/config.json"), "utf-8"),
+    );
+    expect(configJson).not.toHaveProperty("broker_secret");
+    expect(configJson.project_id).toMatch(UUID_V4_PATTERN);
+  });
+
+  it("defaults to generate when no action is supplied", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    // No brokerSecretAction in opts -- should behave like the old silent
+    // auto-generation path, keeping existing callers/tests working.
+    initProject(projectDir, bundleDir, deps);
+
+    const localParsed = JSON.parse(
+      readFileSync(
+        join(projectDir, ".ninthwave/config.local.json"),
+        "utf-8",
+      ),
+    );
+    expect(localParsed.broker_secret).toMatch(BROKER_SECRET_PATTERN);
+  });
+
+  it("existing secret short-circuits the action (never rotates)", () => {
+    const projectDir = setupTempRepo();
+    const bundleDir = createFakeBundle(projectDir + "-bundle-parent");
+
+    const deps: InitDeps = {
+      commandExists: (() => false) as CommandChecker,
+      getEnv: () => undefined,
+    };
+
+    // Seed a pre-existing secret. Even when the caller asks us to "skip",
+    // we must not delete it; and when asked to "generate", we must not
+    // overwrite it.
+    mkdirSync(join(projectDir, ".ninthwave"), { recursive: true });
+    const seeded = Buffer.from(new Uint8Array(32).fill(1)).toString("base64");
+    writeFileSync(
+      join(projectDir, ".ninthwave/config.local.json"),
+      JSON.stringify({ broker_secret: seeded }, null, 2) + "\n",
+    );
+
+    initProject(projectDir, bundleDir, deps, {
+      brokerSecretAction: { action: "generate" },
+    });
+
+    const localParsed = JSON.parse(
+      readFileSync(
+        join(projectDir, ".ninthwave/config.local.json"),
+        "utf-8",
+      ),
+    );
+    expect(localParsed.broker_secret).toBe(seeded);
+  });
+});
+
 // --- Merged setup functionality (migrated from setup.test.ts) ---
 
 /**
