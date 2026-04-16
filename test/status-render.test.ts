@@ -5089,8 +5089,7 @@ describe("formatItemDetail for each item state", () => {
 describe("collaborationLabel", () => {
   it("returns human-readable labels for all modes", () => {
     expect(collaborationLabel("local")).toBe("Local");
-    expect(collaborationLabel("shared")).toBe("Share");
-    expect(collaborationLabel("joined")).toBe("Join");
+    expect(collaborationLabel("connected")).toBe("Connected");
   });
 });
 
@@ -5144,27 +5143,26 @@ describe("renderControlsOverlay", () => {
     const row = stripAnsi(lines.find((line) => line.includes("Collaboration")) ?? "");
     expect(row).toContain("Collaboration");
     expect(row).toContain("[Local]");
-    expect(row).toContain("Share");
-    expect(row).toContain("Join");
+    expect(row).toContain("Connected");
   });
 
-  it("explains share and join flows when no live session is active", () => {
+  it("explains the connect flow when no live session is active", () => {
     const lines = renderControlsOverlay(100, 40, baseOpts);
     const text = stripAnsi(lines.join("\n"));
-    expect(text).toContain("Share and Join both auto-connect");
+    expect(text).toContain("Connect auto-joins");
   });
 
   it("shows inline busy and error collaboration feedback", () => {
     const busyLines = renderControlsOverlay(100, 40, {
       ...baseOpts,
-      collaborationIntent: "share",
+      collaborationIntent: "connect",
       collaborationBusy: true,
     });
-    expect(stripAnsi(busyLines.join("\n"))).toContain("Status:  Starting shared session...");
+    expect(stripAnsi(busyLines.join("\n"))).toContain("Status:  Connecting to shared session...");
 
     const errorLines = renderControlsOverlay(100, 40, {
       ...baseOpts,
-      collaborationIntent: "join",
+      collaborationIntent: "connect",
       collaborationError: "Broker unreachable",
     });
     expect(stripAnsi(errorLines.join("\n"))).toContain("Error:   Broker unreachable");
@@ -5214,13 +5212,13 @@ describe("renderControlsOverlay", () => {
   it("renders pending runtime control values until the engine confirms them", () => {
     const lines = renderControlsOverlay(100, 40, {
       ...baseOpts,
-      pendingCollaborationMode: "shared",
+      pendingCollaborationMode: "connected",
       pendingReviewMode: "on",
       pendingMergeStrategy: "auto",
       pendingSessionLimit: 4,
     });
     const text = stripAnsi(lines.join("\n"));
-    expect(text).toContain("[Share pending]");
+    expect(text).toContain("[Connected pending]");
     expect(text).toContain("[On pending]");
     expect(text).toContain("[› Auto pending]");
     expect(text).toContain("[4 pending]");
@@ -5246,7 +5244,7 @@ describe("renderControlsOverlay", () => {
     const termWidth = 44;
     const lines = renderControlsOverlay(termWidth, 30, {
       ...baseOpts,
-      collaborationMode: "shared",
+      collaborationMode: "connected",
     });
     for (const line of lines) {
       expect(stripAnsiForWidth(line).length).toBeLessThanOrEqual(termWidth);
@@ -5256,7 +5254,7 @@ describe("renderControlsOverlay", () => {
   it("keeps row count and base controls visible when collaboration details grow", () => {
     const lines = renderControlsOverlay(80, 14, {
       ...baseOpts,
-      collaborationMode: "shared",
+      collaborationMode: "connected",
       collaborationError: "Broker unreachable",
     });
     const text = stripAnsi(lines.join("\n"));
@@ -5310,8 +5308,8 @@ describe("formatModeIndicator", () => {
   });
 
   it("shows collaboration mode alone", () => {
-    const result = formatModeIndicator({ collaborationMode: "shared" });
-    expect(stripAnsi(result)).toContain("shared");
+    const result = formatModeIndicator({ collaborationMode: "connected" });
+    expect(stripAnsi(result)).toContain("connected");
   });
 
   it("shows review mode alone", () => {
@@ -5350,11 +5348,11 @@ describe("buildStatusLayout mode indicator in header", () => {
   it("includes collaboration and review mode in header when provided", () => {
     const items = [makeStatusItem({ state: "implementing" })];
     const layout = buildStatusLayout(items, 80, 5, false, {
-      collaborationMode: "shared",
+      collaborationMode: "connected",
       reviewMode: "on",
     });
     const headerText = layout.headerLines.map(stripAnsi).join("\n");
-    expect(headerText).toContain("shared");
+    expect(headerText).toContain("connected");
     expect(headerText).toContain("reviews: on");
   });
 
@@ -5367,7 +5365,7 @@ describe("buildStatusLayout mode indicator in header", () => {
   });
 
   it("includes mode indicator for all collaboration modes", () => {
-    for (const mode of ["local", "shared", "joined"] as CollaborationMode[]) {
+    for (const mode of ["local", "connected"] as CollaborationMode[]) {
       const items = [makeStatusItem({ state: "implementing" })];
       const layout = buildStatusLayout(items, 80, 5, false, {
         collaborationMode: mode,
@@ -5540,7 +5538,7 @@ describe("layout with narrow terminals", () => {
       makeStatusItem({ id: "A-2", state: "queued" }),
     ];
     const layout = buildStatusLayout(items, 80, 3, false, {
-      collaborationMode: "shared",
+      collaborationMode: "connected",
       reviewMode: "on",
     });
     // Render at very small terminal height

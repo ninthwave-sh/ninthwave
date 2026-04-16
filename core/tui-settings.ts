@@ -5,9 +5,9 @@ import type { MergeStrategy } from "./orchestrator.ts";
 export type StartupReviewMode = "off" | "on";
 export type ReviewMode = "off" | "on";
 
-export type StartupCollaborationMode = "local" | "share" | "join";
+export type StartupCollaborationMode = "local" | "connect";
 export type CollaborationIntent = StartupCollaborationMode;
-export type CollaborationMode = "local" | "shared" | "joined";
+export type CollaborationMode = "local" | "connected";
 
 export type PersistedMergeStrategy = Extract<MergeStrategy, "auto" | "manual">;
 export type PersistedReviewMode = StartupReviewMode;
@@ -49,29 +49,14 @@ export const COLLABORATION_MODE_OPTIONS: readonly ChoiceSettingOption<PersistedC
     persistable: true,
   },
   {
-    persistedValue: "share",
-    runtimeValue: "shared",
-    startupLabel: "share",
-    startupDescription: "Share this session for collaboration",
-    runtimeLabel: "Share",
+    persistedValue: "connect",
+    runtimeValue: "connected",
+    startupLabel: "connect",
+    startupDescription: "Auto-connect to this project's shared broker session",
+    runtimeLabel: "Connected",
     runtimeKey: "2",
     persistable: true,
   },
-  {
-    persistedValue: "join",
-    runtimeValue: "joined",
-    startupLabel: "join",
-    startupDescription: "Join an existing session",
-    runtimeLabel: "Join",
-    runtimeKey: "3",
-    persistable: true,
-  },
-] as const;
-
-export const STARTUP_COLLABORATION_MODE_OPTIONS = [
-  COLLABORATION_MODE_OPTIONS[0]!,
-  COLLABORATION_MODE_OPTIONS[1]!,
-  COLLABORATION_MODE_OPTIONS[2]!,
 ] as const;
 
 export const REVIEW_MODE_OPTIONS: readonly ChoiceSettingOption<PersistedReviewMode, ReviewMode>[] = [
@@ -213,6 +198,18 @@ export function isPersistedCollaborationMode(value: unknown): value is Persisted
   return hasPersistedValue(COLLABORATION_MODE_OPTIONS, value);
 }
 
+/**
+ * Normalize a persisted collaboration mode value, accepting legacy "share"/"join"
+ * (which were distinct UI options before H-BAJ-3 collapsed them into a single
+ * auto-connect flow) and mapping them to "connect". Returns undefined for
+ * unrecognized values.
+ */
+export function normalizePersistedCollaborationMode(value: unknown): PersistedCollaborationMode | undefined {
+  if (value === "local" || value === "connect") return value;
+  if (value === "share" || value === "join") return "connect";
+  return undefined;
+}
+
 export function persistedReviewModeToRuntime(mode: PersistedReviewMode): ReviewMode {
   return getByPersistedValue(REVIEW_MODE_OPTIONS, mode).runtimeValue;
 }
@@ -238,10 +235,8 @@ export function collaborationIntentToMode(intent: CollaborationIntent): Collabor
   switch (intent) {
     case "local":
       return "local";
-    case "share":
-      return "shared";
-    case "join":
-      return "joined";
+    case "connect":
+      return "connected";
   }
 }
 
@@ -249,10 +244,8 @@ export function collaborationIntentFromMode(mode: CollaborationMode): Collaborat
   switch (mode) {
     case "local":
       return "local";
-    case "shared":
-      return "share";
-    case "joined":
-      return "join";
+    case "connected":
+      return "connect";
   }
 }
 
@@ -285,9 +278,8 @@ export function resolveTuiSettingsDefaults(userConfig: {
       : TUI_SETTINGS_DEFAULTS.mergeStrategy,
     reviewMode: normalizePersistedReviewMode(userConfig.review_mode)
       ?? TUI_SETTINGS_DEFAULTS.reviewMode,
-    collaborationMode: isPersistedCollaborationMode(userConfig.collaboration_mode)
-      ? userConfig.collaboration_mode
-      : TUI_SETTINGS_DEFAULTS.collaborationMode,
+    collaborationMode: normalizePersistedCollaborationMode(userConfig.collaboration_mode)
+      ?? TUI_SETTINGS_DEFAULTS.collaborationMode,
   };
 }
 

@@ -991,13 +991,13 @@ describe("cmdNoArgs", () => {
       parseWorkItems: () => [fakeWorkItem("H-1", "Task")],
       isDaemonRunning: () => null,
       loadConfig: () => ({ review_external: true, ai_tools: ["claude"] } as any),
-      loadUserConfig: () => ({ ai_tools: ["opencode", "copilot"], merge_strategy: "auto", collaboration_mode: "share" }),
+      loadUserConfig: () => ({ ai_tools: ["opencode", "copilot"], merge_strategy: "auto", collaboration_mode: "connect" }),
       runInteractiveFlow: async (_todos, _wip, deps) => {
         expect(deps?.defaultReviewMode).toBe("on");
         expect(deps?.defaultSettings).toEqual({
           mergeStrategy: "auto",
           reviewMode: "on",
-          collaborationMode: "share",
+          collaborationMode: "connect",
         });
         expect(deps?.savedToolIds).toEqual(["opencode", "copilot"]);
         return null;
@@ -1040,11 +1040,11 @@ describe("cmdNoArgs", () => {
     expect(savedUpdates[0]).toMatchObject({
       merge_strategy: "auto",
       session_limit: 4,
-      collaboration_mode: "share",
       ai_tools: ["opencode", "copilot"],
     });
     // reviewMode "on" matches the new startup default, so it is not re-saved.
     expect(savedUpdates[0]).not.toHaveProperty("review_mode");
+    expect(savedUpdates[0]).not.toHaveProperty("collaboration_mode");
     expect(watchArgs).toContain("--connect");
     expect(watchArgs).toContain("--tool");
     expect(watchArgs).toContain("opencode,copilot");
@@ -1084,8 +1084,8 @@ describe("cmdNoArgs", () => {
     // so it is persisted.
     expect(savedUpdates[0]).toMatchObject({
       session_limit: 4,
-      collaboration_mode: "share",
     });
+    expect(savedUpdates[0]).not.toHaveProperty("collaboration_mode");
     expect(savedUpdates[0]).not.toHaveProperty("backend_mode");
     expect(savedUpdates[0]).not.toHaveProperty("merge_strategy");
     expect(savedUpdates[0]).not.toHaveProperty("review_mode");

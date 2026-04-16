@@ -14,7 +14,6 @@ import { hasAgentFiles, isAiToolId } from "./ai-tools.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 import type { StartupItemsRefreshResult } from "./startup-items.ts";
 import {
-  STARTUP_COLLABORATION_MODE_OPTIONS,
   STARTUP_MERGE_STRATEGY_OPTIONS,
   STARTUP_REVIEW_MODE_OPTIONS,
   type StartupReviewMode as ReviewMode,
@@ -28,8 +27,7 @@ import {
 } from "./tui-widgets.ts";
 
 // Connection action: "connect" opts into broker auto-join.
-// The "join" variant has been retired; broker membership is now derived
-// from `project_id` + `broker_secret` in the project config.
+// Broker membership derives from `project_id` + `broker_secret` in the project config.
 export type ConnectionAction = { type: "connect" };
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -58,8 +56,6 @@ export interface InteractiveDeps {
   useLegacyPrompts?: boolean;
   /** Injectable WidgetIO for testing the TUI path. */
   widgetIO?: WidgetIO;
-  /** When false, skip the connection step (e.g. run-more re-entry where session is already active). */
-  showConnectionStep?: boolean;
   /** Default review mode from project config. */
   defaultReviewMode?: "on" | "off";
   /** Resolved startup settings defaults for future TUI settings widgets. */
@@ -367,43 +363,6 @@ export async function promptReviewMode(
   }
 }
 
-// ── Connection mode prompt ──────────────────────────────────────────
-
-/**
- * Prompt the user to choose connection mode.
- * Returns a ConnectionAction or null for local mode.
- */
-export async function promptConnectionMode(
-  prompt: PromptFn,
-  defaultMode: "local" | "share" | "join" = "local",
-): Promise<ConnectionAction | null> {
-  console.log();
-  console.log(`${BOLD}Collaborate via ninthwave.sh:${RESET}`);
-  console.log();
-  for (let i = 0; i < STARTUP_COLLABORATION_MODE_OPTIONS.length; i++) {
-    const option = STARTUP_COLLABORATION_MODE_OPTIONS[i]!;
-    const defaultTag = option.persistedValue === defaultMode ? ` ${GREEN}(default)${RESET}` : "";
-    console.log(`  ${BOLD}${i + 1}${RESET}. ${CYAN}${option.startupLabel}${RESET}    ${DIM}-- ${option.startupDescription}${RESET}${defaultTag}`);
-  }
-  console.log();
-
-  while (true) {
-    const answer = (await prompt(`${BOLD}Choose [1-3]: ${RESET}`)).trim();
-    const selection = answer === "" ? defaultMode : answer.toLowerCase();
-
-    if (selection === "1" || selection === "local") {
-      return null;
-    }
-
-    if (selection === "2" || selection === "share" || selection === "connect" || selection === "3" || selection === "join") {
-      // Share and join both resolve to the same auto-joined broker session.
-      return { type: "connect" };
-    }
-
-    console.log(`  ${YELLOW}Enter 1-3 or a mode name (share/join/local).${RESET}`);
-  }
-}
-
 // ── Summary + confirmation ───────────────────────────────────────────
 
 export async function confirmSummary(
@@ -428,11 +387,6 @@ export async function confirmSummary(
   console.log(`  ${BOLD}Merge strategy:${RESET}  ${result.mergeStrategy}`);
   console.log(`  ${BOLD}Session limit:${RESET}   ${result.sessionLimit}`);
   console.log(`  ${BOLD}AI reviews:${RESET}      ${result.reviewMode}`);
-  if (result.connectionAction) {
-    console.log(`  ${BOLD}Collaboration:${RESET}   Share session (auto-join)`);
-  } else {
-    console.log(`  ${BOLD}Collaboration:${RESET}   Local by default`);
-  }
   if (result.aiTools && result.aiTools.length > 0) {
     const toolLabel = result.aiTools.join(", ") + (result.aiTools.length > 1 ? " (round-robin)" : "");
     console.log(`  ${BOLD}AI tool:${RESET}         ${toolLabel}`);
@@ -462,9 +416,6 @@ export function buildStartupPersistenceUpdates(
   const defaults = options.defaults;
 
   const mergeStrategy = result.mergeStrategy === "auto" ? "auto" as const : "manual" as const;
-  const collaborationMode: "local" | "share" = result.connectionAction
-    ? "share"
-    : "local";
 
   // Only persist settings the user actively changed from their startup defaults.
   // This prevents a wrong default from being cemented by pressing Enter.
@@ -481,9 +432,6 @@ export function buildStartupPersistenceUpdates(
     result.sessionLimit !== options.defaultSessionLimit
   ) {
     updates.session_limit = result.sessionLimit;
-  }
-  if (collaborationMode !== defaults?.collaborationMode) {
-    updates.collaboration_mode = collaborationMode;
   }
   if (aiTools) {
     updates.ai_tools = aiTools;
@@ -518,7 +466,6 @@ export async function runTuiSelectionFlow(
     const result = await runSelectionScreen(io, todos, defaultSessionLimit, {
       defaultReviewMode: deps.defaultReviewMode,
       defaultSettings: deps.defaultSettings,
-      showConnectionStep: deps.showConnectionStep,
       installedTools: deps.installedTools,
       refreshItems: deps.refreshStartupItems,
       savedToolIds: deps.savedToolIds,
@@ -572,8 +519,7 @@ export async function runInteractiveFlow(
 
 /**
  * Legacy readline-based interactive flow (local-first).
- * Merge strategy, session limit, and review mode stay on local-first defaults.
- * Collaboration only changes when the user explicitly chooses share/join.
+ * Merge strategy, session limit, and review mode use local-first defaults.
  */
 async function runReadlineFlow(
   todos: WorkItem[],
@@ -590,7 +536,6 @@ async function runReadlineFlow(
   const mergeStrategy: MergeStrategy = "manual";
   const sessionLimit = defaultSessionLimit;
   const reviewMode: ReviewMode = "on";
-  let connectionAction: ConnectionAction | null = null;
 
   // Step 2: AI tool (conditional, multi-select)
   let aiTool: string | undefined;
@@ -654,13 +599,6 @@ async function runReadlineFlow(
     aiTools = [aiTool];
   }
 
-  if (deps.showConnectionStep !== false) {
-    connectionAction = await promptConnectionMode(
-      prompt,
-      deps.defaultSettings?.collaborationMode ?? "local",
-    );
-  }
-
   // Step 3: Summary + confirmation
   const result: InteractiveResult = {
     itemIds: itemResult.ids,
@@ -669,7 +607,7 @@ async function runReadlineFlow(
     allSelected: itemResult.allSelected,
     futureOnly: false,
     reviewMode,
-    connectionAction,
+    connectionAction: null,
     aiTool,
     aiTools,
   };

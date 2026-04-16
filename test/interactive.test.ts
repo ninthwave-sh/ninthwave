@@ -8,7 +8,6 @@ import {
   promptMergeStrategy,
   promptSessionLimit,
   promptReviewMode,
-  promptConnectionMode,
   confirmSummary,
   buildStartupPersistenceUpdates,
   runInteractiveFlow,
@@ -342,26 +341,7 @@ describe("confirmSummary", () => {
     expect(confirmed).toBe(false);
   });
 
-  it("displays reviewMode and connection info", async () => {
-    const connResult: InteractiveResult = {
-      ...result,
-      reviewMode: "on",
-      connectionAction: { type: "connect" },
-    };
-    const logs: string[] = [];
-    const origLog = console.log;
-    console.log = (...args: unknown[]) => logs.push(args.join(" "));
-    try {
-      await confirmSummary(connResult, items, makePrompt([""]));
-    } finally {
-      console.log = origLog;
-    }
-    const output = logs.join("\n");
-    expect(output).toContain("on");
-    expect(output).toContain("Share session (auto-join)");
-  });
-
-  it("displays Local when connectionAction is null", async () => {
+  it("displays reviewMode in the summary", async () => {
     const logs: string[] = [];
     const origLog = console.log;
     console.log = (...args: unknown[]) => logs.push(args.join(" "));
@@ -371,7 +351,7 @@ describe("confirmSummary", () => {
       console.log = origLog;
     }
     const output = logs.join("\n");
-    expect(output).toContain("Local by default");
+    expect(output).toContain("on");
   });
 });
 
@@ -385,15 +365,15 @@ describe("buildStartupPersistenceUpdates", () => {
     connectionAction: null,
   };
 
-  it("maps local collaboration mode from a null connection action", () => {
+  it("persists merge_strategy and review_mode when defaults are not supplied", () => {
     const updates = buildStartupPersistenceUpdates(baseResult);
     expect(updates).toMatchObject({
       merge_strategy: "manual",
       review_mode: "on",
-      collaboration_mode: "local",
     });
     // Session limit is only persisted when it differs from the resolved default.
     expect(updates).not.toHaveProperty("session_limit");
+    expect(updates).not.toHaveProperty("collaboration_mode");
   });
 
   it("only persists session_limit when it differs from the resolved default", () => {
@@ -423,23 +403,6 @@ describe("buildStartupPersistenceUpdates", () => {
     expect(updates).not.toHaveProperty("review_mode");
     expect(updates).not.toHaveProperty("collaboration_mode");
     expect(updates).not.toHaveProperty("session_limit");
-  });
-
-  it("maps share collaboration mode from a connect action", () => {
-    expect(buildStartupPersistenceUpdates({
-      ...baseResult,
-      connectionAction: { type: "connect" },
-    })).toMatchObject({ collaboration_mode: "share" });
-  });
-
-  it("maps connect action to share collaboration mode without leaking extra fields", () => {
-    const updates = buildStartupPersistenceUpdates({
-      ...baseResult,
-      connectionAction: { type: "connect" },
-    });
-
-    expect(updates).toMatchObject({ collaboration_mode: "share" });
-    expect(updates).not.toHaveProperty("code");
   });
 
   it("persists multiple selected tools via ai_tools", () => {
@@ -479,7 +442,7 @@ describe("runInteractiveFlow", () => {
   ];
 
   it("returns complete result with startup defaults for valid legacy flow", async () => {
-    const prompt = makePrompt(["1 2", "", ""]);
+    const prompt = makePrompt(["1 2", ""]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
 
     expect(result).not.toBeNull();
@@ -498,7 +461,7 @@ describe("runInteractiveFlow", () => {
   });
 
   it("returns null when user cancels at confirmation", async () => {
-    const prompt = makePrompt(["1", "", "n"]);
+    const prompt = makePrompt(["1", "n"]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
     expect(result).toBeNull();
   });
@@ -510,7 +473,7 @@ describe("runInteractiveFlow", () => {
   });
 
   it("uses precomputed session limit as default without prompting", async () => {
-    const prompt = makePrompt(["all", "", ""]);
+    const prompt = makePrompt(["all", ""]);
     const result = await runInteractiveFlow(items, 7, { prompt, useLegacyPrompts: true });
 
     expect(result).not.toBeNull();
@@ -518,7 +481,7 @@ describe("runInteractiveFlow", () => {
   });
 
   it("always returns manual merge strategy", async () => {
-    const prompt = makePrompt(["1", "", ""]);
+    const prompt = makePrompt(["1", ""]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
 
     expect(result).not.toBeNull();
@@ -526,7 +489,7 @@ describe("runInteractiveFlow", () => {
   });
 
   it("readline fallback always returns reviews on regardless of defaultReviewMode", async () => {
-    const prompt = makePrompt(["1", "", ""]);
+    const prompt = makePrompt(["1", ""]);
     const result = await runInteractiveFlow(items, 3, {
       prompt,
       useLegacyPrompts: true,
@@ -537,30 +500,12 @@ describe("runInteractiveFlow", () => {
     expect(result!.reviewMode).toBe("on");
   });
 
-  it("defaults to local connectionAction on empty collaboration choice", async () => {
-    const prompt = makePrompt(["1", "", ""]);
+  it("readline fallback always returns local (null) connectionAction", async () => {
+    const prompt = makePrompt(["1", ""]);
     const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
 
     expect(result).not.toBeNull();
     expect(result!.connectionAction).toBeNull();
-  });
-
-  it("returns connect when share is explicitly chosen in legacy flow", async () => {
-    const prompt = makePrompt(["1", "share", ""]);
-    const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
-
-    expect(result).not.toBeNull();
-    expect(result!.connectionAction).toEqual({ type: "connect" });
-  });
-
-  it("returns connect when join is explicitly chosen in legacy flow", async () => {
-    // "Join" and "share" both auto-connect to the project's deterministic
-    // broker session derived from project_id + broker_secret.
-    const prompt = makePrompt(["1", "join", ""]);
-    const result = await runInteractiveFlow(items, 3, { prompt, useLegacyPrompts: true });
-
-    expect(result).not.toBeNull();
-    expect(result!.connectionAction).toEqual({ type: "connect" });
   });
 
   it("returns an explicit future-only result in the empty-queue TUI path", async () => {
@@ -586,7 +531,7 @@ describe("runInteractiveFlow", () => {
       defaultSettings: {
         mergeStrategy: "auto",
         reviewMode: "on",
-        collaborationMode: "share",
+        collaborationMode: "local",
       },
     });
     sendKeyBatches(["\r"], ["\r"]);
@@ -595,7 +540,7 @@ describe("runInteractiveFlow", () => {
     expect(result).not.toBeNull();
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.reviewMode).toBe("on");
-    expect(result!.connectionAction).toEqual({ type: "connect" });
+    expect(result!.connectionAction).toBeNull();
     expect(result!.sessionLimit).toBe(6);
   });
 
@@ -733,51 +678,3 @@ describe("promptReviewMode", () => {
   });
 });
 
-// ── promptConnectionMode ───────────────────────────────────────────
-
-describe("promptConnectionMode", () => {
-  it("returns local for default (empty input)", async () => {
-    const result = await promptConnectionMode(makePrompt([""]));
-    expect(result).toBeNull();
-  });
-
-  it("returns local on input 1", async () => {
-    const result = await promptConnectionMode(makePrompt(["1"]));
-    expect(result).toBeNull();
-  });
-
-  it('returns connect on input "2"', async () => {
-    const result = await promptConnectionMode(makePrompt(["2"]));
-    expect(result).toEqual({ type: "connect" });
-  });
-
-  it('returns connect on text "share"', async () => {
-    const result = await promptConnectionMode(makePrompt(["share"]));
-    expect(result).toEqual({ type: "connect" });
-  });
-
-  it("uses share as the default when configured", async () => {
-    const result = await promptConnectionMode(makePrompt([""]), "share");
-    expect(result).toEqual({ type: "connect" });
-  });
-
-  it("uses join as the default when configured (auto-connect, no code prompt)", async () => {
-    const result = await promptConnectionMode(makePrompt([""]), "join");
-    expect(result).toEqual({ type: "connect" });
-  });
-
-  it('returns null (local) on input "local"', async () => {
-    const result = await promptConnectionMode(makePrompt(["local"]));
-    expect(result).toBeNull();
-  });
-
-  it('returns connect on input "3" (join shares the same auto-connect path as share)', async () => {
-    const result = await promptConnectionMode(makePrompt(["3"]));
-    expect(result).toEqual({ type: "connect" });
-  });
-
-  it("retries on invalid choice then accepts valid", async () => {
-    const result = await promptConnectionMode(makePrompt(["99", "local"]));
-    expect(result).toBeNull();
-  });
-});

@@ -36,7 +36,7 @@ export interface WatchEngineSnapshotEvent {
   };
 }
 
-export type RuntimeCollaborationAction = "share" | "join" | "local";
+export type RuntimeCollaborationAction = "connect" | "local";
 
 export interface RuntimeCollaborationActionRequest {
   action: RuntimeCollaborationAction;
@@ -67,8 +67,7 @@ export interface RuntimeControlHandlers {
   onReviewChange?: (mode: ReviewMode) => void;
   onCollaborationChange?: (mode: CollaborationMode) => void;
   onCollaborationLocal?: () => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
-  onCollaborationShare?: () => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
-  onCollaborationJoinSubmit?: (code: string) => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
+  onCollaborationConnect?: () => void | RuntimeCollaborationActionResult | Promise<void | RuntimeCollaborationActionResult>;
   onExtendTimeout?: (itemId: string) => boolean;
   onShutdown?: () => void;
 }
@@ -129,19 +128,12 @@ export function createRuntimeControlHandlers(
       deps.sendControl({ type: "set-collaboration-mode", mode: "local", source: "keyboard" });
       return { mode: "local" };
     },
-    onCollaborationShare: () => {
+    onCollaborationConnect: () => {
       if (deps.requestCollaborationAction) {
-        return deps.requestCollaborationAction({ action: "share", source: "keyboard" });
+        return deps.requestCollaborationAction({ action: "connect", source: "keyboard" });
       }
-      deps.sendControl({ type: "set-collaboration-mode", mode: "shared", source: "keyboard" });
-      return { mode: "shared" };
-    },
-    onCollaborationJoinSubmit: (code) => {
-      if (deps.requestCollaborationAction) {
-        return deps.requestCollaborationAction({ action: "join", code, source: "keyboard" });
-      }
-      deps.sendControl({ type: "set-collaboration-mode", mode: "joined", code, source: "keyboard" });
-      return { mode: "joined" };
+      deps.sendControl({ type: "set-collaboration-mode", mode: "connected", source: "keyboard" });
+      return { mode: "connected" };
     },
     onExtendTimeout: (itemId) => {
       deps.sendControl({ type: "extend-timeout", itemId, source: "keyboard" });

@@ -23,7 +23,7 @@ export const DEFAULT_CREW_URL = "wss://ninthwave.sh";
 // ── Types ───────────────────────────────────────────────────────────
 
 export interface CollaborationSessionState {
-  mode: "local" | "shared" | "joined";
+  mode: "local" | "connected";
   /** First 8 chars of the derived crew id; debug-only display hint. */
   crewIdPrefix?: string;
   crewUrl?: string;
@@ -169,17 +169,14 @@ export async function applyRuntimeCollaborationAction(
     return { mode: "local" };
   }
 
-  if (request.action === "share"
-    && state.mode === "shared"
-    && state.crewBroker?.isConnected()) {
-    deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_share_reused" });
-    return { mode: "shared" };
+  if (state.mode === "connected" && state.crewBroker?.isConnected()) {
+    deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_connect_reused" });
+    return { mode: "connected" };
   }
 
   const nextCrewUrl = resolveCrewSocketUrl(state.crewUrl);
-  // Auto-join: both "share" and "join" now resolve to the same crew id
-  // derived from the project config. The distinction between the two paths
-  // survives in the UI (share vs join) but the protocol is identical.
+  // Auto-join: the crew id derives from project_id + broker_secret, so any
+  // daemon configured with the same project config lands in the same session.
   let nextCrewId: string;
   let effectiveConfig: ProjectConfig;
   try {
@@ -189,18 +186,15 @@ export async function applyRuntimeCollaborationAction(
     deps.log({
       ts: new Date().toISOString(),
       level: "warn",
-      event: request.action === "share" ? "runtime_share_failed" : "runtime_join_failed",
+      event: "runtime_connect_failed",
       error: error instanceof Error ? error.message : String(error),
     });
     return { error: error instanceof Error ? error.message : String(error) };
   }
 
   const nextCrewIdPrefix = nextCrewId.slice(0, 8);
-  if (request.action === "share") {
-    deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_share_created" });
-  }
+  deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_connect_started" });
 
-  const nextMode = request.action === "share" ? "shared" : "joined";
   const nextBroker = createCrewBrokerInstance(
     deps.projectRoot,
     nextCrewUrl,
@@ -221,7 +215,7 @@ export async function applyRuntimeCollaborationAction(
     deps.log({
       ts: new Date().toISOString(),
       level: "warn",
-      event: request.action === "share" ? "runtime_share_connect_failed" : "runtime_join_failed",
+      event: "runtime_connect_failed",
       error: error instanceof Error ? error.message : String(error),
     });
     return { error: error instanceof Error ? error.message : String(error) };
@@ -231,9 +225,9 @@ export async function applyRuntimeCollaborationAction(
   state.crewBroker = nextBroker;
   state.crewIdPrefix = nextCrewIdPrefix;
   state.crewUrl = nextCrewUrl;
-  state.connectMode = request.action === "share";
-  state.mode = nextMode;
-  deps.onBrokerChanged?.(nextBroker, { mode: nextMode, crewIdPrefix: nextCrewIdPrefix });
-  deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_crew_connected", mode: nextMode });
-  return { mode: nextMode };
+  state.connectMode = true;
+  state.mode = "connected";
+  deps.onBrokerChanged?.(nextBroker, { mode: "connected", crewIdPrefix: nextCrewIdPrefix });
+  deps.log({ ts: new Date().toISOString(), level: "info", event: "runtime_crew_connected", mode: "connected" });
+  return { mode: "connected" };
 }

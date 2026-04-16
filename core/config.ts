@@ -4,9 +4,9 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
 import { homedir } from "os";
 import {
-  isPersistedCollaborationMode,
   isPersistedMergeStrategy,
   isPersistedReviewMode,
+  normalizePersistedCollaborationMode,
   normalizePersistedReviewMode,
   type PersistedCollaborationMode,
   type PersistedMergeStrategy,
@@ -497,8 +497,9 @@ export function loadUserConfig(homeOverride?: string): UserConfig {
     if (normalizedReviewMode) {
       result.review_mode = normalizedReviewMode;
     }
-    if (isPersistedCollaborationMode(parsed.collaboration_mode)) {
-      result.collaboration_mode = parsed.collaboration_mode;
+    const normalizedCollaborationMode = normalizePersistedCollaborationMode(parsed.collaboration_mode);
+    if (normalizedCollaborationMode) {
+      result.collaboration_mode = normalizedCollaborationMode;
     }
     if (typeof parsed.update_checks_enabled === "boolean") {
       result.update_checks_enabled = parsed.update_checks_enabled;
@@ -560,8 +561,9 @@ export function saveUserConfig(
       continue;
     }
     if (key === "collaboration_mode") {
-      if (isPersistedCollaborationMode(value)) {
-        merged[key] = value;
+      const normalized = normalizePersistedCollaborationMode(value);
+      if (normalized) {
+        merged[key] = normalized;
       }
       continue;
     }

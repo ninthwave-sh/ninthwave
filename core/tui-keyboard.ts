@@ -200,8 +200,8 @@ export interface TuiState {
   onCollaborationChange?: (mode: CollaborationMode) => void;
   /** Called when the user selects Local in the controls overlay. */
   onCollaborationLocal?: CollaborationActionHandler;
-  /** Called when the user selects Share in the controls overlay. */
-  onCollaborationShare?: CollaborationActionHandler;
+  /** Called when the user selects Connected in the controls overlay. */
+  onCollaborationConnect?: CollaborationActionHandler;
   /** Called after any key that should trigger an immediate re-render. */
   onUpdate?: () => void;
   /** Extend timeout for the currently selected item in grace period. */
@@ -521,8 +521,7 @@ export function setupKeyboardShortcuts(
       return;
     }
 
-    // Both share and join auto-connect to the project's derived broker session.
-    const handler = tuiState.onCollaborationShare ?? (() => tuiState.onCollaborationChange?.(fallbackMode));
+    const handler = tuiState.onCollaborationConnect ?? (() => tuiState.onCollaborationChange?.(fallbackMode));
     runCollaborationAction(fallbackMode, handler);
   };
 

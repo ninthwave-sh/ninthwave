@@ -475,7 +475,7 @@ export interface InteractiveEngineTransportRuntime {
   mergeStrategy: MergeStrategy;
   sessionLimit: number;
   reviewMode: "off" | "on";
-  collaborationMode: "local" | "shared" | "joined";
+  collaborationMode: "local" | "connected";
 }
 
 export const INTERACTIVE_STARTUP_OVERLAYS = {
@@ -1082,7 +1082,7 @@ interface InteractiveOperatorParentSessionOptions {
   watchMode: boolean;
   futureOnlyStartup: boolean;
   reviewMode: "off" | "on";
-  collaborationMode: "local" | "shared" | "joined";
+  collaborationMode: "local" | "connected";
   bypassEnabled: boolean;
   fixForward: boolean;
   reviewAutoFix?: "off" | "direct" | "pr";
@@ -1252,7 +1252,7 @@ async function runInteractiveOperatorParentSession(
         reviewMode: operatorLastSnapshot.runtime.reviewMode,
         watchMode: opts.watchMode,
         futureOnlyStartup: opts.futureOnlyStartup,
-        connectMode: operatorLastSnapshot.runtime.collaborationMode === "shared",
+        connectMode: operatorLastSnapshot.runtime.collaborationMode === "connected",
         crewUrl: opts.crewUrl,
         bypassEnabled: opts.bypassEnabled,
       });
@@ -1275,9 +1275,7 @@ async function runInteractiveOperatorParentSession(
 
       if (operatorResult.completionAction === "run-more") {
         const freshItems = opts.loadRunnableWorkItems("run-more");
-        const interactiveResult = await runInteractiveFlow(freshItems, operatorLastSnapshot.runtime.sessionLimit, {
-          showConnectionStep: false,
-        });
+        const interactiveResult = await runInteractiveFlow(freshItems, operatorLastSnapshot.runtime.sessionLimit);
         if (!interactiveResult) {
           break;
         }
@@ -1580,7 +1578,7 @@ export async function cmdOrchestrate(
     ? "off" as const
     : "on" as const;
   const startupCollaborationMode = connectMode
-    ? "shared" as const
+    ? "connected" as const
     : persistedCollaborationModeToRuntime(interactiveStartupConfig.defaults.collaborationMode);
 
   if (tuiMode && !isInteractiveEngineChild) {
@@ -1862,7 +1860,7 @@ export async function cmdOrchestrate(
   // from project_id + broker_secret in the project config.
 
   const collaborationState: CollaborationSessionState = {
-    mode: connectMode ? "shared" : "local",
+    mode: connectMode ? "connected" : "local",
     ...(crewUrl ? { crewUrl } : {}),
     connectMode,
   };
@@ -1878,13 +1876,13 @@ export async function cmdOrchestrate(
 
   if (connectMode) {
     emitInteractiveEngineStartupOverlay(isInteractiveEngineChild, INTERACTIVE_STARTUP_OVERLAYS.connectingSession);
-    info("Sharing session via ninthwave.sh...");
-    const result = await applyRuntimeCollaborationAction(collaborationState, { action: "share", source: "startup" }, {
+    info("Connecting to shared session via ninthwave.sh...");
+    const result = await applyRuntimeCollaborationAction(collaborationState, { action: "connect", source: "startup" }, {
       projectRoot,
       log,
     });
     if (result.error) {
-      die(result.error ?? "Failed to create session");
+      die(result.error ?? "Failed to connect to session");
     }
     syncCollaborationLocals();
     info(`Session active on ninthwave.sh as "${hostname()}"`);
@@ -1987,27 +1985,22 @@ export async function cmdOrchestrate(
     }
 
     if (
-      request.action === "share"
-      && collaborationState.mode === "shared"
+      collaborationState.mode === "connected"
       && collaborationState.crewBroker?.isConnected()
     ) {
       return result;
     }
 
     const mirrorResult = await applyLocalRuntimeCollaborationAction({
-      action: "join",
+      action: "connect",
       source: request.source,
     });
     if (mirrorResult.error) return mirrorResult;
 
-    if (request.action === "share") {
-      collaborationState.mode = "shared";
-      collaborationState.connectMode = true;
-      syncCollaborationLocals();
-      return { mode: "shared" };
-    }
-
-    return { mode: "joined" };
+    collaborationState.mode = "connected";
+    collaborationState.connectMode = true;
+    syncCollaborationLocals();
+    return { mode: "connected" };
   };
   const runtimeControlHandlers = createRuntimeControlHandlers({
     sendControl: (command) => {
@@ -2419,9 +2412,7 @@ export async function cmdOrchestrate(
         if (operatorResult.completionAction === "run-more") {
           cleanupKeyboard();
           const freshItems = loadDiscoveryWorkItems("run-more");
-          const interactiveResult = await runInteractiveFlow(freshItems, operatorLastSnapshot.runtime.sessionLimit, {
-            showConnectionStep: false,
-          });
+          const interactiveResult = await runInteractiveFlow(freshItems, operatorLastSnapshot.runtime.sessionLimit);
           if (!interactiveResult) {
             cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);
             break;
@@ -2502,11 +2493,8 @@ export async function cmdOrchestrate(
 
         // Re-parse work items and re-enter interactive selection
         // Widgets render in the same alt-screen buffer -- no screen switch needed
-        // showConnectionStep: false because session is already established
         const freshItems = loadDiscoveryWorkItems("run-more");
-        const interactiveResult = await runInteractiveFlow(freshItems, sessionLimit, {
-          showConnectionStep: false,
-        });
+        const interactiveResult = await runInteractiveFlow(freshItems, sessionLimit);
         if (!interactiveResult) {
           // User cancelled selection -- restore keyboard and exit loop
           cleanupKeyboard = setupKeyboardShortcuts(abortController, log, process.stdin, tuiState);

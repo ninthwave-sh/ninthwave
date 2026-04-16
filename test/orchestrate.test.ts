@@ -6057,7 +6057,7 @@ describe("resolveInteractiveStartupConfig", () => {
         ai_tools: ["opencode", "copilot"],
         merge_strategy: "auto",
         review_mode: "on",
-        collaboration_mode: "share",
+        collaboration_mode: "connect",
       },
       projectRoot,
     );
@@ -6065,7 +6065,7 @@ describe("resolveInteractiveStartupConfig", () => {
     expect(result.defaults).toEqual({
       mergeStrategy: "auto",
       reviewMode: "on",
-      collaborationMode: "share",
+      collaborationMode: "connect",
     });
     expect(result.savedToolIds).toEqual(["opencode", "copilot"]);
   });
@@ -6103,7 +6103,7 @@ describe("resolveInteractiveStartupConfig", () => {
         ai_tools: ["opencode", "copilot"],
         merge_strategy: "auto",
         review_mode: "on",
-        collaboration_mode: "share",
+        collaboration_mode: "connect",
       },
       projectRoot,
     );
@@ -6127,7 +6127,7 @@ describe("resolveInteractiveStartupConfig", () => {
     );
 
     // mergeStrategy "auto" and reviewMode "on" both match the persisted defaults,
-    // so neither is re-saved. collaboration_mode stays "share".
+    // so neither is re-saved. collaboration_mode stays "connect".
     // sessionLimit 6 differs from defaultSessionLimit 1, so it is persisted.
     expect(persisted).toEqual({
       session_limit: 6,
@@ -6159,7 +6159,7 @@ describe("createRuntimeControlHandlers", () => {
       },
     });
 
-    const shareResult = handlers.onCollaborationShare?.();
+    const connectResult = handlers.onCollaborationConnect?.();
     const localResult = handlers.onCollaborationLocal?.();
     const extendResult = handlers.onExtendTimeout?.("ENG-1");
     handlers.onPauseChange?.(true);
@@ -6170,7 +6170,7 @@ describe("createRuntimeControlHandlers", () => {
 
     expect(currentSessionLimit).toBe(4);
     expect(sentControls).toEqual([
-      { type: "set-collaboration-mode", mode: "shared", source: "keyboard" },
+      { type: "set-collaboration-mode", mode: "connected", source: "keyboard" },
       { type: "set-collaboration-mode", mode: "local", source: "keyboard" },
       { type: "extend-timeout", itemId: "ENG-1", source: "keyboard" },
       { type: "set-paused", paused: true, source: "keyboard" },
@@ -6184,7 +6184,7 @@ describe("createRuntimeControlHandlers", () => {
       { review_mode: "on" },
       { session_limit: 4 },
     ]);
-    expect(shareResult).toEqual({ mode: "shared" });
+    expect(connectResult).toEqual({ mode: "connected" });
     expect(localResult).toEqual({ mode: "local" });
     expect(extendResult).toBe(true);
   });
@@ -6227,7 +6227,7 @@ describe("applyRuntimeCollaborationAction", () => {
     };
   }
 
-  it("shares once, connects, and reuses the active session on repeat share", async () => {
+  it("connects once and reuses the active session on repeat connect", async () => {
     const state = {
       mode: "local" as const,
       connectMode: false,
@@ -6236,7 +6236,7 @@ describe("applyRuntimeCollaborationAction", () => {
     const createBroker = vi.fn(() => broker);
     const onBrokerChanged = vi.fn();
 
-    const firstResult = await applyRuntimeCollaborationAction(state, { action: "share" }, {
+    const firstResult = await applyRuntimeCollaborationAction(state, { action: "connect" }, {
       projectRoot: "/project",
       crewName: "operator",
       log: () => {},
@@ -6244,7 +6244,7 @@ describe("applyRuntimeCollaborationAction", () => {
       createBroker,
       onBrokerChanged,
     });
-    const secondResult = await applyRuntimeCollaborationAction(state, { action: "share" }, {
+    const secondResult = await applyRuntimeCollaborationAction(state, { action: "connect" }, {
       projectRoot: "/project",
       crewName: "operator",
       log: () => {},
@@ -6253,14 +6253,14 @@ describe("applyRuntimeCollaborationAction", () => {
       onBrokerChanged,
     });
 
-    expect(firstResult).toEqual({ mode: "shared" });
-    expect(secondResult).toEqual({ mode: "shared" });
-    // Share is a no-network operation -- the crew id is derived locally.
+    expect(firstResult).toEqual({ mode: "connected" });
+    expect(secondResult).toEqual({ mode: "connected" });
+    // Connect is a no-network operation -- the crew id is derived locally.
     expect(createBroker).toHaveBeenCalledTimes(1);
     expect(broker.connect).toHaveBeenCalledTimes(1);
     expect(onBrokerChanged).toHaveBeenCalledTimes(1);
     expect(state).toMatchObject({
-      mode: "shared",
+      mode: "connected",
       crewIdPrefix: EXPECTED_CREW_ID.slice(0, 8),
       connectMode: true,
       crewBroker: broker,
@@ -6278,7 +6278,7 @@ describe("applyRuntimeCollaborationAction", () => {
       }),
     });
 
-    const result = await applyRuntimeCollaborationAction(state, { action: "share" }, {
+    const result = await applyRuntimeCollaborationAction(state, { action: "connect" }, {
       projectRoot: "/project",
       log: () => {},
       config: TEST_CONFIG,
@@ -6293,7 +6293,7 @@ describe("applyRuntimeCollaborationAction", () => {
     });
   });
 
-  it("uses an existing crew URL for share session broker connection", async () => {
+  it("uses an existing crew URL for the connected session broker", async () => {
     const state = {
       mode: "local" as const,
       connectMode: false,
@@ -6302,7 +6302,7 @@ describe("applyRuntimeCollaborationAction", () => {
     const broker = makeBroker();
     const createBroker = vi.fn(() => broker);
 
-    const result = await applyRuntimeCollaborationAction(state, { action: "share" }, {
+    const result = await applyRuntimeCollaborationAction(state, { action: "connect" }, {
       projectRoot: "/project",
       log: () => {},
       config: TEST_CONFIG,
@@ -6310,7 +6310,7 @@ describe("applyRuntimeCollaborationAction", () => {
       onBrokerChanged: vi.fn(),
     });
 
-    expect(result).toEqual({ mode: "shared" });
+    expect(result).toEqual({ mode: "connected" });
     // createBroker now receives (projectRoot, crewUrl, crewId, brokerSecret, deps, name)
     expect(createBroker).toHaveBeenCalledWith(
       "/project",
@@ -6323,56 +6323,21 @@ describe("applyRuntimeCollaborationAction", () => {
     expect(state.crewUrl).toBe("wss://config.example/socket");
   });
 
-  it("keeps the current session intact on a rejected join", async () => {
+  it("connects to the derived crew id and disconnects cleanly back to local mode", async () => {
     const currentBroker = makeBroker();
-    const rejectedBroker = makeBroker({
-      connect: vi.fn(async () => {
-        throw new Error("Broker unreachable");
-      }),
-    });
-    const state = {
-      mode: "shared" as const,
-      crewIdPrefix: "abcdefgh",
-      crewUrl: "wss://ninthwave.sh",
-      crewBroker: currentBroker,
-      connectMode: true,
-    };
-
-    const result = await applyRuntimeCollaborationAction(state, { action: "join" }, {
-      projectRoot: "/project",
-      log: () => {},
-      config: TEST_CONFIG,
-      createBroker: vi.fn(() => rejectedBroker),
-      onBrokerChanged: vi.fn(),
-    });
-
-    expect(result).toEqual({ error: "Broker unreachable" });
-    expect(currentBroker.disconnect).not.toHaveBeenCalled();
-    expect(state).toMatchObject({
-      mode: "shared",
-      crewIdPrefix: "abcdefgh",
-      crewBroker: currentBroker,
-      connectMode: true,
-    });
-  });
-
-  it("joins the derived crew id, then disconnects cleanly back to local mode", async () => {
-    const currentBroker = makeBroker();
-    const joinedBroker = makeBroker();
+    const nextBroker = makeBroker();
     const onBrokerChanged = vi.fn();
     const state = {
-      mode: "shared" as const,
-      crewIdPrefix: "sharepre",
-      crewUrl: "wss://ninthwave.sh",
-      crewBroker: currentBroker,
-      connectMode: true,
+      mode: "local" as const,
+      crewBroker: undefined,
+      connectMode: false,
     };
 
-    const joinResult = await applyRuntimeCollaborationAction(state, { action: "join" }, {
+    const connectResult = await applyRuntimeCollaborationAction(state, { action: "connect" }, {
       projectRoot: "/project",
       log: () => {},
       config: TEST_CONFIG,
-      createBroker: vi.fn(() => joinedBroker),
+      createBroker: vi.fn(() => nextBroker),
       onBrokerChanged,
     });
     const localResult = await applyRuntimeCollaborationAction(state, { action: "local" }, {
@@ -6383,11 +6348,11 @@ describe("applyRuntimeCollaborationAction", () => {
       onBrokerChanged,
     });
 
-    expect(joinResult).toEqual({ mode: "joined" });
+    expect(connectResult).toEqual({ mode: "connected" });
     expect(localResult).toEqual({ mode: "local" });
-    expect(joinedBroker.connect).toHaveBeenCalledTimes(1);
-    expect(currentBroker.disconnect).toHaveBeenCalledTimes(1);
-    expect(joinedBroker.disconnect).toHaveBeenCalledTimes(1);
+    expect(nextBroker.connect).toHaveBeenCalledTimes(1);
+    expect(nextBroker.disconnect).toHaveBeenCalledTimes(1);
+    expect(currentBroker.disconnect).not.toHaveBeenCalled();
     expect(state).toMatchObject({
       mode: "local",
       crewIdPrefix: undefined,
@@ -6744,7 +6709,7 @@ describe("watch engine runner", () => {
     const runPromise = runner.run();
     runner.sendControl({ type: "set-paused", paused: true, source: "test-0" });
     runner.sendControl({ type: "set-review-mode", mode: "off", source: "test-1" });
-    runner.sendControl({ type: "set-collaboration-mode", mode: "shared", source: "test-2" });
+    runner.sendControl({ type: "set-collaboration-mode", mode: "connected", source: "test-2" });
     runner.sendControl({ type: "set-session-limit", limit: 4, source: "test-3" });
     runner.sendControl({ type: "set-merge-strategy", strategy: "auto", source: "test-4" });
     continueLoop();
@@ -6769,7 +6734,7 @@ describe("watch engine runner", () => {
       mergeStrategy: "auto",
       sessionLimit: 4,
       reviewMode: "off",
-      collaborationMode: "shared",
+      collaborationMode: "connected",
     });
     expect(orch.config.mergeStrategy).toBe("auto");
     expect(orch.config.skipReview).toBe(true);
@@ -6929,7 +6894,7 @@ describe("shared engine wrappers", () => {
       const runPromise = runner.run();
       runner.sendControl({ type: "set-paused", paused: true, source: "test-pause" });
       runner.sendControl({ type: "set-review-mode", mode: "off", source: "test-review" });
-      runner.sendControl({ type: "set-collaboration-mode", mode: "shared", source: "test-collab" });
+      runner.sendControl({ type: "set-collaboration-mode", mode: "connected", source: "test-collab" });
       runner.sendControl({ type: "set-session-limit", limit: 4, source: "test-session-limit" });
       runner.sendControl({ type: "set-merge-strategy", strategy: "auto", source: "test-merge" });
       continueLoop();
@@ -6970,7 +6935,7 @@ describe("shared engine wrappers", () => {
         mergeStrategy: "auto",
         sessionLimit: 4,
         reviewMode: "off",
-        collaborationMode: "shared",
+        collaborationMode: "connected",
       },
     ]);
     expect(detached.snapshotTimings[0]).toEqual({
@@ -7975,7 +7940,7 @@ describe("interactive watch operator session", () => {
           mergeStrategy: "auto",
           sessionLimit: 4,
           reviewMode: "on",
-          collaborationMode: "shared",
+          collaborationMode: "connected",
         },
       },
     });
@@ -7988,7 +7953,7 @@ describe("interactive watch operator session", () => {
       mergeStrategy: "auto",
       sessionLimit: 4,
       reviewMode: "on",
-      collaborationMode: "shared",
+      collaborationMode: "connected",
     });
     expect(tuiState.engineDisconnected).toBe(false);
     expect(result.completionAction).toBeUndefined();
@@ -8065,7 +8030,7 @@ describe("interactive watch operator session", () => {
     const { stream: stdout } = makeOperatorStdout();
     const tuiState = makeOperatorTuiState();
     const child = makeOperatorChild();
-    let requestCollaboration!: (request: { action: "share" | "join" | "local"; code?: string }) => Promise<{ mode?: "local" | "shared" | "joined"; code?: string; error?: string }>;
+    let requestCollaboration!: (request: { action: "connect" | "local"; code?: string }) => Promise<{ mode?: "local" | "connected"; code?: string; error?: string }>;
 
     const sessionPromise = runInteractiveWatchOperatorSession({
       projectRoot: "/project",
@@ -8087,17 +8052,17 @@ describe("interactive watch operator session", () => {
 
     await Promise.resolve();
 
-    const resultPromise = requestCollaboration({ action: "share" });
+    const resultPromise = requestCollaboration({ action: "connect" });
     const requestMessage = JSON.parse((child.stdin.write as any).mock.calls.at(-1)[0]);
-    expect(requestMessage).toMatchObject({ type: "runtime-collaboration", action: "share" });
+    expect(requestMessage).toMatchObject({ type: "runtime-collaboration", action: "connect" });
 
     child.emitLine({
       type: "control-result",
       requestId: requestMessage.requestId,
-      result: { mode: "shared", code: "ABCD-1234" },
+      result: { mode: "connected", code: "ABCD-1234" },
     });
 
-    await expect(resultPromise).resolves.toEqual({ mode: "shared", code: "ABCD-1234" });
+    await expect(resultPromise).resolves.toEqual({ mode: "connected", code: "ABCD-1234" });
 
     (stdin as any)._emit("data", "q");
     (stdin as any)._emit("data", "q");

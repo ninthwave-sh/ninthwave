@@ -154,8 +154,8 @@ describe("runtime control type cycle arrays", () => {
     expect(REVIEW_MODE_CYCLE).toEqual(["off", "on"]);
   });
 
-  it("COLLABORATION_MODE_CYCLE contains all three modes", () => {
-    expect(COLLABORATION_MODE_CYCLE).toEqual(["local", "shared", "joined"]);
+  it("COLLABORATION_MODE_CYCLE contains both modes", () => {
+    expect(COLLABORATION_MODE_CYCLE).toEqual(["local", "connected"]);
   });
 });
 
@@ -771,7 +771,7 @@ describe("setupKeyboardShortcuts", () => {
       pendingSessionLimit: 4,
       pendingStrategy: "auto",
       pendingReviewMode: "on",
-      pendingCollaborationMode: "shared",
+      pendingCollaborationMode: "connected",
       onShutdown,
     });
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
@@ -908,11 +908,11 @@ describe("controls overlay row navigation", () => {
     cleanup();
   });
 
-  it("Left/Right select collaboration intents and Enter invokes Share/Local callbacks", () => {
+  it("Left/Right select collaboration intents and Enter invokes Connect/Local callbacks", () => {
     const ac = new AbortController();
     const stdin = makeFakeStdin();
     const onCollaborationLocal = vi.fn(() => ({ mode: "local" as const }));
-    const onCollaborationShare = vi.fn(() => ({ mode: "shared" as const }));
+    const onCollaborationConnect = vi.fn(() => ({ mode: "connected" as const }));
     const onUpdate = vi.fn();
     const state = makeTuiState({
       showControls: true,
@@ -920,23 +920,23 @@ describe("controls overlay row navigation", () => {
       collaborationMode: "local",
       collaborationIntent: "local",
       onCollaborationLocal,
-      onCollaborationShare,
+      onCollaborationConnect,
       onUpdate,
     });
     state.viewOptions.collaborationMode = "local";
     const cleanup = setupKeyboardShortcuts(ac, () => {}, stdin as any, state);
 
     stdin.emit("data", "\x1b[C");
-    expect(state.collaborationIntent).toBe("share");
-    expect(state.viewOptions.collaborationIntent).toBe("share");
+    expect(state.collaborationIntent).toBe("connect");
+    expect(state.viewOptions.collaborationIntent).toBe("connect");
     expect(state.collaborationMode).toBe("local");
-    expect(onCollaborationShare).not.toHaveBeenCalled();
+    expect(onCollaborationConnect).not.toHaveBeenCalled();
 
     stdin.emit("data", "\r");
     expect(state.collaborationMode).toBe("local");
-    expect(state.pendingCollaborationMode).toBe("shared");
+    expect(state.pendingCollaborationMode).toBe("connected");
     expect(state.viewOptions.collaborationMode).toBe("local");
-    expect(onCollaborationShare).toHaveBeenCalledTimes(1);
+    expect(onCollaborationConnect).toHaveBeenCalledTimes(1);
     expect(onUpdate).toHaveBeenCalled();
 
     applyRuntimeSnapshotToTuiState(state, {
@@ -944,18 +944,18 @@ describe("controls overlay row navigation", () => {
       mergeStrategy: state.mergeStrategy,
       sessionLimit: state.sessionLimit ?? 3,
       reviewMode: state.reviewMode,
-      collaborationMode: "shared",
+      collaborationMode: "connected",
     });
-    expect(state.collaborationMode).toBe("shared");
+    expect(state.collaborationMode).toBe("connected");
     expect(state.pendingCollaborationMode).toBeUndefined();
 
     stdin.emit("data", "\x1b[D");
     expect(state.collaborationIntent).toBe("local");
-    expect(state.collaborationMode).toBe("shared");
+    expect(state.collaborationMode).toBe("connected");
     expect(onCollaborationLocal).not.toHaveBeenCalled();
 
     stdin.emit("data", "\r");
-    expect(state.collaborationMode).toBe("shared");
+    expect(state.collaborationMode).toBe("connected");
     expect(state.pendingCollaborationMode).toBe("local");
     expect(state.collaborationIntent).toBe("local");
     expect(onCollaborationLocal).toHaveBeenCalledTimes(1);

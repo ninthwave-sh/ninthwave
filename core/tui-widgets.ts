@@ -12,8 +12,6 @@ import type { ConnectionAction } from "./interactive.ts";
 import { hasAgentFiles, isAiToolId } from "./ai-tools.ts";
 import type { AiToolProfile } from "./ai-tools.ts";
 import {
-  COLLABORATION_MODE_OPTIONS,
-  REVIEW_MODE_OPTIONS,
   TUI_SETTINGS_DEFAULTS,
   type TuiSettingsDefaults,
 } from "./tui-settings.ts";
@@ -35,13 +33,6 @@ function moveTo(row: number, col: number): string {
 const CLEAR_LINE = "\x1B[K";
 
 const ANSI_SEQUENCE_PATTERN = /^(?:\x1b\]8;[^\x07]*\x07|\x1b\[[0-9;]*[A-Za-z])/;
-
-function renderStartupChip(label: string | number, selected: boolean): string {
-  const text = String(label);
-  return selected
-    ? `${GREEN}${BOLD}[${text}]${RESET}`
-    : `${DIM} ${text} ${RESET}`;
-}
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -252,14 +243,6 @@ export interface NumberPickerResult {
 
 export interface TextInputResult {
   value: string;
-  cancelled: boolean;
-}
-
-interface StartupSettingsScreenResult {
-  mergeStrategy: Extract<MergeStrategy, "auto" | "manual">;
-  reviewMode: "on" | "off";
-  collaborationMode: "local" | "share" | "join";
-  sessionLimit: number;
   cancelled: boolean;
 }
 
@@ -905,188 +888,6 @@ export function runConfirm(
     render();
   });
 }
-
-// ── Startup Settings Screen ──────────────────────────────────────────
-
-/**
- * Startup settings screen shown after item/tool selection.
- * Keeps the item summary visible while arrow keys adjust startup settings.
- */
-export function runStartupSettingsScreen(
-  io: WidgetIO,
-  opts: {
-    title?: string;
-    summaryLines?: string[];
-    defaultSessionLimit: number;
-    defaultSettings?: TuiSettingsDefaults;
-  },
-): Promise<StartupSettingsScreenResult> {
-  return new Promise((resolve) => {
-    const defaults = opts.defaultSettings ?? TUI_SETTINGS_DEFAULTS;
-    const settingRowCount = 2;
-    let activeRow = 0;
-    let scrollOffset = 0;
-    const mergeStrategy = defaults.mergeStrategy;
-    let reviewIndex = Math.max(
-      0,
-      REVIEW_MODE_OPTIONS.findIndex((option) => option.persistedValue === defaults.reviewMode),
-    );
-    let collaborationIndex = Math.max(
-      0,
-      COLLABORATION_MODE_OPTIONS.findIndex((option) => option.persistedValue === defaults.collaborationMode),
-    );
-    const sessionLimit = Math.max(1, Math.min(10, opts.defaultSessionLimit));
-    const currentReviewOption = () => REVIEW_MODE_OPTIONS[reviewIndex]!;
-    const currentCollaborationOption = () => COLLABORATION_MODE_OPTIONS[collaborationIndex]!;
-
-    const renderChoiceRow = (
-      title: string,
-      values: string[],
-      active: boolean,
-    ): string => {
-      const pointer = active ? `${CYAN}>${RESET}` : " ";
-      return `${pointer} ${BOLD}${title.padEnd(16)}${RESET} ${values.join(" ")}`;
-    };
-
-    const reviewValues = () => REVIEW_MODE_OPTIONS.map((option, index) =>
-      renderStartupChip(option.startupLabel, index === reviewIndex),
-    );
-    const collaborationValues = () => COLLABORATION_MODE_OPTIONS.map((option, index) =>
-      renderStartupChip(option.startupLabel, index === collaborationIndex),
-    );
-    const activeDescription = () => {
-      switch (activeRow) {
-        case 0:
-          return currentReviewOption().startupDescription;
-        case 1:
-          return currentCollaborationOption().startupDescription;
-        default:
-          return "";
-      }
-    };
-
-    const render = () => {
-      const rows = io.getRows();
-      const cols = io.getCols();
-      const headerGap = rows >= 8 ? 1 : 0;
-      const footerGap = rows >= 6 ? 1 : 0;
-      const headerLines = 1 + headerGap;
-      const footerLines = 1 + footerGap;
-      const viewportHeight = Math.max(1, rows - headerLines - footerLines);
-      const bodyLines: string[] = [];
-      const rowStartLines: number[] = [];
-      const rowEndLines: number[] = [];
-      const summaryLines = (opts.summaryLines ?? []).flatMap((line) =>
-        wrapLineToWidth(`  ${stripAnsiForWidth(line)}`, cols),
-      );
-      const descriptionLines = wrapLineToWidth(activeDescription(), cols).map((line) => `${DIM}${line}${RESET}`);
-
-      if (summaryLines.length > 0) {
-        bodyLines.push(...summaryLines, "");
-      }
-
-      const choiceRows = [
-        renderChoiceRow("Reviews", reviewValues(), activeRow === 0),
-        renderChoiceRow("Collaboration", collaborationValues(), activeRow === 1),
-      ];
-
-      for (let i = 0; i < choiceRows.length; i++) {
-        rowStartLines[i] = bodyLines.length;
-        bodyLines.push(truncateCheckboxLine(choiceRows[i]!, cols));
-        rowEndLines[i] = bodyLines.length;
-      }
-
-      bodyLines.push("", ...descriptionLines);
-      scrollOffset = clampActiveLineScrollOffset(
-        scrollOffset,
-        rowStartLines[activeRow] ?? 0,
-        rowEndLines[activeRow] ?? (rowStartLines[activeRow] ?? 0) + 1,
-        viewportHeight,
-        bodyLines.length,
-      );
-
-      const visibleBodyLines = bodyLines.slice(scrollOffset, scrollOffset + viewportHeight);
-      let out = CURSOR_HOME;
-
-      out += `${truncateCheckboxLine(`${BOLD}${opts.title ?? "Ninthwave · Start orchestration"}${RESET}`, cols)}${CLEAR_LINE}\n`;
-      if (headerGap) {
-        out += `${CLEAR_LINE}\n`;
-      }
-
-      for (const line of visibleBodyLines) {
-        out += `${truncateCheckboxLine(line, cols)}${CLEAR_LINE}\n`;
-      }
-      for (let i = visibleBodyLines.length; i < viewportHeight; i++) {
-        out += `${CLEAR_LINE}\n`;
-      }
-
-      out += `${truncateCheckboxLine(`${DIM}↑/↓ change row  ←/→ change value  Enter confirm  Esc cancel${RESET}`, cols)}${CLEAR_LINE}`;
-      if (footerGap) {
-        out += `\n${CLEAR_LINE}`;
-      }
-
-      io.write(out);
-    };
-
-    const handler = (key: string) => {
-      switch (key) {
-        case "\x1B[A":
-        case "k":
-          activeRow = (activeRow - 1 + settingRowCount) % settingRowCount;
-          break;
-        case "\x1B[B":
-        case "j":
-          activeRow = (activeRow + 1) % settingRowCount;
-          break;
-        case "\x1B[D":
-        case "h":
-          if (activeRow === 0) {
-            reviewIndex = (reviewIndex - 1 + REVIEW_MODE_OPTIONS.length) % REVIEW_MODE_OPTIONS.length;
-          } else if (activeRow === 1) {
-            collaborationIndex = (collaborationIndex - 1 + COLLABORATION_MODE_OPTIONS.length) % COLLABORATION_MODE_OPTIONS.length;
-          }
-          break;
-        case "\x1B[C":
-        case "l":
-          if (activeRow === 0) {
-            reviewIndex = (reviewIndex + 1) % REVIEW_MODE_OPTIONS.length;
-          } else if (activeRow === 1) {
-            collaborationIndex = (collaborationIndex + 1) % COLLABORATION_MODE_OPTIONS.length;
-          }
-          break;
-        case "\r":
-          io.offKey(handler);
-          resolve({
-            mergeStrategy,
-            reviewMode: currentReviewOption().persistedValue,
-            collaborationMode: currentCollaborationOption().persistedValue,
-            sessionLimit,
-            cancelled: false,
-          });
-          return;
-        case "\x1B":
-        case "\x03":
-          io.offKey(handler);
-          resolve({
-            mergeStrategy,
-            reviewMode: currentReviewOption().persistedValue,
-            collaborationMode: currentCollaborationOption().persistedValue,
-            sessionLimit,
-            cancelled: true,
-          });
-          return;
-        default:
-          return;
-      }
-
-      render();
-    };
-
-    io.onKey(handler);
-    render();
-  });
-}
-
 // ── Selection Screen (composite) ────────────────────────────────────
 
 /**
@@ -1197,11 +998,7 @@ function summarizeStartupRefreshNotice(
  * Run the full TUI selection screen flow:
  * 1. Checkbox list for item selection
  * 2. Checkbox list for AI tool selection (conditional: 2+ tools)
- * 3. Startup settings screen (startup) or summary confirmation (re-entry)
- *
- * Initial startup keeps the item summary visible while arrow keys adjust merge,
- * reviews, collaboration, and session limit. Re-entry flows (`showConnectionStep: false`)
- * keep the simpler confirmation-only step so they do not change live session policy.
+ * 3. Summary confirmation
  *
  * Renders entirely in the alt-screen buffer using raw keypresses.
  * Returns null if cancelled at any step.
@@ -1217,7 +1014,6 @@ export async function runSelectionScreen(
   opts: {
     defaultReviewMode?: "on" | "off";
     defaultSettings?: TuiSettingsDefaults;
-    showConnectionStep?: boolean;
     /** Installed AI tools for the tool selection step. Empty/single = skip screen. */
     installedTools?: AiToolProfile[];
     /** One-shot async refresh for pruning merged startup items after first paint. */
@@ -1286,10 +1082,9 @@ export async function runSelectionScreen(
     (id) => id !== ALL_SENTINEL_ID && id !== FUTURE_TASKS_ID,
   );
 
-  const defaultMergeStrategy: Extract<MergeStrategy, "auto" | "manual"> = resolvedDefaults.mergeStrategy;
-  const initialSessionLimit = Math.max(1, Math.min(10, defaultSessionLimit));
-  const defaultReviewMode: "on" | "off" = resolvedDefaults.reviewMode;
-  const defaultConnectionAction: ConnectionAction | null = null;
+  const mergeStrategy: Extract<MergeStrategy, "auto" | "manual"> = resolvedDefaults.mergeStrategy;
+  const sessionLimit = Math.max(1, Math.min(10, defaultSessionLimit));
+  const reviewMode: "on" | "off" = resolvedDefaults.reviewMode;
 
   // Step 2: AI coding tool (conditional -- only when 2+ tools detected)
   let aiTool: string | undefined;
@@ -1361,48 +1156,16 @@ export async function runSelectionScreen(
     ...(toolLabel ? ["", `${BOLD}AI tool:${RESET}         ${toolLabel}`] : []),
   ];
 
-  let mergeStrategy: MergeStrategy = defaultMergeStrategy;
-  let sessionLimit = initialSessionLimit;
-  let reviewMode: "on" | "off" = defaultReviewMode;
-  let connectionAction: ConnectionAction | null = defaultConnectionAction;
+  io.write(CLEAR_SCREEN);
+  const confirmed = await runConfirm(io, {
+    title: "Ninthwave \u00b7 Start orchestration?",
+    lines: summaryLines,
+  });
 
-  if (opts.showConnectionStep === false) {
-    io.write(CLEAR_SCREEN);
-    const confirmed = await runConfirm(io, {
-      title: "Ninthwave \u00b7 Start orchestration?",
-      lines: summaryLines,
-    });
+  io.write(SHOW_CURSOR);
 
-    io.write(SHOW_CURSOR);
-
-    if (!confirmed) {
-      return null;
-    }
-  } else {
-    io.write(CLEAR_SCREEN);
-    const settingsResult = await runStartupSettingsScreen(io, {
-      title: "Ninthwave \u00b7 Start orchestration",
-      summaryLines,
-      defaultSessionLimit: initialSessionLimit,
-      defaultSettings: resolvedDefaults,
-    });
-
-    io.write(SHOW_CURSOR);
-
-    if (settingsResult.cancelled) {
-      return null;
-    }
-
-    mergeStrategy = settingsResult.mergeStrategy;
-    sessionLimit = settingsResult.sessionLimit;
-    reviewMode = settingsResult.reviewMode;
-    if (settingsResult.collaborationMode === "share" || settingsResult.collaborationMode === "join") {
-      // Share and join both resolve to the same auto-joined broker session
-      // derived from project_id + broker_secret in the project config.
-      connectionAction = { type: "connect" };
-    } else {
-      connectionAction = null;
-    }
+  if (!confirmed) {
+    return null;
   }
 
   return {
@@ -1412,7 +1175,7 @@ export async function runSelectionScreen(
     mergeStrategy,
     sessionLimit,
     reviewMode,
-    connectionAction,
+    connectionAction: null,
     cancelled: false,
     aiTool,
     aiTools,

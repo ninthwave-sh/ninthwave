@@ -7,7 +7,6 @@ import {
   runSingleSelect,
   runNumberPicker,
   runConfirm,
-  runStartupSettingsScreen,
   runTextInput,
   runSelectionScreen,
   sortWorkItems,
@@ -124,24 +123,6 @@ function getLastRenderedFrame(output: string): string {
 
 function getPlainFrameLines(output: string): string[] {
   return getLastRenderedFrame(output).split("\n").map((line) => stripAnsiForWidth(line));
-}
-
-function getPlainFrameLine(output: string, pattern: string): string {
-  const line = getPlainFrameLines(output).find((frameLine) => frameLine.includes(pattern));
-  if (!line) {
-    throw new Error(`No frame line matched pattern: ${pattern}`);
-  }
-  return line;
-}
-
-function getStartupChipStart(line: string, label: string): number {
-  for (const variant of [`[${label}]`, ` ${label} `]) {
-    const index = line.indexOf(variant);
-    if (index !== -1) {
-      return index;
-    }
-  }
-  throw new Error(`No chip found for label: ${label}`);
 }
 
 // ── CheckboxList widget ─────────────────────────────────────────────
@@ -1054,199 +1035,6 @@ describe("toCheckboxItems", () => {
   });
 });
 
-describe("runStartupSettingsScreen", () => {
-  it("changes rows with up/down and values with left/right", async () => {
-    const { io, sendKeys } = createMockIO();
-
-    const resultPromise = runStartupSettingsScreen(io, {
-      summaryLines: ["Items: A-1"],
-      defaultSessionLimit: 4,
-      defaultSettings: {
-        mergeStrategy: "manual",
-        reviewMode: "off",
-        collaborationMode: "local",
-      },
-    });
-
-    sendKeys([
-      "\x1B[C", // reviews off -> on
-      "\x1B[B", // collaboration
-      "\x1B[C", // local -> share
-      "\r",
-    ]);
-
-    const result = await resultPromise;
-    expect(result.cancelled).toBe(false);
-    expect(result.mergeStrategy).toBe("manual");
-    expect(result.reviewMode).toBe("on");
-    expect(result.collaborationMode).toBe("share");
-    expect(result.sessionLimit).toBe(4);
-  });
-
-  it("confirms defaults on Enter", async () => {
-    const { io, sendKeys } = createMockIO();
-
-    const resultPromise = runStartupSettingsScreen(io, {
-      summaryLines: ["Items: A-1"],
-      defaultSessionLimit: 4,
-    });
-
-    sendKeys(["\r"]);
-
-    const result = await resultPromise;
-    expect(result.cancelled).toBe(false);
-    expect(result.mergeStrategy).toBe("manual");
-    expect(result.reviewMode).toBe("on");
-    expect(result.collaborationMode).toBe("local");
-    expect(result.sessionLimit).toBe(4);
-  });
-
-  it("preserves auto merge strategy from persisted config on Enter", async () => {
-    const { io, sendKeys } = createMockIO();
-
-    const resultPromise = runStartupSettingsScreen(io, {
-      summaryLines: ["Items: A-1"],
-      defaultSessionLimit: 4,
-      defaultSettings: {
-        mergeStrategy: "auto",
-        reviewMode: "off",
-        collaborationMode: "local",
-      },
-    });
-
-    sendKeys(["\r"]);
-
-    const result = await resultPromise;
-    expect(result.cancelled).toBe(false);
-    expect(result.mergeStrategy).toBe("auto");
-  });
-
-  it("cancels on Escape and Ctrl+C", async () => {
-    const { io, sendKeys } = createMockIO();
-    const escapePromise = runStartupSettingsScreen(io, {
-      summaryLines: ["Items: A-1"],
-      defaultSessionLimit: 4,
-    });
-    sendKeys(["\x1B"]);
-    expect((await escapePromise).cancelled).toBe(true);
-
-    const second = createMockIO();
-    const ctrlCPromise = runStartupSettingsScreen(second.io, {
-      summaryLines: ["Items: A-1"],
-      defaultSessionLimit: 4,
-    });
-    second.sendKeys(["\x03"]);
-    expect((await ctrlCPromise).cancelled).toBe(true);
-  });
-
-  it("keeps title, footer, and the active row visible in a short terminal", async () => {
-    const { io, sendKey, getOutput } = createMockIO({ rows: 9, cols: 38 });
-
-    const resultPromise = runStartupSettingsScreen(io, {
-      summaryLines: [
-        "Items: A-1 A very long task title that should wrap across multiple viewport lines",
-        "AI tool: Claude Code round-robin with a second tool label that also wraps",
-      ],
-      defaultSessionLimit: 4,
-    });
-
-    const activeLabels = ["Reviews", "Collaboration"];
-
-    for (let i = 0; i < activeLabels.length; i++) {
-      const lines = getPlainFrameLines(getOutput());
-      expect(lines.length).toBeLessThanOrEqual(9);
-      expect(lines[0]).toContain("Start orchestration");
-      expect(lines.some((line) => line.includes("↑/↓ change row"))).toBe(true);
-      expect(lines.some((line) => line.includes(`> ${activeLabels[i]}`))).toBe(true);
-
-      if (i < activeLabels.length - 1) {
-        sendKey("\x1B[B");
-      }
-    }
-
-    sendKey("\r");
-
-    const result = await resultPromise;
-    expect(result.cancelled).toBe(false);
-    expect(result.mergeStrategy).toBe("manual");
-    expect(result.reviewMode).toBe("on");
-    expect(result.collaborationMode).toBe("local");
-    expect(result.sessionLimit).toBe(4);
-  });
-
-  it("wraps long summaries and descriptions within the terminal viewport", async () => {
-    const summary = createMockIO({ rows: 10, cols: 32 });
-
-    const summaryPromise = runStartupSettingsScreen(summary.io, {
-      summaryLines: [
-        "Items: A-1 A very long task title that should wrap neatly inside the viewport",
-      ],
-      defaultSessionLimit: 4,
-    });
-
-    const summaryLines = getPlainFrameLines(summary.getOutput());
-    expect(summaryLines.length).toBeLessThanOrEqual(10);
-    for (const line of summaryLines) {
-      expect(line.length).toBeLessThanOrEqual(32);
-    }
-    expect(summaryLines).toContain("  Items: A-1 A very long task");
-    expect(summaryLines).toContain("title that should wrap neatly");
-    expect(summaryLines).toContain("inside the viewport");
-
-    summary.sendKeys(["\r"]);
-
-    const summaryResult = await summaryPromise;
-    expect(summaryResult.cancelled).toBe(false);
-
-    const description = createMockIO({ rows: 12, cols: 32 });
-
-    const descriptionPromise = runStartupSettingsScreen(description.io, {
-      summaryLines: [],
-      defaultSessionLimit: 4,
-      defaultSettings: {
-        mergeStrategy: "manual",
-        reviewMode: "off",
-        collaborationMode: "local",
-      },
-    });
-
-    description.sendKeys(["\x1B[B"]);
-
-    const lines = getPlainFrameLines(description.getOutput());
-    expect(lines.length).toBeLessThanOrEqual(12);
-    for (const line of lines) {
-      expect(line.length).toBeLessThanOrEqual(32);
-    }
-    expect(lines.some((line) => line.includes("> Collaboration"))).toBe(true);
-
-    description.sendKeys(["\r"]);
-
-    const result = await descriptionPromise;
-    expect(result.cancelled).toBe(false);
-  });
-
-  it("shows only Reviews and Collaboration rows", async () => {
-    const { io, sendKeys, getOutput } = createMockIO();
-
-    const resultPromise = runStartupSettingsScreen(io, {
-      summaryLines: ["Items: A-1"],
-      defaultSessionLimit: 4,
-    });
-
-    const output = getOutput();
-    expect(output).toContain("Reviews");
-    expect(output).toContain("Collaboration");
-    expect(output).not.toContain("> Merge");
-    expect(output).not.toContain("> Session limit");
-
-    sendKeys(["\r"]);
-
-    const result = await resultPromise;
-    expect(result.cancelled).toBe(false);
-    expect(result.mergeStrategy).toBe("manual");
-    expect(result.sessionLimit).toBe(4);
-  });
-});
 
 // ── Selection screen (composite) ────────────────────────────────────
 
@@ -1264,36 +1052,6 @@ describe("runSelectionScreen", () => {
     expect(result!.futureOnly).toBe(true);
     expect(getOutput()).toContain("Future tasks");
     expect(getOutput()).toContain("No work items queued");
-  });
-
-  it("supports future-only startup with direct share selection", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-
-    const resultPromise = runSelectionScreen(io, [], 4);
-    sendKeyBatches(
-      ["\r"],
-      ["\x1B[B", "\x1B[C", "\r"],
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.futureOnly).toBe(true);
-    expect(result!.connectionAction).toEqual({ type: "connect" });
-  });
-
-  it("supports future-only startup with direct join selection (auto-connect, no code prompt)", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-
-    const resultPromise = runSelectionScreen(io, [], 4);
-    sendKeyBatches(
-      ["\r"],
-      ["\x1B[B", "\x1B[C", "\x1B[C", "\r"],
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.futureOnly).toBe(true);
-    expect(result!.connectionAction).toEqual({ type: "connect" });
   });
 
   it("completes full flow: select items → confirm with local-first defaults", async () => {
@@ -1724,7 +1482,7 @@ describe("runSelectionScreen -- startup defaults", () => {
       defaultSettings: {
         mergeStrategy: "auto",
         reviewMode: "on",
-        collaborationMode: "share",
+        collaborationMode: "local",
       },
     });
     sendKeyBatches(["\r"], ["\r"]);
@@ -1733,51 +1491,8 @@ describe("runSelectionScreen -- startup defaults", () => {
     expect(result).not.toBeNull();
     expect(result!.mergeStrategy).toBe("auto");
     expect(result!.reviewMode).toBe("on");
-    expect(result!.connectionAction).toEqual({ type: "connect" });
+    expect(result!.connectionAction).toBeNull();
     expect(result!.sessionLimit).toBe(7);
-  });
-
-  it("returns selected settings values from the startup settings screen", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],
-      [
-        "\x1B[C", // reviews off -> on (default is "on" but on the "off" → "on" cycle)
-        "\x1B[B",
-        "\x1B[C", // collaboration local -> share
-        "\r",
-      ],
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.mergeStrategy).toBe("manual");
-    expect(result!.reviewMode).toBe("off");
-    expect(result!.connectionAction).toEqual({ type: "connect" });
-    expect(result!.sessionLimit).toBe(4);
-  });
-
-  it("returns connect connectionAction when join is selected (auto-connect, no code prompt)", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(
-      ["\r"],
-      [
-        "\x1B[B", // → Collaboration row
-        "\x1B[C", // local -> share
-        "\x1B[C", // share -> join
-        "\r",
-      ],
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.connectionAction).toEqual({ type: "connect" });
   });
 
   it("falls back to defaultReviewMode when defaultSettings are omitted", async () => {
@@ -1803,144 +1518,8 @@ describe("runSelectionScreen -- startup defaults", () => {
     expect(result).not.toBeNull();
     expect(result!.sessionLimit).toBe(7);
   });
-
-  it("uses confirmation-only re-entry flow when showConnectionStep is false", async () => {
-    const { io, sendKeyBatches } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4, { showConnectionStep: false });
-    sendKeyBatches(["\r"], ["\r"]);
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.mergeStrategy).toBe("manual");
-    expect(result!.connectionAction).toBeNull();
-  });
 });
 
-// ── Selection screen: startup settings display ───────────────────────
-
-describe("runSelectionScreen -- startup settings display", () => {
-  it("settings screen shows 'All (dynamic)' when allSelected", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [
-      makeWorkItem("A-1", "First task"),
-      makeWorkItem("B-2", "Second task"),
-    ];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    // All items start pre-checked (__ALL__ included) → allSelected = true
-    sendKeyBatches(["\r"], ["\r"]);
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.allSelected).toBe(true);
-    expect(getOutput()).toContain("All");
-    expect(getOutput()).toContain("dynamic");
-  });
-
-  it("settings screen shows individual item list when not allSelected", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [
-      makeWorkItem("A-1", "First task"),
-      makeWorkItem("B-2", "Second task"),
-    ];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    // Explicitly uncheck __ALL__ (unchecks all), then re-check A-1
-    sendKeyBatches(
-      [" ", "\x1B[B", " ", "\r"],  // uncheck __ALL__, re-check A-1
-      ["\r"],   // confirm settings
-    );
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(result!.allSelected).toBe(false);
-    expect(getOutput()).toContain("A-1");
-  });
-
-  it("settings screen shows AI reviews default chip", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(["\r"], ["\r"]);
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("[on]");
-  });
-
-  it("settings screen shows collaboration defaults", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(["\r"], ["\x1B[B", "\r"]);
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("[local]");
-    expect(getOutput()).toContain("Local by default, no connection");
-  });
-
-  it("renders review chips with reserved bracket slots", async () => {
-    const { io, sendKeys, getOutput } = createMockIO();
-
-    const resultPromise = runStartupSettingsScreen(io, {
-      summaryLines: ["Items: A-1"],
-      defaultSessionLimit: 4,
-    });
-
-    const reviewLine = getPlainFrameLine(getOutput(), "> Reviews");
-
-    expect(reviewLine).toContain(" off ");
-    expect(reviewLine).toContain("[on]");
-
-    sendKeys(["\r"]);
-
-    const result = await resultPromise;
-    expect(result.cancelled).toBe(false);
-  });
-
-  it("keeps review option columns fixed when moving horizontally", async () => {
-    const { io, sendKeys, getOutput } = createMockIO();
-
-    const resultPromise = runStartupSettingsScreen(io, {
-      summaryLines: ["Items: A-1"],
-      defaultSessionLimit: 4,
-    });
-
-    const beforeMove = getPlainFrameLine(getOutput(), "> Reviews");
-    const beforeStarts = ["on", "off"].map((label) => getStartupChipStart(beforeMove, label));
-
-    sendKeys(["\x1B[C"]);
-
-    const afterMove = getPlainFrameLine(getOutput(), "> Reviews");
-    const afterStarts = ["on", "off"].map((label) => getStartupChipStart(afterMove, label));
-
-    expect(beforeMove).toContain("[on]");
-    expect(afterMove).toContain("[off]");
-    expect(beforeStarts).toEqual(afterStarts);
-
-    sendKeys(["\r"]);
-
-    const result = await resultPromise;
-    expect(result.cancelled).toBe(false);
-  });
-
-  it("settings screen title includes 'Start orchestration'", async () => {
-    const { io, sendKeyBatches, getOutput } = createMockIO();
-    const items = [makeWorkItem("A-1", "Task")];
-
-    const resultPromise = runSelectionScreen(io, items, 4);
-    sendKeyBatches(["\r"], ["\r"]);
-
-    const result = await resultPromise;
-    expect(result).not.toBeNull();
-    expect(getOutput()).toContain("Start orchestration");
-  });
-});
 
 // ── AI tool step ────────────────────────────────────────────────────
 

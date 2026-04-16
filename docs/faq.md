@@ -178,7 +178,7 @@ Wildcard patterns are also supported (e.g., `H-AUTH-*` depends on all auth items
 ### What does the full workflow look like?
 
 1. **Decompose** -- Break your feature into work items (`/decompose` or write them manually)
-2. **Start orchestration** -- Run `nw`, select work items (and an AI tool when needed), then confirm the single startup settings screen
+2. **Start orchestration** -- Run `nw`, select work items (and an AI tool when needed), then confirm the summary
 3. **Orchestrate** -- `nw` launches parallel AI sessions, each in an isolated worktree
 4. **Workers implement** -- Each AI session reads its work item, writes code, runs tests, and creates a PR
 5. **CI runs** -- The orchestrator monitors CI checks on each PR

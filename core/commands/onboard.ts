@@ -600,7 +600,6 @@ export async function cmdNoArgs(
 
   // Connection action → CLI flags
   if (result.connectionAction) {
-    // Both "share" and "join" map to the same auto-joined broker; use --connect.
     watchArgs.push("--connect");
   }
 

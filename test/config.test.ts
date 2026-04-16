@@ -682,14 +682,31 @@ describe("loadUserConfig", () => {
       JSON.stringify({
         merge_strategy: "auto",
         review_mode: "on",
-        collaboration_mode: "share",
+        collaboration_mode: "connect",
       }),
     );
 
     const config = loadUserConfig(tmpHome);
     expect(config.merge_strategy).toBe("auto");
     expect(config.review_mode).toBe("on");
-    expect(config.collaboration_mode).toBe("share");
+    expect(config.collaboration_mode).toBe("connect");
+  });
+
+  it("normalizes legacy share/join collaboration_mode values to connect", () => {
+    const tmpHome = setupTempRepo();
+    const configDir = join(tmpHome, ".ninthwave");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ collaboration_mode: "share" }),
+    );
+    expect(loadUserConfig(tmpHome).collaboration_mode).toBe("connect");
+
+    writeFileSync(
+      join(configDir, "config.json"),
+      JSON.stringify({ collaboration_mode: "join" }),
+    );
+    expect(loadUserConfig(tmpHome).collaboration_mode).toBe("connect");
   });
 
   it("reads tmux_layout from valid JSON", () => {
@@ -1000,7 +1017,7 @@ describe("saveUserConfig", () => {
       tmux_layout: "windows",
       merge_strategy: "auto",
       review_mode: "on",
-      collaboration_mode: "join",
+      collaboration_mode: "connect",
       session_limit: 4,
     }, tmpHome);
 
@@ -1009,7 +1026,7 @@ describe("saveUserConfig", () => {
     expect(content.tmux_layout).toBe("windows");
     expect(content.merge_strategy).toBe("auto");
     expect(content.review_mode).toBe("on");
-    expect(content.collaboration_mode).toBe("join");
+    expect(content.collaboration_mode).toBe("connect");
     expect(content.session_limit).toBe(4);
 
     const config = loadUserConfig(tmpHome);
@@ -1017,7 +1034,7 @@ describe("saveUserConfig", () => {
       tmux_layout: "windows",
       merge_strategy: "auto",
       review_mode: "on",
-      collaboration_mode: "join",
+      collaboration_mode: "connect",
       session_limit: 4,
     });
   });

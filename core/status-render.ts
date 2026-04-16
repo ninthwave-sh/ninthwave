@@ -3052,11 +3052,9 @@ export function renderControlsOverlay(
   const collaborationDetailLines: string[] = [];
 
   if (_collaborationBusy) {
-    const busyLabel = selectedCollaborationMode === "shared"
-      ? "Starting shared session..."
-      : selectedCollaborationMode === "joined"
-        ? "Joining session..."
-        : "Returning to local mode...";
+    const busyLabel = selectedCollaborationMode === "connected"
+      ? "Connecting to shared session..."
+      : "Returning to local mode...";
     collaborationDetailLines.push(`  ${DIM}Status:${RESET}  ${CYAN}${busyLabel}${RESET}`);
   }
 
@@ -3070,7 +3068,7 @@ export function renderControlsOverlay(
 
   if (collaborationDetailLines.length === 0) {
     collaborationDetailLines.push(
-      `  ${DIM}Share and Join both auto-connect to this project's shared broker session.${RESET}`,
+      `  ${DIM}Connect auto-joins this project's shared broker session.${RESET}`,
     );
   }
 
