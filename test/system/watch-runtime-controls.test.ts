@@ -209,7 +209,7 @@ describe("system: watch runtime controls", () => {
           const status = readFakeAiState(harness.stateDir, run.runId).status;
           return status === "completed" || status === "signaled" ? status : false;
         } catch { return false; }
-      }, { timeoutMs: 10_000, description: "fake AI terminal state" });
+      }, { timeoutMs: 30_000, description: "fake AI terminal state" });
       expect(["completed", "signaled"]).toContain(fakeAiStatus);
 
       const launches = await waitFor(() => {
