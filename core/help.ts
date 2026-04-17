@@ -26,6 +26,7 @@ import {
 import { cmdCiFailures } from "./commands/ci.ts";
 import { cmdInit } from "./commands/init.ts";
 import { cmdBroker } from "./commands/broker.ts";
+import { cmdCrew } from "./commands/crew.ts";
 import { cmdReconcile } from "./commands/reconcile.ts";
 import { cmdAnalytics } from "./commands/analytics.ts";
 import { cmdHistory } from "./commands/history.ts";
@@ -403,6 +404,23 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     },
     flags: {},
     examples: ["nw retry H-FOO-1"],
+  },
+  {
+    name: "crew",
+    usage: "crew [status|create|join <secret>|disconnect]",
+    description: "Manage the project's crew connection (broker secret, URL)",
+    group: "advanced",
+    needsRoot: true,
+    needsWork: false,
+    handler: async (ctx) => { await cmdCrew(ctx.args, ctx.projectRoot); },
+    flags: {},
+    examples: [
+      "nw crew",
+      "nw crew status",
+      "nw crew create",
+      "nw crew join <secret>",
+      "nw crew disconnect",
+    ],
   },
   {
     name: "review-inbox",
