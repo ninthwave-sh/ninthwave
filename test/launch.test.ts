@@ -32,6 +32,7 @@ type MockMux = Multiplexer & {
 type MockLaunchDeps = LaunchGitDeps & {
   fetchOrigin: Mock;
   ffMerge: Mock;
+  resetHard: Mock;
   branchExists: Mock;
   createWorktree: Mock;
   attachWorktree: Mock;
@@ -65,6 +66,7 @@ function createMockLaunchDeps(): MockLaunchDeps {
   return {
     fetchOrigin: vi.fn(),
     ffMerge: vi.fn(),
+    resetHard: vi.fn(),
     branchExists: vi.fn(() => false),
     createWorktree: vi.fn((_repo: string, wtPath: string) => {
       mkdirSync(wtPath, { recursive: true });
@@ -1050,6 +1052,122 @@ describe("launchSingleItem stacked fallback on fetch failure", () => {
       "ninthwave/M-CI-1",
       "origin/ninthwave/A-1",
     );
+  });
+});
+
+describe("launchSingleItem worktree reuse sync (H-ORCH-13)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanupTempRepos();
+  });
+
+  it("resets a reused worktree to origin/<branch> so it starts on the current remote HEAD", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    // Pre-create the worktree path on disk so ensureWorktreeAndBranch
+    // takes the reuse branch of the if-ladder.
+    const worktreePath = join(worktreeDir, `ninthwave-${item.id}`);
+    mkdirSync(worktreePath, { recursive: true });
+
+    await captureOutput(() => {
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
+      expect(res).not.toBeNull();
+    });
+
+    // Fetched the branch itself (not main/dep) before resetting
+    expect(deps.fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/M-CI-1");
+    // Reset the worktree to the current remote HEAD of its branch
+    expect(deps.resetHard).toHaveBeenCalledWith(worktreePath, "origin/ninthwave/M-CI-1");
+    // Did NOT create a new worktree -- reused the existing one
+    expect(deps.createWorktree).not.toHaveBeenCalled();
+  });
+
+  it("warns and still launches when fetchOrigin fails on the reused worktree", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    const worktreePath = join(worktreeDir, `ninthwave-${item.id}`);
+    mkdirSync(worktreePath, { recursive: true });
+
+    // Simulate network failure / remote branch missing
+    deps.fetchOrigin = vi.fn(() => {
+      throw new Error("fatal: couldn't find remote ref ninthwave/M-CI-1");
+    });
+
+    const output = await captureOutput(() => {
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
+      expect(res).not.toBeNull();
+    });
+
+    // Reset must NOT be called when the fetch failed
+    expect(deps.resetHard).not.toHaveBeenCalled();
+    // A warning is emitted so humans can see the worktree is outdated
+    expect(output).toContain("Failed to sync reused worktree");
+    // Launch still proceeded -- no new worktree was created
+    expect(deps.createWorktree).not.toHaveBeenCalled();
+  });
+
+  it("warns and still launches when resetHard fails on the reused worktree", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    const worktreePath = join(worktreeDir, `ninthwave-${item.id}`);
+    mkdirSync(worktreePath, { recursive: true });
+
+    // Fetch succeeds but reset fails (e.g. index.lock contention)
+    deps.resetHard = vi.fn(() => {
+      throw new Error("fatal: Unable to create '.git/index.lock': File exists.");
+    });
+
+    const output = await captureOutput(() => {
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
+      expect(res).not.toBeNull();
+    });
+
+    expect(deps.fetchOrigin).toHaveBeenCalledWith(repo, "ninthwave/M-CI-1");
+    expect(output).toContain("Failed to sync reused worktree");
+    expect(deps.createWorktree).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch or reset when creating a fresh worktree (no reuse)", async () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    // No pre-existing worktree on disk -- ensureWorktreeAndBranch takes the
+    // create branch, which fetches main (not the item branch) and creates.
+    await captureOutput(() => {
+      const res = launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {}, deps);
+      expect(res).not.toBeNull();
+    });
+
+    // The create path fetches main, but must NOT fetch or reset the item branch
+    expect(deps.fetchOrigin).not.toHaveBeenCalledWith(repo, "ninthwave/M-CI-1");
+    expect(deps.resetHard).not.toHaveBeenCalled();
+    expect(deps.createWorktree).toHaveBeenCalled();
   });
 });
 

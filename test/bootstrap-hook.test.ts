@@ -33,6 +33,7 @@ type MockMux = Multiplexer & {
 type MockLaunchDeps = LaunchGitDeps & {
   fetchOrigin: Mock;
   ffMerge: Mock;
+  resetHard: Mock;
   branchExists: Mock;
   createWorktree: Mock;
   attachWorktree: Mock;
@@ -64,6 +65,7 @@ function createMockLaunchDeps(): MockLaunchDeps {
   return {
     fetchOrigin: vi.fn(),
     ffMerge: vi.fn(),
+    resetHard: vi.fn(),
     branchExists: vi.fn(() => false),
     createWorktree: vi.fn((_repo: string, wtPath: string) => {
       mkdirSync(wtPath, { recursive: true });

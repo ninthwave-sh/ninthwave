@@ -9,6 +9,7 @@ import { loadMergedProjectConfig, loadUserConfig } from "../config.ts";
 import {
   fetchOrigin as defaultFetchOrigin,
   ffMerge as defaultFfMerge,
+  resetHard as defaultResetHard,
   branchExists as defaultBranchExists,
   deleteBranch as defaultDeleteBranch,
   createWorktree as defaultCreateWorktree,
@@ -39,6 +40,7 @@ import {
 export interface LaunchGitDeps {
   fetchOrigin: typeof defaultFetchOrigin;
   ffMerge: typeof defaultFfMerge;
+  resetHard: typeof defaultResetHard;
   branchExists: typeof defaultBranchExists;
   createWorktree: typeof defaultCreateWorktree;
   attachWorktree: typeof defaultAttachWorktree;
@@ -51,6 +53,7 @@ export interface LaunchGitDeps {
 const defaultLaunchGitDeps: LaunchGitDeps = {
   fetchOrigin: defaultFetchOrigin,
   ffMerge: defaultFfMerge,
+  resetHard: defaultResetHard,
   branchExists: defaultBranchExists,
   createWorktree: defaultCreateWorktree,
   attachWorktree: defaultAttachWorktree,
@@ -443,9 +446,21 @@ export function ensureWorktreeAndBranch(
   // Clean stale index.lock files before worktree operations
   cleanStaleIndexLocks(projectRoot);
 
-  // Worktree already exists on disk -- reuse it
+  // Worktree already exists on disk -- reuse it, but first sync the branch to
+  // the current remote HEAD so the worker never inherits a stale local branch
+  // (H-ORCH-13). Mirrors the reset pattern in review-inbox.ts prepareReviewWorktree.
+  // If the fetch fails (no network, or branch has never been pushed), warn and
+  // proceed with the existing local state rather than blocking launch.
   if (existsSync(worktreePath)) {
     warn(`Worktree already exists for ${item.id} at ${worktreePath}, reusing`);
+    try {
+      deps.fetchOrigin(targetRepo, branchName);
+      deps.resetHard(worktreePath, `origin/${branchName}`);
+    } catch (e) {
+      warn(
+        `Failed to sync reused worktree ${worktreePath} to origin/${branchName}: ${e instanceof Error ? e.message : e}. Worker may start on stale branch.`,
+      );
+    }
     return { action: "launch" };
   }
 

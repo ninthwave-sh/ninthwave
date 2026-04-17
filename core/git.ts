@@ -73,6 +73,22 @@ export function fetchOrigin(repoRoot: string, branch: string): void {
   }
 }
 
+/** Hard-reset a worktree's HEAD to a git ref (e.g. `origin/<branch>`). */
+export function resetHard(worktreePath: string, ref: string): void {
+  const result = run("git", [
+    "-C",
+    worktreePath,
+    "reset",
+    "--hard",
+    ref,
+  ]);
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `reset --hard ${ref} in ${worktreePath} failed: ${result.stderr}`,
+    );
+  }
+}
+
 /** Fast-forward merge a branch. */
 export function ffMerge(repoRoot: string, branch: string): void {
   const result = run("git", [
