@@ -197,6 +197,24 @@ Format: `[CHML]-<feature_code>-<seq>`
 - Feature code from Phase 1
 - Incrementing sequence
 
+**Reserved IDs -- check git history of `.ninthwave/work/` BEFORE assigning numbers.** Work item IDs become git branch names (`ninthwave/<ID>`). If you mint an ID that any prior work item already used, `nw` will refuse to launch the new item because the lineage tokens don't match the existing branch, and the entire dependency chain behind it stalls. Re-decomposing a feature after a previous pass has shipped or abandoned items is the common trigger -- the open `.ninthwave/work/` queue looks empty, but git history still records every ID ever used.
+
+Use git history of the work dir (not `gh pr list`): work item filenames follow the convention `{priority_num}-{domain_slug}--{ID}.md`, so the ID is always present in the filename. PR titles are free prose and drift. Git history also catches decomposed-then-abandoned items that never got a PR.
+
+Before assigning any new sequence numbers:
+
+1. List every ID ever added, modified, renamed, or deleted under `.ninthwave/work/` across all branches:
+   ```bash
+   git log --all --name-only --pretty=format: -- .ninthwave/work/ \
+     | grep -oE '[CHML]-[A-Z]+-[0-9]+\.md' \
+     | sed 's/\.md$//' \
+     | sort -u
+   ```
+   Filter to the feature code you're assigning. No `--diff-filter=A` -- renames only show the new name with `A`, so filtering that way would miss half of a `git mv` pair.
+2. Union that set with the IDs already in `.ninthwave/work/` (current queue).
+3. Assign new numbers from the first integer strictly greater than the maximum in the union. Do not reclaim gaps -- the branch names for abandoned IDs may still exist on origin or in local clones, and reusing a gap is as risky as reusing the tail.
+4. If the repo is a shallow clone (`git rev-parse --is-shallow-repository` returns `true`), STOP and run `git fetch --unshallow` first. The check is only sound against full history.
+
 ---
 
 ### Phase 5: REVIEW
@@ -287,4 +305,4 @@ Explicitly remind the user that the files you just wrote are now the live queue.
 - **File conflict awareness:** Items in the same batch should not modify the same files
 - **No VERSION/CHANGELOG:** work items should not mention modifying these files
 - **Portable references:** All paths in work items (Source, description, Key files) must be repo-relative. Workers clone from remote into isolated worktrees -- absolute paths and external files (home directories, tool config directories) are inaccessible. Referencing plan documentation for context is encouraged, but referenced files must be committed to the repo. If the source spec is external, internalize it during INTAKE.
-- **Idempotent:** Check `.ninthwave/work/` for existing files with the same ID before writing duplicates
+- **Idempotent:** Before writing any work item, verify its ID is unused in BOTH `.ninthwave/work/` (current queue) AND the git history of that directory (`git log --all --name-only -- .ninthwave/work/`). Reusing an ID that any prior work item already owned will stall launch with a `launch-blocked` lineage-mismatch error -- see the "Reserved IDs" step in Phase 4.
