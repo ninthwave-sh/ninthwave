@@ -52,6 +52,15 @@ export class CmuxAdapter implements Multiplexer {
   diagnoseUnavailable(): string {
     return "cmux is not available. Ensure cmux is installed and running.";
   }
+  /**
+   * Surface the underlying cmux daemon error from the most recent
+   * `launchWorkspace` / `splitPane` failure so `formatMuxLaunchFailure`
+   * (in `core/commands/launch.ts`) can stamp it into `orchestrator.log`
+   * instead of a generic "is cmux running?" fallback.
+   */
+  getLastLaunchError(): string | undefined {
+    return cmux.getLastLaunchError();
+  }
   launchWorkspace(cwd: string, command: string, _workItemId?: string): string | null {
     return cmux.launchWorkspace(cwd, command);
   }

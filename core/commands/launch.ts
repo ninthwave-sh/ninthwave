@@ -671,7 +671,15 @@ ${itemText}`;
     try { deps.removeWorktree(projectRoot, worktreePath, /* force */ true); } catch (e) {
       warn(`Failed to remove worktree for ${item.id}: ${e instanceof Error ? e.message : e}`);
     }
-    if (err instanceof AiSessionLaunchError && options.throwOnLaunchFailure) {
+    // Re-throw any caught error when callers (e.g. the orchestrator) opt in
+    // via `throwOnLaunchFailure`. Without this, non-AiSessionLaunchError
+    // failures (bootstrap hook, worktree creation, partition allocation,
+    // etc.) silently collapse into a generic "Launch failed for ${id}"
+    // message in `orchestrator.log` because the engine child's stderr is
+    // dropped post-startup. The thrown message propagates through
+    // `executeLaunch`'s catch and is stamped into `action_result.error`
+    // and `failureReason`.
+    if (options.throwOnLaunchFailure) {
       throw err;
     }
     return null;

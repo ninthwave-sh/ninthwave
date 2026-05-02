@@ -16,6 +16,19 @@ function cmuxBin(): string {
   return _cmuxBin ?? "cmux";
 }
 
+/**
+ * Most recent launch failure captured by `launchWorkspace` / `splitPane`.
+ * Surfaced via `getLastLaunchError()` so callers (e.g. `formatMuxLaunchFailure`
+ * in `core/commands/launch.ts`) can stamp the cmux daemon's actual error into
+ * the structured `orchestrator.log` instead of a generic message.
+ */
+let lastLaunchError: string | undefined;
+
+/** Read the most recent launch failure captured by this module. */
+export function getLastLaunchError(): string | undefined {
+  return lastLaunchError;
+}
+
 /** Check if the cmux binary is available. */
 export function isAvailable(): boolean {
   const result = run(cmuxBin(), ["version"]);
@@ -25,21 +38,46 @@ export function isAvailable(): boolean {
 /**
  * Launch a new cmux workspace.
  * Returns the workspace ref (e.g., "workspace:1") or null on failure.
+ * On failure the underlying stderr is preserved on `getLastLaunchError()`.
  */
 export function launchWorkspace(
   cwd: string,
   command: string,
 ): string | null {
-  const result = run(cmuxBin(), [
+  return launchWorkspaceImpl(cwd, command, (cmd, args) => run(cmd, args));
+}
+
+/**
+ * Injectable implementation of `launchWorkspace` -- testable without real
+ * subprocesses. Captures stderr on failure into module-level
+ * `lastLaunchError`.
+ *
+ * @internal Exported for testing only.
+ */
+export function launchWorkspaceImpl(
+  cwd: string,
+  command: string,
+  runner: ShellRunner,
+): string | null {
+  lastLaunchError = undefined;
+  const result = runner(cmuxBin(), [
     "new-workspace",
     "--cwd",
     cwd,
     "--command",
     command,
   ]);
-  if (result.exitCode !== 0) return null;
+  if (result.exitCode !== 0) {
+    lastLaunchError =
+      result.stderr || `cmux new-workspace exited ${result.exitCode}`;
+    return null;
+  }
   const match = result.stdout.match(/workspace:\d+/);
-  return match ? match[0] : null;
+  if (!match) {
+    lastLaunchError = `cmux new-workspace returned no workspace ref (stdout: ${result.stdout || "<empty>"})`;
+    return null;
+  }
+  return match[0];
 }
 
 /** Read screen content from a cmux workspace. Returns raw text or "" on failure. */
@@ -204,13 +242,21 @@ export function splitPaneImpl(
   command: string,
   runner: ShellRunner,
 ): string | null {
+  lastLaunchError = undefined;
   const result = runner("cmux", ["new-split", "right"]);
-  if (result.exitCode !== 0) return null;
+  if (result.exitCode !== 0) {
+    lastLaunchError =
+      result.stderr || `cmux new-split exited ${result.exitCode}`;
+    return null;
+  }
 
   // new-split returns a ref -- surface:N, pane:N, or similar
   const match = result.stdout.match(/(?:surface|pane):\d+/);
   const ref = match ? match[0] : null;
-  if (!ref) return null;
+  if (!ref) {
+    lastLaunchError = `cmux new-split returned no surface/pane ref (stdout: ${result.stdout || "<empty>"})`;
+    return null;
+  }
 
   // Send the command to the new surface (cmux send interprets \n as Enter)
   const sendResult = runner("cmux", [

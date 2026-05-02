@@ -343,6 +343,37 @@ describe("launchSingleItem bootstrap hook integration", () => {
     expect(output).toContain("Bootstrap hook failed");
   });
 
+  it("rethrows bootstrap hook failures when throwOnLaunchFailure is set", () => {
+    const mockMux = createMockMux();
+    const deps = createMockLaunchDeps();
+    const repo = setupTempRepo();
+    const workDir = setupWorkItemsDir(repo);
+    const worktreeDir = join(repo, ".ninthwave", ".worktrees");
+    const items = parseWorkItems(workDir, worktreeDir);
+    const item = items.find((i) => i.id === "M-CI-1")!;
+
+    const hooksDir = join(repo, ".ninthwave", "hooks");
+    mkdirSync(hooksDir, { recursive: true });
+    const hookPath = join(hooksDir, "post-worktree-create");
+    writeFileSync(hookPath, `#!/usr/bin/env bash\necho "npm install failed" >&2\nexit 1\n`);
+    chmodSync(hookPath, 0o755);
+
+    captureOutput(() => {
+      // Without the broadened throw, this used to silently return null and
+      // the caller stamped a generic "Launch failed for M-CI-1" into
+      // orchestrator.log. With throwOnLaunchFailure: true the underlying
+      // error message must propagate so executeLaunch's catch can record it.
+      expect(() =>
+        launchSingleItem(item, workDir, worktreeDir, repo, "claude", mockMux, {
+          throwOnLaunchFailure: true,
+        }, deps)
+      ).toThrow(/Bootstrap hook failed for M-CI-1/);
+    });
+
+    expect(mockMux.launchWorkspace).not.toHaveBeenCalled();
+    expect(deps.removeWorktree).toHaveBeenCalled();
+  });
+
   it("succeeds when no bootstrap hook exists (backwards compatible)", () => {
     const mockMux = createMockMux();
     const deps = createMockLaunchDeps();

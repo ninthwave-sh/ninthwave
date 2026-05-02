@@ -69,6 +69,46 @@ describe("HeadlessAdapter", () => {
     expect(existsSync(headlessPidFilePath(projectRoot, "H-RSH-4"))).toBe(false);
   });
 
+  it("launchWorkspace captures the spawn error message in getLastLaunchError", () => {
+    const projectRoot = makeProjectRoot();
+    const spawn = vi.fn(() => {
+      throw new Error("EACCES: permission denied");
+    }) as any;
+    const adapter = new HeadlessAdapter(projectRoot, { spawn });
+
+    expect(adapter.launchWorkspace("/tmp/worktree", "bun run worker", "H-RSH-4")).toBeNull();
+    expect(adapter.getLastLaunchError()).toBe("EACCES: permission denied");
+  });
+
+  it("launchWorkspace captures a diagnostic when spawn returns no pid", () => {
+    const projectRoot = makeProjectRoot();
+    const spawn = vi.fn(() => ({ pid: undefined, unref: vi.fn() })) as any;
+    const adapter = new HeadlessAdapter(projectRoot, { spawn });
+
+    expect(adapter.launchWorkspace("/tmp/worktree", "bun run worker", "H-RSH-4")).toBeNull();
+    expect(adapter.getLastLaunchError()).toBe("headless spawn returned no pid");
+  });
+
+  it("launchWorkspace clears a prior launch error on success", () => {
+    const projectRoot = makeProjectRoot();
+    const child = { pid: 4242, unref: vi.fn() } as any;
+    let throwOnce = true;
+    const spawn = vi.fn(() => {
+      if (throwOnce) {
+        throwOnce = false;
+        throw new Error("transient");
+      }
+      return child;
+    }) as any;
+    const adapter = new HeadlessAdapter(projectRoot, { spawn });
+
+    expect(adapter.launchWorkspace("/tmp/worktree", "cmd", "H-RSH-4")).toBeNull();
+    expect(adapter.getLastLaunchError()).toBe("transient");
+
+    expect(adapter.launchWorkspace("/tmp/worktree", "cmd", "H-RSH-5")).toBe("headless:H-RSH-5");
+    expect(adapter.getLastLaunchError()).toBeUndefined();
+  });
+
   it("readScreen reads the last N log lines and returns empty string for missing logs", () => {
     const projectRoot = makeProjectRoot();
     const adapter = new HeadlessAdapter(projectRoot);

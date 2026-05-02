@@ -2,7 +2,12 @@
 // Uses dependency injection via splitPaneImpl's runner argument.
 
 import { describe, it, expect, vi } from "vitest";
-import { splitPaneImpl, type ShellRunner } from "../core/cmux.ts";
+import {
+  getLastLaunchError,
+  launchWorkspaceImpl,
+  splitPaneImpl,
+  type ShellRunner,
+} from "../core/cmux.ts";
 import type { RunResult } from "../core/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -64,5 +69,59 @@ describe("splitPaneImpl", () => {
     });
 
     expect(splitPaneImpl("echo hello", runner)).toBe("pane:7");
+  });
+
+  it("captures stderr in getLastLaunchError when new-split fails", () => {
+    const runner = dispatchRunner({
+      "new-split": fail("no workspace"),
+    });
+
+    expect(splitPaneImpl("echo hi", runner)).toBeNull();
+    expect(getLastLaunchError()).toBe("no workspace");
+  });
+});
+
+describe("launchWorkspaceImpl", () => {
+  it("returns the workspace ref and clears any prior launch error on success", () => {
+    // Seed a stale error from a prior failure so we can confirm it is cleared.
+    splitPaneImpl("noop", dispatchRunner({ "new-split": fail("stale") }));
+    expect(getLastLaunchError()).toBe("stale");
+
+    const runner = dispatchRunner({
+      "new-workspace": ok("workspace:42"),
+    });
+
+    expect(launchWorkspaceImpl("/tmp/cwd", "echo hi", runner)).toBe("workspace:42");
+    expect(getLastLaunchError()).toBeUndefined();
+  });
+
+  it("captures stderr when cmux new-workspace exits non-zero", () => {
+    const runner = dispatchRunner({
+      "new-workspace": fail("Access denied -- only processes started inside cmux can connect"),
+    });
+
+    expect(launchWorkspaceImpl("/tmp/cwd", "echo hi", runner)).toBeNull();
+    expect(getLastLaunchError()).toBe(
+      "Access denied -- only processes started inside cmux can connect",
+    );
+  });
+
+  it("falls back to an exit-code summary when stderr is empty", () => {
+    const runner = vi.fn(
+      (_cmd: string, _args: string[]): RunResult => ({ stdout: "", stderr: "", exitCode: 7 }),
+    );
+
+    expect(launchWorkspaceImpl("/tmp/cwd", "echo hi", runner)).toBeNull();
+    expect(getLastLaunchError()).toBe("cmux new-workspace exited 7");
+  });
+
+  it("captures a diagnostic when stdout has no workspace ref", () => {
+    const runner = dispatchRunner({
+      "new-workspace": ok("garbage output without a ref"),
+    });
+
+    expect(launchWorkspaceImpl("/tmp/cwd", "echo hi", runner)).toBeNull();
+    expect(getLastLaunchError()).toContain("returned no workspace ref");
+    expect(getLastLaunchError()).toContain("garbage output");
   });
 });

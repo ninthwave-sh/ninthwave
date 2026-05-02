@@ -156,6 +156,7 @@ export class HeadlessAdapter implements Multiplexer {
   readonly type: MuxType = "headless";
 
   private readonly deps: HeadlessAdapterDeps;
+  private lastLaunchError: string | undefined;
 
   constructor(
     private readonly projectRoot: string,
@@ -172,7 +173,17 @@ export class HeadlessAdapter implements Multiplexer {
     return "Headless adapter is always available.";
   }
 
+  /**
+   * Surface the underlying error from the most recent `launchWorkspace`
+   * failure so `formatMuxLaunchFailure` (in `core/commands/launch.ts`) can
+   * stamp it into `orchestrator.log` instead of a generic fallback.
+   */
+  getLastLaunchError(): string | undefined {
+    return this.lastLaunchError;
+  }
+
   launchWorkspace(cwd: string, command: string, workItemId?: string): string | null {
+    this.lastLaunchError = undefined;
     const ref = formatHeadlessWorkspaceRef(workItemId?.trim() || `headless-${Date.now()}`);
     const logDir = headlessLogDir(this.projectRoot);
     const pidDir = headlessPidDir(this.projectRoot);
@@ -190,11 +201,15 @@ export class HeadlessAdapter implements Multiplexer {
         stdio: ["ignore", logFd, logFd],
       });
 
-      if (!child.pid) return null;
+      if (!child.pid) {
+        this.lastLaunchError = "headless spawn returned no pid";
+        return null;
+      }
       child.unref();
       this.deps.io.writeFileSync(pidPath, String(child.pid));
       return ref;
-    } catch {
+    } catch (err) {
+      this.lastLaunchError = err instanceof Error ? err.message : String(err);
       return null;
     }
   }

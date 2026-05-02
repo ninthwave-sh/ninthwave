@@ -3262,6 +3262,94 @@ describe("executeLaunch stale branch cleanup", () => {
   });
 });
 
+// ── Launch failure detail propagation ──────────────────────────────
+
+describe("executeLaunch failure detail propagation", () => {
+  // Each test uses its own setupTempRepo() so the heartbeat written by
+  // executeLaunch lives under a unique ~/.ninthwave/projects/{slug}/ and
+  // does not pollute the buildSnapshot heartbeat tests below.
+  afterEach(() => cleanupTempRepos());
+
+  function makeDeps(
+    repo: string,
+    overrides: DeepPartial<OrchestratorDeps> = {},
+  ): OrchestratorDeps {
+    return {
+      git: { fetchOrigin: () => {}, ffMerge: () => {}, ...overrides?.git },
+      gh: { prMerge: () => true, prComment: () => true, ...overrides?.gh },
+      mux: { sendMessage: () => true, closeWorkspace: () => true, ...overrides?.mux },
+      workers: {
+        launchSingleItem: () => ({ worktreePath: "/tmp/wt", workspaceRef: "workspace:1" }),
+        validatePickupCandidate: (item) => ({
+          status: "launch",
+          targetRepo: repo,
+          branchName: `ninthwave/${item.id}`,
+        }),
+        ...overrides?.workers,
+      },
+      cleanup: { cleanSingleWorktree: () => true, ...overrides?.cleanup },
+      io: { writeInbox: () => {}, ...overrides?.io },
+    };
+  }
+
+  function makeCtx(repo: string): ExecutionContext {
+    return {
+      projectRoot: repo,
+      worktreeDir: join(repo, ".ninthwave", ".worktrees"),
+      workDir: join(repo, ".ninthwave", "work"),
+      aiTool: "claude",
+    };
+  }
+
+  it("stamps a thrown launch error message into action_result.error and failureReason on stuck", () => {
+    const repo = setupTempRepo();
+    const orch = new Orchestrator({ maxInflight: 1, maxRetries: 0 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "launching");
+
+    const deps = makeDeps(repo, {
+      workers: {
+        launchSingleItem: () => {
+          throw new Error("cmux launch failed for H-1-1: Access denied");
+        },
+      },
+    });
+
+    const result = orch.executeAction({ type: "launch", itemId: "H-1-1" }, makeCtx(repo), deps);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("cmux launch failed for H-1-1: Access denied");
+    const item = orch.getItem("H-1-1")!;
+    expect(item.state).toBe("stuck");
+    expect(item.failureReason).toBe("launch-failed: cmux launch failed for H-1-1: Access denied");
+  });
+
+  it("stamps a thrown launch error message into action_result.error and schedules retry", () => {
+    const repo = setupTempRepo();
+    const orch = new Orchestrator({ maxInflight: 1, maxRetries: 1 });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "launching");
+
+    const deps = makeDeps(repo, {
+      workers: {
+        launchSingleItem: () => {
+          throw new Error("Bootstrap hook failed for H-1-1: npm install failed");
+        },
+      },
+    });
+
+    const result = orch.executeAction({ type: "launch", itemId: "H-1-1" }, makeCtx(repo), deps);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      "Bootstrap hook failed for H-1-1: npm install failed, scheduled retry 1/1",
+    );
+    const item = orch.getItem("H-1-1")!;
+    expect(item.state).toBe("ready");
+    expect(item.retryCount).toBe(1);
+  });
+});
+
 // ── Stacked launch race guard (H-SL-1) ─────────────────────────────
 
 describe("executeLaunch stacked dep race guard", () => {
