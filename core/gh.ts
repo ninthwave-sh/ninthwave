@@ -1215,6 +1215,78 @@ export function listPrReviewComments(
   }
 }
 
+/**
+ * Signature substring used to identify a ninthwave reviewer verdict comment on a PR.
+ * Matches the prefix written by `executePostReview` (see core/orchestrator-actions.ts):
+ *   "**[Reviewer](https://github.com/<repo>/blob/main/agents/reviewer.md)** Verdict: ..."
+ * The substring `**[Reviewer](` is stable across hub repo paths and the offline
+ * fallback (`agents/reviewer.md`).
+ */
+export const NINTHWAVE_REVIEWER_COMMENT_SIGNATURE = "**[Reviewer](";
+
+function commentHasReviewerSignature(body: string): boolean {
+  return body.includes(NINTHWAVE_REVIEWER_COMMENT_SIGNATURE);
+}
+
+/**
+ * Check whether the PR has any ninthwave reviewer verdict comment.
+ * Used by the parked-worker stall detector: when a review-pending item has been
+ * parked longer than `inboxWaitExpireMs` and no reviewer comment exists, the
+ * orchestrator treats the reviewer as dead and respawns it.
+ *
+ * Best-effort: returns false on API failure so the stall detector errs on the
+ * side of recovery rather than silently swallowing a real stall.
+ */
+export function hasNinthwaveReviewerComment(
+  repoRoot: string,
+  prNumber: number,
+): boolean {
+  const issueComments = listPrComments(repoRoot, prNumber);
+  if (issueComments.some((c) => commentHasReviewerSignature(c.body))) return true;
+  const reviewComments = listPrReviewComments(repoRoot, prNumber);
+  return reviewComments.some((c) => commentHasReviewerSignature(c.body));
+}
+
+/**
+ * Async variant of hasNinthwaveReviewerComment. Issues both API calls
+ * concurrently to keep the snapshot tick responsive.
+ */
+export async function hasNinthwaveReviewerCommentAsync(
+  repoRoot: string,
+  prNumber: number,
+): Promise<boolean> {
+  let ownerRepo: string;
+  try {
+    ownerRepo = await getRepoOwnerAsync(repoRoot);
+  } catch {
+    return false;
+  }
+
+  const fetchBodies = async (path: string): Promise<string[]> => {
+    try {
+      const result = await ghInRepoAsync(repoRoot, [
+        "api",
+        `repos/${ownerRepo}/${path}/${prNumber}/comments`,
+        "--jq",
+        "[.[] | .body]",
+      ]);
+      if (result.exitCode !== 0 || !result.stdout?.trim()) return [];
+      const parsed = JSON.parse(result.stdout) as unknown;
+      return Array.isArray(parsed) ? parsed.map((b) => String(b)) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const [issueBodies, reviewBodies] = await Promise.all([
+    fetchBodies("issues"),
+    fetchBodies("pulls"),
+  ]);
+
+  return issueBodies.some(commentHasReviewerSignature)
+    || reviewBodies.some(commentHasReviewerSignature);
+}
+
 /** Add a reaction to a PR comment. Best-effort: failures are ignored. */
 export function addCommentReaction(
   repoRoot: string,

@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { stateToPollingPriority, buildSnapshotAsync } from "../core/commands/orchestrate.ts";
+import { isInboxWaitStalled, DEFAULT_INBOX_WAIT_EXPIRE_MS } from "../core/snapshot.ts";
 import { RequestQueue } from "../core/request-queue.ts";
 import { Orchestrator } from "../core/orchestrator.ts";
 import type { WorkItem } from "../core/types.ts";
@@ -263,5 +264,117 @@ describe("buildSnapshotAsync with queue", () => {
     expect(snapshot.items).toHaveLength(2);
     expect(snapshot.items[0]!.prNumber).toBe(10);
     expect(snapshot.items[1]!.prNumber).toBe(10);
+  });
+});
+
+// ── isInboxWaitStalled (H-ORCH-17 parked-worker stall detector) ──────
+
+describe("isInboxWaitStalled", () => {
+  const NOW = new Date("2026-04-15T12:00:00Z");
+  const STALE = "2026-04-15T11:30:00Z"; // 30 min old
+  const FRESH = "2026-04-15T11:59:30Z"; // 30 s old
+
+  it("fires after the threshold elapses with no fresh signal", () => {
+    expect(isInboxWaitStalled(
+      { inboxWaitingSince: STALE, lastCommitTime: STALE, lastTransition: STALE },
+      NOW, 5 * 60 * 1000,
+    )).toBe(true);
+  });
+
+  it("resets when a fresh commit lands inside the window", () => {
+    // A fresh commit beats stale waitingSince -- the worker has made progress.
+    expect(isInboxWaitStalled(
+      { inboxWaitingSince: STALE, lastCommitTime: FRESH, lastTransition: STALE },
+      NOW, 5 * 60 * 1000,
+    )).toBe(false);
+  });
+
+  it("resets when a fresh inbox wait starts inside the window", () => {
+    // Fresh inboxWaitingSince also resets the stall window.
+    expect(isInboxWaitStalled(
+      { inboxWaitingSince: FRESH, lastCommitTime: STALE, lastTransition: STALE },
+      NOW, 5 * 60 * 1000,
+    )).toBe(false);
+  });
+
+  it("returns false when expireMs is 0 (detector disabled)", () => {
+    expect(isInboxWaitStalled(
+      { inboxWaitingSince: STALE, lastCommitTime: STALE, lastTransition: STALE },
+      NOW, 0,
+    )).toBe(false);
+  });
+
+  it("returns false when no timestamps are available", () => {
+    expect(isInboxWaitStalled(
+      { inboxWaitingSince: null, lastCommitTime: null, lastTransition: null },
+      NOW, 5 * 60 * 1000,
+    )).toBe(false);
+  });
+
+  it("exposes a default threshold matching the OrchestratorConfig default", () => {
+    // 90 minutes -- safe-guard fallback, not a liveness gate. Long enough that
+    // a thorough reviewer or feedback-handler can finish without being respawned.
+    expect(DEFAULT_INBOX_WAIT_EXPIRE_MS).toBe(90 * 60 * 1000);
+  });
+});
+
+// ── buildSnapshotAsync stall detector wiring (H-ORCH-17) ─────────────
+
+describe("buildSnapshotAsync parked-worker stall detector", () => {
+  const NOW = new Date("2026-04-15T12:00:00Z");
+  const STALE = "2026-04-15T11:30:00Z";
+
+  function setupParkedReviewPending(): Orchestrator {
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("R-1"));
+    const item = orch.getItem("R-1")!;
+    item.reviewCompleted = true;
+    item.sessionParked = true;
+    item.prNumber = 99;
+    item.lastTransition = STALE;
+    orch.hydrateState("R-1", "review-pending");
+    item.lastTransition = STALE;
+    return orch;
+  }
+
+  it("queries the reviewer comment helper for stalled review-pending items", async () => {
+    const orch = setupParkedReviewPending();
+    const checkPr = async () => "R-1\t99\tci-passed\tMERGEABLE\t2026-04-15T11:30:00Z";
+    const calls: number[] = [];
+    const checkReviewerComment = async (_root: string, prNumber: number) => {
+      calls.push(prNumber);
+      return false;
+    };
+
+    const snapshot = await buildSnapshotAsync(
+      orch, "/project", "/project/.ninthwave/.worktrees",
+      fakeMux, async () => STALE, checkPr,
+      undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined,
+      checkReviewerComment, 5 * 60 * 1000, NOW,
+    );
+
+    expect(calls).toEqual([99]);
+    expect(snapshot.items[0]!.hasReviewerComment).toBe(false);
+  });
+
+  it("skips the reviewer comment helper when not stalled", async () => {
+    const orch = setupParkedReviewPending();
+    const fresh = "2026-04-15T11:59:30Z";
+    orch.getItem("R-1")!.lastTransition = fresh;
+    const checkPr = async () => "R-1\t99\tci-passed\tMERGEABLE\t2026-04-15T11:59:30Z";
+    let called = false;
+    const checkReviewerComment = async () => { called = true; return false; };
+
+    const snapshot = await buildSnapshotAsync(
+      orch, "/project", "/project/.ninthwave/.worktrees",
+      fakeMux, async () => fresh, checkPr,
+      undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined,
+      checkReviewerComment, 5 * 60 * 1000, NOW,
+    );
+
+    expect(called).toBe(false);
+    expect(snapshot.items[0]!.hasReviewerComment).toBeUndefined();
   });
 });

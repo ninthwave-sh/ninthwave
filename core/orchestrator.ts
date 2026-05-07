@@ -530,13 +530,54 @@ export class Orchestrator {
 
   private emitWorkerRespawnEvent(
     item: OrchestratorItem,
-    trigger: "ci-fix-ack-timeout" | "parked-ci-failure" | "worker-dead",
+    trigger:
+      | "ci-fix-ack-timeout"
+      | "parked-ci-failure"
+      | "worker-dead"
+      | "review-pending-stall"
+      | "feedback-wait-stall",
   ): void {
     this.config.onEvent?.(item.id, "worker-respawn", {
       trigger,
       ciFailCount: item.ciFailCount,
       ciFailCountTotal: item.ciFailCountTotal,
     });
+  }
+
+  // ── Parked-worker stall detector ──────────────────────────────────
+  //
+  // Backstop for two related stall modes that previously required human
+  // intervention:
+  //
+  //   1. Review-pending parked items (H-MCX-175 confused-deputy): the reviewer
+  //      worker exited without writing a verdict comment, so the PR sat
+  //      pending review indefinitely.
+  //   2. Drain-wait stall (H-CMA-3): the orchestrator delivered feedback, the
+  //      worker entered `nw inbox --wait`, and never re-entered the drain-wait
+  //      loop. `inboxWaitingSince` ticked but nothing consumed it.
+  //
+  // Trigger: more than `inboxWaitExpireMs` since the most recent of
+  // `inboxWaitingSince`, `lastCommitTime`, or `lastTransition`. Each fresh
+  // signal resets the timer, so the detector only fires on genuine idleness.
+
+  private inboxWaitStalled(
+    item: OrchestratorItem,
+    snap: ItemSnapshot | undefined,
+    now: Date,
+  ): boolean {
+    const expireMs = this.config.inboxWaitExpireMs;
+    if (!expireMs || expireMs <= 0) return false;
+    const candidates: number[] = [];
+    const push = (ts: string | null | undefined): void => {
+      if (!ts) return;
+      const ms = new Date(ts).getTime();
+      if (Number.isFinite(ms)) candidates.push(ms);
+    };
+    push(snap?.inboxSnapshot?.waitingSince);
+    push(snap?.lastCommitTime ?? item.lastCommitTime);
+    push(item.lastTransition);
+    if (candidates.length === 0) return false;
+    return now.getTime() - Math.max(...candidates) > expireMs;
   }
 
   // ── Cross-cutting interceptors ─────────────────────────────────────
@@ -915,6 +956,30 @@ export class Orchestrator {
         }
         return this.stuckOrRetry(item, "worker-stalled: no new commits after activity timeout");
       }
+    }
+
+    // Parked-worker stall detector (H-ORCH-17), drain-wait variant. The
+    // implementer received a feedback batch and entered `nw inbox --wait`,
+    // but `inboxWaitingSince` ticked past the threshold without progress.
+    // Respawn the worker with the stored feedback message so it gets a
+    // fresh session to act on the feedback.
+    //
+    // Constraints:
+    //  - Only fires when needsFeedbackResponse is set (the worker is in the
+    //    drain-wait state, not regular implementation work).
+    //  - Requires a fresh-but-stale inbox waitingSince (the canonical drain-wait
+    //    signal) so we do not respawn a worker that simply has not finished
+    //    its initial implementation.
+    //  - Requires a stored pendingFeedbackMessage; without one the respawn
+    //    would have nothing to deliver.
+    if (
+      item.needsFeedbackResponse
+      && item.pendingFeedbackMessage
+      && snap?.inboxSnapshot?.waitingSince
+      && this.inboxWaitStalled(item, snap, now)
+    ) {
+      this.emitWorkerRespawnEvent(item, "feedback-wait-stall");
+      return this.respawnForFeedback(item, item.pendingFeedbackMessage);
     }
 
     return [];
@@ -1629,7 +1694,50 @@ export class Orchestrator {
       ));
     }
 
+    // Parked-worker stall detector (H-ORCH-17). When the item has been parked
+    // longer than `inboxWaitExpireMs` with no new commit and no fresh inbox
+    // wait, the snapshot builder queries the PR for a ninthwave reviewer
+    // comment. If no reviewer comment exists, the reviewer is treated as dead
+    // (e.g., confused-deputy: respawned reviewer created a duplicate PR
+    // instead of posting a verdict) and we respawn it by clearing the review
+    // gate and chaining back to evaluateMerge. If a reviewer comment exists,
+    // the stall is genuine human-review wait and we leave the item alone.
+    if (
+      snap?.hasReviewerComment === false
+      && this.inboxWaitStalled(item, snap, now)
+    ) {
+      const stallActions = this.handleReviewPendingStall(item, snap, now);
+      if (stallActions) return [...actions, ...stallActions];
+    }
+
     return actions;
+  }
+
+  /**
+   * Recover from a parked review-pending stall by treating the reviewer as
+   * dead and chaining through evaluateMerge to launch a fresh review worker.
+   *
+   * Resets the review gate (`reviewCompleted = false`, `lastReviewedCommitSha = null`)
+   * so evaluateMerge does not short-circuit on the stale state, and transitions
+   * to ci-passed which is the natural launch point for a re-review.
+   *
+   * Returns null when recovery is not possible (item already over the review
+   * round budget). Skipping in that case preserves the existing stuck path.
+   */
+  private handleReviewPendingStall(
+    item: OrchestratorItem,
+    snap: ItemSnapshot | undefined,
+    now: Date,
+  ): Action[] | null {
+    if ((item.reviewRound ?? 0) >= this.config.maxReviewRounds) {
+      return null;
+    }
+    this.emitWorkerRespawnEvent(item, "review-pending-stall");
+    item.reviewCompleted = false;
+    item.lastReviewedCommitSha = null;
+    item.sessionParked = false;
+    this.transition(item, "ci-passed", snap?.eventTime);
+    return this.evaluateMerge(item, snap, snap?.eventTime, now);
   }
 
   /**
