@@ -19,6 +19,8 @@ import {
   updatePrBody,
   upsertDeletedFileReviewComment,
   deletedFileReviewCommentMarker,
+  hasNinthwaveReviewerComment,
+  NINTHWAVE_REVIEWER_COMMENT_SIGNATURE,
 } from "../core/gh.ts";
 import { setupTempRepo, cleanupTempRepos } from "./helpers.ts";
 
@@ -667,3 +669,95 @@ describe("ensureDomainLabels", () => {
 // test/contract/gh-pr-status.test.ts (via gh module spies).
 // Cannot test sync variants here because watch.test.ts's vi.mock leaks
 // (bun test shared-process model -- see CLAUDE.md).
+
+// ── hasNinthwaveReviewerComment ────────────────────────────────────
+
+describe("hasNinthwaveReviewerComment", () => {
+  // The reviewer signature is the same prefix `executePostReview` writes when
+  // posting verdicts. Keep this constant in sync; the signature is the
+  // detection contract for the parked-worker stall recovery (H-ORCH-17).
+  it("uses the reviewer signature constant exposed for callers", () => {
+    expect(NINTHWAVE_REVIEWER_COMMENT_SIGNATURE).toBe("**[Reviewer](");
+  });
+
+  it("returns true when an issue comment carries the reviewer signature", () => {
+    runSpy.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === "repo") {
+        return { stdout: "owner/repo", stderr: "", exitCode: 0 };
+      }
+      if (args[1] === "repos/owner/repo/issues/42/comments") {
+        return {
+          stdout: JSON.stringify([
+            { id: 1, body: "**[Reviewer](https://github.com/owner/repo/blob/main/agents/reviewer.md)** Verdict: Approved" },
+          ]),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      // Review comments query should not be called once issue comments match.
+      return { stdout: "[]", stderr: "", exitCode: 0 };
+    });
+
+    expect(hasNinthwaveReviewerComment("/repo", 42)).toBe(true);
+  });
+
+  it("returns true when only a review (inline) comment carries the signature", () => {
+    runSpy.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === "repo") {
+        return { stdout: "owner/repo", stderr: "", exitCode: 0 };
+      }
+      if (args[1] === "repos/owner/repo/issues/42/comments") {
+        return { stdout: "[]", stderr: "", exitCode: 0 };
+      }
+      if (args[1] === "repos/owner/repo/pulls/42/comments") {
+        return {
+          stdout: JSON.stringify([
+            { id: 99, body: "**[Reviewer](agents/reviewer.md)** Inline note", path: "core/foo.ts" },
+          ]),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      return { stdout: "[]", stderr: "", exitCode: 0 };
+    });
+
+    expect(hasNinthwaveReviewerComment("/repo", 42)).toBe(true);
+  });
+
+  it("returns false when no comment carries the reviewer signature", () => {
+    runSpy.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === "repo") {
+        return { stdout: "owner/repo", stderr: "", exitCode: 0 };
+      }
+      if (args[1] === "repos/owner/repo/issues/42/comments") {
+        return {
+          stdout: JSON.stringify([
+            { id: 1, body: "**[Orchestrator]** Status update" },
+            { id: 2, body: "Just a normal human comment" },
+          ]),
+          stderr: "",
+          exitCode: 0,
+        };
+      }
+      if (args[1] === "repos/owner/repo/pulls/42/comments") {
+        return { stdout: "[]", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+
+    expect(hasNinthwaveReviewerComment("/repo", 42)).toBe(false);
+  });
+
+  it("returns false on API failure rather than silently swallowing the stall", () => {
+    runSpy.mockImplementation((_cmd: string, args: string[]) => {
+      if (args[0] === "repo") {
+        return { stdout: "", stderr: "no remote", exitCode: 1 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+
+    // getRepoOwner throws when `gh repo view` fails; the helper must not
+    // crash and should return false so the orchestrator retries next cycle.
+    expect(hasNinthwaveReviewerComment("/repo", 42)).toBe(false);
+  });
+});

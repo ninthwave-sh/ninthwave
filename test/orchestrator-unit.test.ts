@@ -7739,3 +7739,284 @@ describe("session parking (H-SP-2)", () => {
     expect(actions.some((a) => a.type === "launch" && a.itemId === "H-1-1")).toBe(true);
   });
 });
+
+// ── Parked-worker stall detector (H-ORCH-17) ──────────────────────────
+
+describe("parked-worker stall detector", () => {
+  // Fix the wall-clock so we can drive `inboxWaitingSince` deterministically.
+  // 5 min is the default `inboxWaitExpireMs`, so make the timestamps an order
+  // of magnitude larger than the threshold to avoid boundary flakiness.
+  const STALL_NOW = new Date("2026-01-15T12:00:00Z");
+  const STALE_TS = "2026-01-15T11:50:00Z"; // 10 min old (well past 5 min)
+  const FRESH_TS = "2026-01-15T11:59:30Z"; // 30 s old (well inside threshold)
+
+  function setupParkedReviewPending(orch: Orchestrator, id = "H-1-1"): void {
+    orch.addItem(makeWorkItem(id));
+    const item = orch.getItem(id)!;
+    item.reviewCompleted = true;
+    item.sessionParked = true;
+    item.prNumber = 42;
+    item.reviewRound = 1;
+    item.lastReviewedCommitSha = "sha-old";
+    orch.hydrateState(id, "review-pending");
+    // Push lastTransition into the past so the stall window can elapse.
+    item.lastTransition = STALE_TS;
+  }
+
+  function makeStallSnapshot(overrides: Partial<ItemSnapshot> = {}): ItemSnapshot {
+    return {
+      id: "H-1-1",
+      prNumber: 42,
+      prState: "open",
+      lastCommitTime: STALE_TS,
+      headSha: "sha-old",
+      inboxSnapshot: {
+        pendingCount: 0,
+        waitingSince: STALE_TS,
+        namespace: "test",
+        lastActivity: null,
+      },
+      ...overrides,
+    };
+  }
+
+  it("respawns the reviewer when stalled with no reviewer comment", () => {
+    const events: Array<{ event: string; data?: Record<string, unknown> }> = [];
+    const orch = new Orchestrator({
+      mergeStrategy: "auto",
+      onEvent: (_id, event, data) => events.push({ event, data }),
+    });
+    setupParkedReviewPending(orch);
+
+    const actions = orch.processTransitions(
+      snapshotWith([makeStallSnapshot({ hasReviewerComment: false })]),
+      STALL_NOW,
+    );
+
+    const item = orch.getItem("H-1-1")!;
+    // Recovery resets the review gate and chains through evaluateMerge,
+    // which transitions ci-passed -> reviewing and emits a launch-review.
+    expect(item.state).toBe("reviewing");
+    expect(item.reviewCompleted).toBe(false);
+    expect(item.lastReviewedCommitSha).toBeNull();
+    expect(item.sessionParked).toBe(false);
+    expect(actions.some((a) => a.type === "launch-review")).toBe(true);
+    expect(events.some((e) =>
+      e.event === "worker-respawn" && e.data?.trigger === "review-pending-stall",
+    )).toBe(true);
+  });
+
+  it("does not respawn when a reviewer comment is already present", () => {
+    const events: Array<{ event: string; data?: Record<string, unknown> }> = [];
+    const orch = new Orchestrator({
+      mergeStrategy: "auto",
+      onEvent: (_id, event, data) => events.push({ event, data }),
+    });
+    setupParkedReviewPending(orch);
+
+    const actions = orch.processTransitions(
+      snapshotWith([makeStallSnapshot({ hasReviewerComment: true })]),
+      STALL_NOW,
+    );
+
+    const item = orch.getItem("H-1-1")!;
+    expect(item.state).toBe("review-pending");
+    expect(item.reviewCompleted).toBe(true);
+    expect(item.sessionParked).toBe(true);
+    expect(actions.some((a) => a.type === "launch-review")).toBe(false);
+    expect(events.some((e) => e.event === "worker-respawn")).toBe(false);
+  });
+
+  it("does not respawn when hasReviewerComment is undefined (snapshot skipped check)", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    setupParkedReviewPending(orch);
+
+    // No hasReviewerComment field: snapshot decided the stall window had not
+    // elapsed (or the API call failed). Recovery should not fire.
+    const actions = orch.processTransitions(
+      snapshotWith([makeStallSnapshot()]),
+      STALL_NOW,
+    );
+
+    const item = orch.getItem("H-1-1")!;
+    expect(item.state).toBe("review-pending");
+    expect(actions.some((a) => a.type === "launch-review")).toBe(false);
+  });
+
+  it("clears the stall when a fresh commit lands inside the window", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    setupParkedReviewPending(orch);
+
+    // Fresh commit (and fresh waitingSince) means the stall window has not
+    // actually elapsed -- recovery must not fire even though the snapshot
+    // pre-populated hasReviewerComment=false.
+    const actions = orch.processTransitions(
+      snapshotWith([makeStallSnapshot({
+        hasReviewerComment: false,
+        lastCommitTime: FRESH_TS,
+        inboxSnapshot: {
+          pendingCount: 0,
+          waitingSince: FRESH_TS,
+          namespace: "test",
+          lastActivity: null,
+        },
+      })]),
+      STALL_NOW,
+    );
+
+    const item = orch.getItem("H-1-1")!;
+    expect(item.state).toBe("review-pending");
+    expect(actions.some((a) => a.type === "launch-review")).toBe(false);
+  });
+
+  it("respects inboxWaitExpireMs configuration", () => {
+    // Tighten the threshold to 30 s. With a 30 s old timestamp, 30 s+ should
+    // elapse the window and recovery should fire.
+    const events: Array<{ event: string }> = [];
+    const orch = new Orchestrator({
+      mergeStrategy: "auto",
+      inboxWaitExpireMs: 30_000,
+      onEvent: (_id, event) => events.push({ event }),
+    });
+    setupParkedReviewPending(orch);
+    orch.getItem("H-1-1")!.lastTransition = "2026-01-15T11:59:00Z"; // 60 s old
+
+    const actions = orch.processTransitions(
+      snapshotWith([makeStallSnapshot({
+        hasReviewerComment: false,
+        lastCommitTime: "2026-01-15T11:59:00Z",
+        inboxSnapshot: {
+          pendingCount: 0,
+          waitingSince: "2026-01-15T11:59:00Z",
+          namespace: "test",
+          lastActivity: null,
+        },
+      })]),
+      STALL_NOW,
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("reviewing");
+    expect(actions.some((a) => a.type === "launch-review")).toBe(true);
+  });
+
+  it("disabling the detector via inboxWaitExpireMs=0 keeps the item parked", () => {
+    const orch = new Orchestrator({
+      mergeStrategy: "auto",
+      inboxWaitExpireMs: 0,
+    });
+    setupParkedReviewPending(orch);
+
+    const actions = orch.processTransitions(
+      snapshotWith([makeStallSnapshot({ hasReviewerComment: false })]),
+      STALL_NOW,
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("review-pending");
+    expect(actions.some((a) => a.type === "launch-review")).toBe(false);
+  });
+
+  it("does not recurse past maxReviewRounds", () => {
+    const orch = new Orchestrator({
+      mergeStrategy: "auto",
+      maxReviewRounds: 2,
+    });
+    setupParkedReviewPending(orch);
+    orch.getItem("H-1-1")!.reviewRound = 2;
+
+    orch.processTransitions(
+      snapshotWith([makeStallSnapshot({ hasReviewerComment: false })]),
+      STALL_NOW,
+    );
+
+    // Round budget exhausted: stall recovery is skipped and the existing
+    // review-pending state is preserved (the item will be marked stuck via
+    // the standard maxReviewRounds path on the next review attempt).
+    const item = orch.getItem("H-1-1")!;
+    expect(item.state).toBe("review-pending");
+    expect(item.sessionParked).toBe(true);
+  });
+
+  it("respawns an implementing worker stuck in feedback drain-wait", () => {
+    const events: Array<{ event: string; data?: Record<string, unknown> }> = [];
+    const orch = new Orchestrator({
+      mergeStrategy: "auto",
+      onEvent: (_id, event, data) => events.push({ event, data }),
+    });
+    orch.addItem(makeWorkItem("H-1-1"));
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.workspaceRef = "workspace:1";
+    item.worktreePath = "/tmp/wt";
+    item.needsFeedbackResponse = true;
+    item.pendingFeedbackMessage = "Address this feedback";
+    // SHA gate: feedback was given on this commit and the worker has not
+    // pushed a new one. Without this match, handleImplementing would treat
+    // the open PR as ready-for-CI and transition out of implementing.
+    item.lastReviewedCommitSha = "sha-feedback";
+    orch.hydrateState("H-1-1", "implementing");
+    item.lastTransition = STALE_TS;
+    item.lastCommitTime = STALE_TS;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        prNumber: 42,
+        prState: "open",
+        headSha: "sha-feedback",
+        workerAlive: true,
+        lastCommitTime: STALE_TS,
+        lastHeartbeat: { ts: STALE_TS, label: "waiting" },
+        inboxSnapshot: {
+          pendingCount: 0,
+          waitingSince: STALE_TS,
+          namespace: "test",
+          lastActivity: null,
+        },
+      }]),
+      STALL_NOW,
+    );
+
+    // respawnForFeedback transitions to ready, stashes the workspace ref for
+    // executeRetry, then launchReadyItems promotes ready -> launching in the
+    // same cycle.
+    const respawned = orch.getItem("H-1-1")!;
+    expect(respawned.state).toBe("launching");
+    expect(respawned.needsFeedbackResponse).toBe(true);
+    expect(respawned.pendingFeedbackMessage).toBe("Address this feedback");
+    expect(actions.some((a) => a.type === "retry")).toBe(true);
+    expect(events.some((e) =>
+      e.event === "worker-respawn" && e.data?.trigger === "feedback-wait-stall",
+    )).toBe(true);
+  });
+
+  it("does not respawn an implementing worker without needsFeedbackResponse", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    const item = orch.getItem("H-1-1")!;
+    item.workspaceRef = "workspace:1";
+    item.worktreePath = "/tmp/wt";
+    orch.hydrateState("H-1-1", "implementing");
+    item.lastTransition = STALE_TS;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        workerAlive: true,
+        lastCommitTime: STALE_TS,
+        lastHeartbeat: { ts: STALE_TS, label: "waiting" },
+        inboxSnapshot: {
+          pendingCount: 0,
+          waitingSince: STALE_TS,
+          namespace: "test",
+          lastActivity: null,
+        },
+      }]),
+      STALL_NOW,
+    );
+
+    // Worker is in normal implementing state -- the drain-wait detector must
+    // not fire here. Existing activity-timeout logic still governs death.
+    expect(orch.getItem("H-1-1")!.state).toBe("implementing");
+    expect(actions.some((a) => a.type === "retry")).toBe(false);
+  });
+});

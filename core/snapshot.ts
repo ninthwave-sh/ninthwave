@@ -26,6 +26,8 @@ import {
   getDefaultBranchAsync as defaultGetDefaultBranchAsync,
   getMergeCommitSha as defaultGetMergeCommitSha,
   fetchAllNinthwavePRsAsync as defaultFetchAllPRsAsync,
+  hasNinthwaveReviewerComment as defaultHasNinthwaveReviewerComment,
+  hasNinthwaveReviewerCommentAsync as defaultHasNinthwaveReviewerCommentAsync,
   type PrComment,
   type PrBulkCache,
 } from "./gh.ts";
@@ -337,6 +339,46 @@ export async function getWorktreeLastCommitTimeAsync(
   }
 }
 
+// ── Parked-worker stall detector ──────────────────────────────────
+
+/**
+ * Default stall threshold for the parked-worker detector when callers do not
+ * inject one. Mirrors `OrchestratorConfig.inboxWaitExpireMs`. Kept here so
+ * standalone callers of buildSnapshot (mostly tests) can still drive the
+ * detector without hard-coding the constant in many places.
+ */
+export const DEFAULT_INBOX_WAIT_EXPIRE_MS = 5 * 60 * 1000;
+
+/**
+ * Compute whether a parked-worker stall window has elapsed.
+ *
+ * Trigger window: `now - max(inboxWaitingSince, lastCommitTime, lastTransition)
+ * > expireMs`. Using the most recent of those three timestamps avoids false
+ * positives -- a fresh commit, a fresh transition, or an in-progress inbox wait
+ * all reset the timer, so the detector only fires when the item is genuinely
+ * idle.
+ */
+export function isInboxWaitStalled(
+  args: {
+    inboxWaitingSince?: string | null;
+    lastCommitTime?: string | null;
+    lastTransition?: string | null;
+  },
+  now: Date,
+  expireMs: number,
+): boolean {
+  if (expireMs <= 0) return false;
+  const candidates: number[] = [];
+  for (const ts of [args.inboxWaitingSince, args.lastCommitTime, args.lastTransition]) {
+    if (!ts) continue;
+    const ms = new Date(ts).getTime();
+    if (Number.isFinite(ms)) candidates.push(ms);
+  }
+  if (candidates.length === 0) return false;
+  const mostRecent = Math.max(...candidates);
+  return now.getTime() - mostRecent > expireMs;
+}
+
 // ── Polling priority ──────────────────────────────────────────────
 
 /**
@@ -384,6 +426,9 @@ export function buildSnapshot(
   getMergeCommitSha: (repoRoot: string, prNumber: number) => string | null = defaultGetMergeCommitSha,
   getDefaultBranch: (repoRoot: string) => string | null = defaultGetDefaultBranch,
   getHeadSha: (repoRoot: string, ref: string) => string | null = defaultResolveRef,
+  checkReviewerComment: (repoRoot: string, prNumber: number) => boolean = defaultHasNinthwaveReviewerComment,
+  inboxWaitExpireMs: number = orch.config.inboxWaitExpireMs ?? DEFAULT_INBOX_WAIT_EXPIRE_MS,
+  now: Date = new Date(),
 ): PollSnapshot {
   const items: ItemSnapshot[] = [];
   const readyIds: string[] = [];
@@ -632,6 +677,31 @@ export function buildSnapshot(
       }
     }
 
+    // Parked-worker stall detector: when a review-pending item has been parked
+    // for longer than `inboxWaitExpireMs` with no new commit and no fresh inbox
+    // wait, query PR comment history to see whether the reviewer ever ran. The
+    // orchestrator handler uses this signal to decide between respawning the
+    // reviewer (no comment) and clearing the stall (comment present).
+    if (
+      orchItem.state === "review-pending"
+      && snap.prNumber
+      && isInboxWaitStalled(
+          {
+            inboxWaitingSince: snap.inboxSnapshot?.waitingSince,
+            lastCommitTime: snap.lastCommitTime ?? orchItem.lastCommitTime,
+            lastTransition: orchItem.lastTransition,
+          },
+          now,
+          inboxWaitExpireMs,
+        )
+    ) {
+      try {
+        snap.hasReviewerComment = checkReviewerComment(repoRoot, snap.prNumber);
+      } catch {
+        // Best-effort: leave undefined and the orchestrator will retry next cycle.
+      }
+    }
+
     items.push(snap);
   }
 
@@ -671,6 +741,9 @@ export async function buildSnapshotAsync(
   queue?: RequestQueue,
   getHeadSha: (repoRoot: string, ref: string) => string | null | Promise<string | null> = defaultResolveRef,
   fetchAllPRs: (repoRoot: string) => Promise<PrBulkCache | null> = defaultFetchAllPRsAsync,
+  checkReviewerComment: (repoRoot: string, prNumber: number) => boolean | Promise<boolean> = defaultHasNinthwaveReviewerCommentAsync,
+  inboxWaitExpireMs: number = orch.config.inboxWaitExpireMs ?? DEFAULT_INBOX_WAIT_EXPIRE_MS,
+  now: Date = new Date(),
 ): Promise<PollSnapshot> {
   const items: ItemSnapshot[] = [];
   const readyIds: string[] = [];
@@ -922,6 +995,27 @@ export async function buildSnapshotAsync(
             snap.newComments = comments;
           }
         } catch { /* best-effort */ }
+      }
+    }
+
+    // Parked-worker stall detector (see sync variant for rationale).
+    if (
+      orchItem.state === "review-pending"
+      && snap.prNumber
+      && isInboxWaitStalled(
+          {
+            inboxWaitingSince: snap.inboxSnapshot?.waitingSince,
+            lastCommitTime: snap.lastCommitTime ?? orchItem.lastCommitTime,
+            lastTransition: orchItem.lastTransition,
+          },
+          now,
+          inboxWaitExpireMs,
+        )
+    ) {
+      try {
+        snap.hasReviewerComment = await checkReviewerComment(repoRoot, snap.prNumber);
+      } catch {
+        // Best-effort: leave undefined and the orchestrator will retry next cycle.
       }
     }
 

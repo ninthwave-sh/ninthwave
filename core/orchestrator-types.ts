@@ -290,6 +290,14 @@ export interface OrchestratorConfig {
   gracePeriodMs: number;
   /** Max number of times extendTimeout() can push the deadline forward. Default: 3. */
   maxTimeoutExtensions: number;
+  /** Stall threshold (ms) for parked-worker recovery. When a review-pending item or an
+   *  implementing item with `needsFeedbackResponse` has been waiting on the inbox (or
+   *  parked without a new commit) longer than this, the orchestrator runs the
+   *  parked-worker stall detector. For review-pending items it queries PR comment
+   *  history for a ninthwave reviewer signature; if absent the reviewer is treated as
+   *  dead and respawned. For implementing items the stalled worker is respawned with
+   *  the pending feedback message. Default: 5 minutes. */
+  inboxWaitExpireMs: number;
   /** Optional callback invoked on every state transition. Receives item ID, previous state, new state, detected timestamp, and detection latency in ms. */
   onTransition?: (itemId: string, from: string, to: string, timestamp: string, latencyMs: number) => void;
   /** Optional callback for structured events that don't result in state transitions (e.g., timeout suppression). */
@@ -341,6 +349,14 @@ export interface ItemSnapshot {
   headSha?: string;
   /** One-shot signal: worker addressed feedback without code changes. */
   feedbackDoneSignal?: boolean;
+  /**
+   * Parked-worker stall detector signal. Populated only when stall conditions are
+   * met for a review-pending item: true when a ninthwave reviewer comment is
+   * present on the PR (so the reviewer ran), false when no reviewer comment exists
+   * (treat the reviewer as dead and respawn). Undefined when the check was skipped
+   * (item not stalled or no PR number yet). See `OrchestratorConfig.inboxWaitExpireMs`.
+   */
+  hasReviewerComment?: boolean;
 }
 
 export interface PollSnapshot {
@@ -669,6 +685,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   ciPendingFailGraceMs: 60_000,
   gracePeriodMs: 5 * 60 * 1000,  // 5 minutes
   maxTimeoutExtensions: 3,
+  inboxWaitExpireMs: 5 * 60 * 1000,  // 5 minutes
 };
 
 // ── Orchestrator timeouts ────────────────────────────────────────────
