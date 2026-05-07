@@ -6038,6 +6038,111 @@ describe("Orchestrator", () => {
         );
         expect(resumeAction).toBeUndefined();
       });
+
+      // ── Merged-dep suppression for resume nudge (M-ORCH-16) ────────────
+
+      it("suppresses resume nudge when recovering item has a merged dependency", () => {
+        // Three-level stack: A-1-1 → A-1-2 → A-1-3.
+        // A-1-1 has merged into main, leaving A-1-2 (the recovering item)
+        // with a stale base branch. Telling A-1-3 to rebase onto ninthwave/A-1-2
+        // would chain stale commits; the orchestrator must suppress that nudge
+        // so the standard behind-main detection rebases A-1-3 onto main.
+        orch.addItem(makeWorkItem("A-1-1"));
+        orch.getItem("A-1-1")!.reviewCompleted = true;
+        orch.addItem(makeWorkItem("A-1-2", ["A-1-1"]));
+        orch.getItem("A-1-2")!.reviewCompleted = true;
+        orch.addItem(makeWorkItem("A-1-3", ["A-1-2"]));
+        orch.hydrateState("A-1-1", "done");
+        orch.getItem("A-1-1")!.prNumber = 41;
+        orch.hydrateState("A-1-2", "ci-failed");
+        orch.getItem("A-1-2")!.prNumber = 42;
+        orch.getItem("A-1-2")!.ciFailCount = 1;
+        orch.hydrateState("A-1-3", "ci-pending");
+        orch.getItem("A-1-3")!.prNumber = 43;
+        orch.getItem("A-1-3")!.workspaceRef = "workspace:3";
+        orch.getItem("A-1-3")!.baseBranch = "ninthwave/A-1-2";
+
+        // A-1-2 recovers: ci-failed → ci-pending. A-1-1 (its dep) is already done.
+        const actions = orch.processTransitions(
+          snapshotWith([
+            { id: "A-1-2", prNumber: 42, prState: "open", ciStatus: "pending" },
+            { id: "A-1-3", prNumber: 43, prState: "open", ciStatus: "pending" },
+          ]),
+        );
+
+        expect(orch.getItem("A-1-2")!.state).toBe("ci-pending");
+        // No resume nudge -- A-1-2's dep is merged so its branch may be stale.
+        const resumeAction = actions.find(
+          (a) => a.itemId === "A-1-3" && a.message?.includes("Resume"),
+        );
+        expect(resumeAction).toBeUndefined();
+      });
+
+      it("suppresses resume nudge when recovering item has a merged-state dependency", () => {
+        // Same scenario as above but the dep is in the intermediate "merged"
+        // state (post-merge, pre-cleanup) rather than fully "done".
+        orch.addItem(makeWorkItem("A-1-1"));
+        orch.getItem("A-1-1")!.reviewCompleted = true;
+        orch.addItem(makeWorkItem("A-1-2", ["A-1-1"]));
+        orch.getItem("A-1-2")!.reviewCompleted = true;
+        orch.addItem(makeWorkItem("A-1-3", ["A-1-2"]));
+        orch.hydrateState("A-1-1", "merged");
+        orch.getItem("A-1-1")!.prNumber = 41;
+        orch.hydrateState("A-1-2", "ci-failed");
+        orch.getItem("A-1-2")!.prNumber = 42;
+        orch.getItem("A-1-2")!.ciFailCount = 1;
+        orch.hydrateState("A-1-3", "ci-pending");
+        orch.getItem("A-1-3")!.prNumber = 43;
+        orch.getItem("A-1-3")!.workspaceRef = "workspace:3";
+        orch.getItem("A-1-3")!.baseBranch = "ninthwave/A-1-2";
+
+        const actions = orch.processTransitions(
+          snapshotWith([
+            { id: "A-1-2", prNumber: 42, prState: "open", ciStatus: "pending" },
+            { id: "A-1-3", prNumber: 43, prState: "open", ciStatus: "pending" },
+          ]),
+        );
+
+        const resumeAction = actions.find(
+          (a) => a.itemId === "A-1-3" && a.message?.includes("Resume"),
+        );
+        expect(resumeAction).toBeUndefined();
+      });
+
+      it("still sends resume nudge when recovering item's deps are not yet merged", () => {
+        // Regression check: only suppress when the dep is genuinely merged/done.
+        // If the dep is still active (e.g. ci-pending, reviewing), the standard
+        // resume nudge must still flow.
+        orch.addItem(makeWorkItem("A-1-1"));
+        orch.getItem("A-1-1")!.reviewCompleted = true;
+        orch.addItem(makeWorkItem("A-1-2", ["A-1-1"]));
+        orch.getItem("A-1-2")!.reviewCompleted = true;
+        orch.addItem(makeWorkItem("A-1-3", ["A-1-2"]));
+        orch.hydrateState("A-1-1", "ci-pending");
+        orch.getItem("A-1-1")!.prNumber = 41;
+        orch.hydrateState("A-1-2", "ci-failed");
+        orch.getItem("A-1-2")!.prNumber = 42;
+        orch.getItem("A-1-2")!.ciFailCount = 1;
+        orch.hydrateState("A-1-3", "ci-pending");
+        orch.getItem("A-1-3")!.prNumber = 43;
+        orch.getItem("A-1-3")!.workspaceRef = "workspace:3";
+        orch.getItem("A-1-3")!.baseBranch = "ninthwave/A-1-2";
+
+        const actions = orch.processTransitions(
+          snapshotWith([
+            { id: "A-1-1", prNumber: 41, prState: "open", ciStatus: "pending" },
+            { id: "A-1-2", prNumber: 42, prState: "open", ciStatus: "pending" },
+            { id: "A-1-3", prNumber: 43, prState: "open", ciStatus: "pending" },
+          ]),
+        );
+
+        expect(orch.getItem("A-1-2")!.state).toBe("ci-pending");
+        const resumeAction = actions.find(
+          (a) => a.itemId === "A-1-3" && a.message?.includes("Resume"),
+        );
+        expect(resumeAction).toBeDefined();
+        expect(resumeAction!.message).toContain("dependency A-1-2 CI is back to pending");
+      });
     });
 
     // ── Stack comment integration (M-STK-6) ────────────────────────────
