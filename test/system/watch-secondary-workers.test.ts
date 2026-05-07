@@ -19,6 +19,7 @@ import {
   fakeAiSuccessScenario,
   readFakeAiContext,
   readFakeAiPrompt,
+  readFakeAiState,
 } from "./helpers/fake-ai-scenario.ts";
 
 const TEST_BIN_DIR = join(import.meta.dirname, "..", "bin");
@@ -638,7 +639,38 @@ describe("system: watch secondary workers", () => {
       );
       expect(context.agent).toBe("ninthwave-forward-fixer");
 
-      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      // Deterministically wait for the forward-fixer to finish and the orchestrator
+      // to observe the post-exit world. Replaces a previous fixed 5-second sleep
+      // that gave non-deterministic coverage of the boundary -- on slow CI the
+      // orchestrator might not have polled at all in 5s; on fast hardware it
+      // could cross the worker-death threshold inside the sleep window.
+      //
+      // 1) Wait for the fake worker to write its terminal status. The shell
+      //    script writes state.env right before exit, so this is a deterministic
+      //    "the worker is gone" signal.
+      const workerRunId = fakeAiDefaultRunId("H-SWW-5", "ninthwave-forward-fixer");
+      const workerStatus = await waitFor(() => {
+        try {
+          const status = readFakeAiState(harness.stateDir, workerRunId).status;
+          return status === "completed" || status === "signaled" ? status : false;
+        } catch { return false; }
+      }, { timeoutMs: 30_000, description: "fake forward-fixer terminal state" });
+      expect(["completed", "signaled"]).toContain(workerStatus);
+
+      // 2) Wait for the orchestrator to advance through at least one poll cycle
+      //    after the worker exited. The state file's updatedAt is bumped on
+      //    every poll, so observing a different value proves the orchestrator
+      //    saw the post-exit world. We deliberately do NOT wait for the
+      //    NOT_ALIVE_THRESHOLD (5) consecutive dead polls: this test is
+      //    asserting the orchestrator stays safe during the debouncing window,
+      //    not that it never escalates to stuck after the threshold (a separate
+      //    invariant covered by orchestrator.test.ts).
+      const baselineUpdatedAt = harness.readOrchestratorState()?.updatedAt ?? "";
+      await waitFor(() => {
+        const state = harness.readOrchestratorState();
+        return state && state.updatedAt !== baselineUpdatedAt ? state : false;
+      }, { timeoutMs: 30_000, description: "orchestrator poll after forward-fixer exit" });
+
       const currentState = harness.readOrchestratorState();
       const item = currentState?.items.find((entry) => entry.id === "H-SWW-5");
       expect(item).toBeDefined();

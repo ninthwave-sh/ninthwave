@@ -3803,6 +3803,32 @@ describe("Orchestrator", () => {
         expect(orch.getItem("X-1-1")!.state).toBe("fixing-forward");
         expect(actions).toHaveLength(0);
       });
+
+      // Regression for the "forward-fixer follow-up boundary" invariant
+      // exercised by test/system/watch-secondary-workers.test.ts. When the
+      // forward-fixer worker exits without merging a fix and the merge-commit
+      // CI is still failing on main, the orchestrator must not escalate to
+      // done or stuck during the worker-liveness debouncing window. The state
+      // must remain fixing-forward until either CI recovers, a repair PR
+      // appears, or NOT_ALIVE_THRESHOLD consecutive dead polls elapse.
+      it("stays fixing-forward during dead-worker debouncing while merge CI still failing", () => {
+        orch = new Orchestrator({ fixForward: true });
+        orch.addItem(makeWorkItem("X-1-1"));
+        orch.getItem("X-1-1")!.reviewCompleted = true;
+        orch.hydrateState("X-1-1", "fixing-forward");
+        orch.getItem("X-1-1")!.mergeCommitSha = "abc123";
+        orch.getItem("X-1-1")!.fixForwardWorkspaceRef = "workspace:forward-fixer-1";
+        // Walk the debouncing window: NOT_ALIVE_THRESHOLD - 1 polls with the
+        // worker dead and CI still failing. The threshold itself is covered by
+        // the "→ stuck when forward-fixer worker dies (debounced)" test above.
+        for (let i = 0; i < 4; i++) {
+          const actions = orch.processTransitions(
+            snapshotWith([{ id: "X-1-1", workerAlive: false, mergeCommitCIStatus: "fail" }]),
+          );
+          expect(orch.getItem("X-1-1")!.state).toBe("fixing-forward");
+          expect(actions).toHaveLength(0);
+        }
+      });
     });
 
     // ── done (terminal) ────────────────────────────────────────────
