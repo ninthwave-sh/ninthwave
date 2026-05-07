@@ -494,8 +494,20 @@ This can arrive as either a structured `[ORCHESTRATOR]` message or a plain-langu
 
 1. Report progress: `nw heartbeat --progress 0.95 --label "Rebasing"`
 2. Pull the latest branch tip first: `git fetch origin && git reset --hard origin/ninthwave/YOUR_WORK_ITEM_ID`
-3. Rebase onto the correct base branch:
-   - If `BASE_BRANCH` is set in your prompt: `git fetch origin $BASE_BRANCH --quiet && git rebase origin/$BASE_BRANCH`
+3. Determine the correct base branch.
+   - If `BASE_BRANCH` is set in your prompt, first check whether the dependency has already merged (mirrors the Phase 3 merged-check):
+     ```bash
+     gh pr list --head "$BASE_BRANCH" --state merged --json number --limit 1
+     ```
+     If that returns a merged PR, the dependency landed since you started. Treat this as a non-stacked rebase: rebase onto main, clear `BASE_BRANCH` for the rest of this session, and drop `--base $BASE_BRANCH` from any subsequent `gh pr edit`/`gh pr create` calls so future PR updates do not retarget the deleted branch.
+       ```bash
+       BASE_BRANCH=""
+       git fetch origin main --quiet && git rebase origin/main
+       ```
+     Otherwise, rebase onto the dependency branch:
+       ```bash
+       git fetch origin $BASE_BRANCH --quiet && git rebase origin/$BASE_BRANCH
+       ```
    - If `BASE_BRANCH` is not set: `git fetch origin main --quiet && git rebase origin/main`
 4. If the rebase succeeds cleanly, run the relevant tests, then `git push --force-with-lease` and `nw heartbeat --progress 1.0 --label "PR created"`
 5. If the rebase stops on conflicts, handle it like the dedicated rebaser would:

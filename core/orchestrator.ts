@@ -731,16 +731,26 @@ export class Orchestrator {
       }
     }
 
-    // Dep recovery: notify stacked dependents when this item recovers from ci-failed to ci-pending
+    // Dep recovery: notify stacked dependents when this item recovers from ci-failed to ci-pending.
+    // Skip the nudge if any of `item`'s own dependencies have already merged/done, since `item`'s
+    // branch may be stale relative to main. Telling dependents to rebase onto a stale branch
+    // produces redundant chain commits and child PRs behind main (M-ORCH-16). When suppressed,
+    // the standard post-merge behind-main detection will rebase dependents onto main directly.
     if (this.config.enableStacking && prevState === "ci-failed" && item.state === "ci-pending") {
-      for (const other of this.getAllItems()) {
-        if (other.baseBranch !== `ninthwave/${item.id}`) continue;
-        if (!other.workspaceRef) continue;
-        actions.push({
-          type: "rebase",
-          itemId: other.id,
-          message: `[ORCHESTRATOR] Resume: dependency ${item.id} CI is back to pending. Please rebase onto ninthwave/${item.id} and continue.`,
-        });
+      const hasMergedDep = item.workItem.dependencies.some((depId) => {
+        const dep = this.items.get(depId);
+        return dep !== undefined && (dep.state === "done" || dep.state === "merged");
+      });
+      if (!hasMergedDep) {
+        for (const other of this.getAllItems()) {
+          if (other.baseBranch !== `ninthwave/${item.id}`) continue;
+          if (!other.workspaceRef) continue;
+          actions.push({
+            type: "rebase",
+            itemId: other.id,
+            message: `[ORCHESTRATOR] Resume: dependency ${item.id} CI is back to pending. Please rebase onto ninthwave/${item.id} and continue.`,
+          });
+        }
       }
     }
 
