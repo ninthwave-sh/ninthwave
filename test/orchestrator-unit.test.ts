@@ -2711,6 +2711,168 @@ describe("handleReviewing", () => {
     expect(actions.some((a) => a.type === "daemon-rebase")).toBe(true);
     expect(actions.some((a) => a.type === "clean-review")).toBe(true);
   });
+
+  // ── Dead-reviewer detection precedence (M-ORCH-18) ──────────────────
+  // The reviewer-died path is an infrastructure recovery and must run
+  // ahead of the ciStatus === "fail" branch. Otherwise a leaked
+  // "Ninthwave / Review" failure routes to the implementer as a CI Fix
+  // Request, which the implementer cannot resolve.
+
+  it("recovers reviewer (no CI Fix Request) when reviewer dies and ciStatus is fail", () => {
+    // Reviewer worker died without a verdict and ciStatus is "fail"
+    // (e.g., the Ninthwave / Review check leaked into aggregation, or a
+    // race where real CI is briefly red). Dead-reviewer recovery must
+    // win: clean up the dead reviewer, set the review commit status to
+    // failure, and re-launch a fresh review via evaluateMerge. No CI
+    // Fix Request must be dispatched to the implementer.
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "reviewing");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewWorkspaceRef = "workspace:5";
+    // Pre-seed the liveness debounce counter so a single false reading
+    // crosses NOT_ALIVE_THRESHOLD = 5 in this poll. checkWorkerLiveness
+    // increments to 5 and returns "dead".
+    item.notAliveCount = 4;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        prNumber: 42,
+        ciStatus: "fail",
+        prState: "open",
+        workerAlive: false,
+      }]),
+      NOW,
+    );
+
+    // Recovery chain: ci-passed -> evaluateMerge -> reviewing (relaunch).
+    expect(item.state).toBe("reviewing");
+    expect(actions.some((a) => a.type === "clean-review")).toBe(true);
+    expect(actions.some((a) =>
+      a.type === "set-commit-status"
+      && a.statusState === "failure"
+      && a.statusDescription?.includes("Review worker died without verdict")
+    )).toBe(true);
+    expect(actions.some((a) => a.type === "launch-review")).toBe(true);
+    // Critical: no CI Fix Request is dispatched to the implementer.
+    expect(actions.some((a) => a.type === "notify-ci-failure")).toBe(false);
+    // CI fail counters must not be incremented for an infrastructure failure.
+    expect(item.ciFailCount).toBe(0);
+    expect(item.ciFailCountTotal).toBe(0);
+  });
+
+  it("routes CI failure to implementer when reviewer is alive and ciStatus is fail", () => {
+    // Regression guard: when the reviewer is healthy but real CI fails,
+    // the existing CI-fail path must still fire and dispatch a CI Fix
+    // Request. Reordering must not regress this behaviour.
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "reviewing");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewWorkspaceRef = "workspace:5";
+    item.notAliveCount = 0;
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        prNumber: 42,
+        ciStatus: "fail",
+        prState: "open",
+        workerAlive: true,
+      }]),
+      NOW,
+    );
+
+    expect(item.state).toBe("ci-failed");
+    expect(item.ciFailCount).toBe(1);
+    expect(actions.some((a) => a.type === "clean-review")).toBe(true);
+    expect(actions.some((a) => a.type === "notify-ci-failure")).toBe(true);
+  });
+
+  it("recovers reviewer first when reviewer dies AND ciStatus is fail; CI failure handled by next reviewer cycle", () => {
+    // When both conditions hold, recovery wins this cycle. The CI
+    // failure becomes routable on a subsequent cycle once the
+    // re-launched reviewer is alive (or after a real CI signal flips
+    // through the normal handleReviewing path with a healthy reviewer).
+    const orch = new Orchestrator({ mergeStrategy: "manual" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "reviewing");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewWorkspaceRef = "workspace:5";
+    item.notAliveCount = 4;
+
+    const cycle1 = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        prNumber: 42,
+        ciStatus: "fail",
+        prState: "open",
+        workerAlive: false,
+      }]),
+      NOW,
+    );
+
+    // Cycle 1: dead reviewer recovered and re-launched; no CI Fix Request.
+    expect(item.state).toBe("reviewing");
+    expect(cycle1.some((a) => a.type === "clean-review")).toBe(true);
+    expect(cycle1.some((a) => a.type === "launch-review")).toBe(true);
+    expect(cycle1.some((a) => a.type === "notify-ci-failure")).toBe(false);
+    expect(item.ciFailCount).toBe(0);
+
+    // Cycle 2: simulate the re-launched reviewer is now alive and
+    // attached to a fresh workspace. The CI failure is routable now
+    // through the normal handleReviewing CI-fail branch.
+    item.reviewWorkspaceRef = "workspace:6";
+    const cycle2 = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        prNumber: 42,
+        ciStatus: "fail",
+        prState: "open",
+        workerAlive: true,
+      }]),
+      new Date(NOW.getTime() + 1000),
+    );
+
+    expect(item.state).toBe("ci-failed");
+    expect(cycle2.some((a) => a.type === "notify-ci-failure")).toBe(true);
+    expect(item.ciFailCount).toBe(1);
+  });
+
+  it("does not respawn or transition while reviewer is still debouncing", () => {
+    // Below NOT_ALIVE_THRESHOLD, liveness is "debouncing", not "dead".
+    // The dead-reviewer block must not fire and the CI-fail branch
+    // must still route the failure (reviewer is not yet declared dead).
+    const orch = new Orchestrator();
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.hydrateState("H-1-1", "reviewing");
+    const item = orch.getItem("H-1-1")!;
+    item.prNumber = 42;
+    item.reviewWorkspaceRef = "workspace:5";
+    item.notAliveCount = 0; // first false reading crosses to 1, still debouncing
+
+    const actions = orch.processTransitions(
+      snapshotWith([{
+        id: "H-1-1",
+        prNumber: 42,
+        ciStatus: "pass",
+        prState: "open",
+        workerAlive: false,
+      }]),
+      NOW,
+    );
+
+    // Still in reviewing; no recovery transition.
+    expect(item.state).toBe("reviewing");
+    expect(actions.some((a) =>
+      a.type === "set-commit-status"
+      && a.statusDescription?.includes("Review worker died without verdict")
+    )).toBe(false);
+  });
 });
 
 // ── handleReviewPending CI detection (H-RX-1) ──────────────────────────

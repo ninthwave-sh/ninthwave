@@ -1699,6 +1699,34 @@ export class Orchestrator {
       return actions;
     }
 
+    // ── Dead-reviewer recovery (must run before CI-failure routing) ──
+    // If the reviewer died without writing a verdict (crash, timeout,
+    // OOM), recover by transitioning back to ci-passed for re-evaluation.
+    // This runs ahead of the ciStatus === "fail" branch below: a dead
+    // reviewer is an infrastructure failure, not a code defect, and must
+    // not be routed to the implementer as a CI Fix Request. Defense in
+    // depth: IGNORED_CHECK_NAMES already filters "Ninthwave / Review"
+    // from CI aggregation, but in any code path where the failure leaks
+    // into ciStatus (or where real CI fails alongside a dead reviewer),
+    // the reviewer must be recovered first. If real CI is genuinely
+    // failing too, the next cycle will route it via handleCiPassed.
+    if (item.reviewWorkspaceRef) {
+      const liveness = this.checkWorkerLiveness(item, snap);
+      if (liveness === "dead") {
+        this.transition(item, "ci-passed", snap?.eventTime);
+        actions.push({ type: "clean-review", itemId: item.id });
+        actions.push({
+          type: "set-commit-status",
+          itemId: item.id,
+          prNumber: item.prNumber,
+          statusState: "failure",
+          statusDescription: "Review worker died without verdict -- will retry",
+        });
+        actions.push(...this.evaluateMerge(item, snap, snap?.eventTime, now));
+        return actions;
+      }
+    }
+
     // CI regression during review → transition to ci-failed, clean up review worker
     if (snap?.ciStatus === "fail") {
       this.transition(item, "ci-failed", snap?.eventTime);
@@ -1738,26 +1766,6 @@ export class Orchestrator {
         "[ORCHESTRATOR] Rebase Request: PR has merge conflicts with main. Please rebase onto latest main.",
       ));
       return actions;
-    }
-
-    // ── Dead-reviewer recovery ───────────────────────────────────────
-    // If the reviewer died without writing a verdict (crash, timeout,
-    // OOM), recover by transitioning back to ci-passed for re-evaluation.
-    if (item.reviewWorkspaceRef) {
-      const liveness = this.checkWorkerLiveness(item, snap);
-      if (liveness === "dead") {
-        this.transition(item, "ci-passed", snap?.eventTime);
-        actions.push({ type: "clean-review", itemId: item.id });
-        actions.push({
-          type: "set-commit-status",
-          itemId: item.id,
-          prNumber: item.prNumber,
-          statusState: "failure",
-          statusDescription: "Review worker died without verdict -- will retry",
-        });
-        actions.push(...this.evaluateMerge(item, snap, snap?.eventTime, now));
-        return actions;
-      }
     }
 
     return actions;
