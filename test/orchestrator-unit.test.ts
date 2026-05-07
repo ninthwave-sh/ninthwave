@@ -7744,10 +7744,11 @@ describe("session parking (H-SP-2)", () => {
 
 describe("parked-worker stall detector", () => {
   // Fix the wall-clock so we can drive `inboxWaitingSince` deterministically.
-  // 5 min is the default `inboxWaitExpireMs`, so make the timestamps an order
-  // of magnitude larger than the threshold to avoid boundary flakiness.
+  // 90 min is the default `inboxWaitExpireMs` (a safe-guard fallback, not a
+  // liveness gate), so make STALE_TS comfortably past the window to avoid
+  // boundary flakiness.
   const STALL_NOW = new Date("2026-01-15T12:00:00Z");
-  const STALE_TS = "2026-01-15T11:50:00Z"; // 10 min old (well past 5 min)
+  const STALE_TS = "2026-01-15T10:00:00Z"; // 120 min old (well past 90 min)
   const FRESH_TS = "2026-01-15T11:59:30Z"; // 30 s old (well inside threshold)
 
   function setupParkedReviewPending(orch: Orchestrator, id = "H-1-1"): void {
@@ -7940,6 +7941,10 @@ describe("parked-worker stall detector", () => {
     const events: Array<{ event: string; data?: Record<string, unknown> }> = [];
     const orch = new Orchestrator({
       mergeStrategy: "auto",
+      // Push activity timeout above STALE_TS so the test exercises the
+      // drain-wait detector specifically, not the activity-timeout fallback
+      // that would otherwise fire first at the default 60 min threshold.
+      activityTimeoutMs: 4 * 60 * 60 * 1000,
       onEvent: (_id, event, data) => events.push({ event, data }),
     });
     orch.addItem(makeWorkItem("H-1-1"));
@@ -7990,7 +7995,13 @@ describe("parked-worker stall detector", () => {
   });
 
   it("does not respawn an implementing worker without needsFeedbackResponse", () => {
-    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    const orch = new Orchestrator({
+      mergeStrategy: "auto",
+      // Push activity timeout above STALE_TS so we isolate the drain-wait
+      // detector behavior; otherwise activity timeout would fire at 60 min
+      // and obscure the fact that the inbox-wait detector correctly skipped.
+      activityTimeoutMs: 4 * 60 * 60 * 1000,
+    });
     orch.addItem(makeWorkItem("H-1-1"));
     const item = orch.getItem("H-1-1")!;
     item.workspaceRef = "workspace:1";

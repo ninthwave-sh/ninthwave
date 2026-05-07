@@ -312,7 +312,9 @@ describe("isInboxWaitStalled", () => {
   });
 
   it("exposes a default threshold matching the OrchestratorConfig default", () => {
-    expect(DEFAULT_INBOX_WAIT_EXPIRE_MS).toBe(5 * 60 * 1000);
+    // 90 minutes -- safe-guard fallback, not a liveness gate. Long enough that
+    // a thorough reviewer or feedback-handler can finish without being respawned.
+    expect(DEFAULT_INBOX_WAIT_EXPIRE_MS).toBe(90 * 60 * 1000);
   });
 });
 

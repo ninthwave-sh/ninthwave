@@ -346,8 +346,12 @@ export async function getWorktreeLastCommitTimeAsync(
  * inject one. Mirrors `OrchestratorConfig.inboxWaitExpireMs`. Kept here so
  * standalone callers of buildSnapshot (mostly tests) can still drive the
  * detector without hard-coding the constant in many places.
+ *
+ * 90 minutes -- intentionally a long safe-guard fallback, not a liveness gate.
+ * A thorough reviewer can legitimately run for many minutes before posting a
+ * verdict, and recovering early would discard in-flight work.
  */
-export const DEFAULT_INBOX_WAIT_EXPIRE_MS = 5 * 60 * 1000;
+export const DEFAULT_INBOX_WAIT_EXPIRE_MS = 90 * 60 * 1000;
 
 /**
  * Compute whether a parked-worker stall window has elapsed.

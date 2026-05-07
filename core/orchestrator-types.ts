@@ -296,7 +296,16 @@ export interface OrchestratorConfig {
    *  parked-worker stall detector. For review-pending items it queries PR comment
    *  history for a ninthwave reviewer signature; if absent the reviewer is treated as
    *  dead and respawned. For implementing items the stalled worker is respawned with
-   *  the pending feedback message. Default: 5 minutes. */
+   *  the pending feedback message.
+   *
+   *  Intentionally a long safe-guard fallback rather than a tight liveness gate: a
+   *  thorough reviewer or feedback-handler can legitimately run for many minutes
+   *  before posting a verdict or new commit, and respawning early would discard
+   *  in-flight work and waste a session. The detector only fires after the worker
+   *  has produced no new commit, no new transition, and no fresh inbox wait for
+   *  the entire window, so a longer default is the right bias. Tighten via config
+   *  for tests or workflows that expect faster recoveries.
+   *  Default: 90 minutes. */
   inboxWaitExpireMs: number;
   /** Optional callback invoked on every state transition. Receives item ID, previous state, new state, detected timestamp, and detection latency in ms. */
   onTransition?: (itemId: string, from: string, to: string, timestamp: string, latencyMs: number) => void;
@@ -685,7 +694,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
   ciPendingFailGraceMs: 60_000,
   gracePeriodMs: 5 * 60 * 1000,  // 5 minutes
   maxTimeoutExtensions: 3,
-  inboxWaitExpireMs: 5 * 60 * 1000,  // 5 minutes
+  inboxWaitExpireMs: 90 * 60 * 1000,  // 90 minutes -- safe-guard fallback, not a liveness gate.
 };
 
 // ── Orchestrator timeouts ────────────────────────────────────────────
