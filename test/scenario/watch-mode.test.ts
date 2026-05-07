@@ -278,4 +278,175 @@ describe("scenario: watch mode", () => {
     expect(watchNewLog).toBeDefined();
     expect(watchNewLog!.newIds).toEqual(["D-2"]);
   });
+
+  it("reconcile drops a queued item when its file disappears, freeing dependents", async () => {
+    const fakeGh = new FakeGitHub();
+    const fakeMux = new FakeMux();
+    const orch = makeOrch();
+
+    // Initial state: R-1 (queued, never starts) plus R-2 that depends on R-1.
+    // R-2 cannot launch until R-1 either completes or is dropped.
+    orch.addItem(makeWorkItem("R-1"));
+    orch.addItem(makeWorkItem("R-2", ["R-1"]));
+
+    const actionDeps = buildActionDeps(fakeGh, fakeMux);
+    const loopDeps = buildLoopDeps(fakeGh, fakeMux, actionDeps);
+
+    // After the first scan, R-1's file is gone (e.g., user renamed/deleted it).
+    // R-2's dependency on R-1 should be dropped now that R-1 is no longer tracked.
+    let scanCallCount = 0;
+    loopDeps.scanWorkItems = vi.fn(() => {
+      scanCallCount++;
+      return [makeWorkItem("R-2", ["R-1"])];
+    });
+
+    loopDeps.sleep = async () => {
+      const r2 = orch.getItem("R-2");
+      if (r2?.state === "implementing" && !fakeGh.getPR("ninthwave/R-2")) {
+        completeItem("R-2", fakeGh, orch);
+      }
+    };
+
+    await orchestrateLoop(orch, defaultCtx, loopDeps, {
+      maxIterations: 80,
+      watch: true,
+      watchIntervalMs: 0,
+    });
+
+    // R-1 was dropped (zombie cleanup); R-2 launched and ran to done.
+    expect(orch.getItem("R-1")).toBeUndefined();
+    expect(orch.getItem("R-2")?.state).toBe("done");
+
+    const removedLog = loopDeps.__logs.find((l) => l.event === "watch_removed_items");
+    expect(removedLog).toBeDefined();
+    expect(removedLog!.removedIds).toEqual(["R-1"]);
+    expect(scanCallCount).toBeGreaterThan(0);
+  });
+
+  it("reconcile preserves items already in terminal state when their file is gone", async () => {
+    const fakeGh = new FakeGitHub();
+    const fakeMux = new FakeMux();
+    const orch = makeOrch();
+
+    orch.addItem(makeWorkItem("T-1"));
+
+    const actionDeps = buildActionDeps(fakeGh, fakeMux);
+    const loopDeps = buildLoopDeps(fakeGh, fakeMux, actionDeps);
+
+    // The work-item file disappears from origin/main only after T-1 reaches
+    // a terminal state (the merge commit removed it). Reconcile must not
+    // silently drop the entry from history once that happens.
+    let t1FileGone = false;
+    loopDeps.scanWorkItems = vi.fn(() => (t1FileGone ? [] : [makeWorkItem("T-1")]));
+
+    loopDeps.sleep = async () => {
+      const t1 = orch.getItem("T-1");
+      if (t1?.state === "implementing" && !fakeGh.getPR("ninthwave/T-1")) {
+        completeItem("T-1", fakeGh, orch);
+      }
+      if (t1?.state === "done") {
+        t1FileGone = true;
+      }
+    };
+
+    await orchestrateLoop(orch, defaultCtx, loopDeps, {
+      maxIterations: 80,
+      watch: true,
+      watchIntervalMs: 0,
+    });
+
+    expect(orch.getItem("T-1")?.state).toBe("done");
+    // No watch_removed_items log should be emitted for terminal-state items.
+    const removedLog = loopDeps.__logs.find((l) => l.event === "watch_removed_items");
+    expect(removedLog).toBeUndefined();
+  });
+
+  it("reconcile detects dependency edits and updates the tracked workItem in place", async () => {
+    const fakeGh = new FakeGitHub();
+    const fakeMux = new FakeMux();
+    const orch = makeOrch();
+
+    // E-1 starts depending on a non-existent E-0 (so it stays queued).
+    // E-2 has no deps and is the eventual target whose deps will be edited.
+    orch.addItem(makeWorkItem("E-1", ["E-0"]));
+
+    const actionDeps = buildActionDeps(fakeGh, fakeMux);
+    const loopDeps = buildLoopDeps(fakeGh, fakeMux, actionDeps);
+
+    let scanCallCount = 0;
+    loopDeps.scanWorkItems = vi.fn(() => {
+      scanCallCount++;
+      // After the first scan, the file has been edited to remove the dep on E-0.
+      if (scanCallCount === 1) return [makeWorkItem("E-1", [])];
+      return [makeWorkItem("E-1", [])];
+    });
+
+    loopDeps.sleep = async () => {
+      const e1 = orch.getItem("E-1");
+      if (e1?.state === "implementing" && !fakeGh.getPR("ninthwave/E-1")) {
+        completeItem("E-1", fakeGh, orch);
+      }
+    };
+
+    await orchestrateLoop(orch, defaultCtx, loopDeps, {
+      maxIterations: 80,
+      watch: true,
+      watchIntervalMs: 0,
+    });
+
+    expect(orch.getItem("E-1")?.state).toBe("done");
+    expect(orch.getItem("E-1")?.workItem.dependencies).toEqual([]);
+
+    const editLog = loopDeps.__logs.find((l) => l.event === "watch_edited_item");
+    expect(editLog).toBeDefined();
+    expect(editLog!.itemId).toBe("E-1");
+    expect(editLog!.changedFields).toContain("dependencies");
+  });
+
+  it("reconcile applies addition, deletion, and edit in a single tick", async () => {
+    const fakeGh = new FakeGitHub();
+    const fakeMux = new FakeMux();
+    const orch = makeOrch();
+
+    // Pre-seed three items. M-keep starts depending on a phantom dep so it
+    // sits in queued long enough for the reconcile to land. The first scan
+    // call edits M-keep's deps (clearing them), drops M-drop, and adds M-add.
+    orch.addItem(makeWorkItem("M-keep", ["M-phantom"]));
+    orch.addItem(makeWorkItem("M-drop"));
+
+    const actionDeps = buildActionDeps(fakeGh, fakeMux);
+    const loopDeps = buildLoopDeps(fakeGh, fakeMux, actionDeps);
+
+    loopDeps.scanWorkItems = vi.fn(() => [
+      makeWorkItem("M-keep", []),
+      makeWorkItem("M-add"),
+    ]);
+
+    loopDeps.sleep = async () => {
+      for (const id of ["M-keep", "M-add"]) {
+        const item = orch.getItem(id);
+        if (item?.state === "implementing" && !fakeGh.getPR(`ninthwave/${id}`)) {
+          completeItem(id, fakeGh, orch);
+        }
+      }
+    };
+
+    await orchestrateLoop(orch, defaultCtx, loopDeps, {
+      maxIterations: 120,
+      watch: true,
+      watchIntervalMs: 0,
+    });
+
+    expect(orch.getItem("M-keep")?.state).toBe("done");
+    expect(orch.getItem("M-add")?.state).toBe("done");
+    expect(orch.getItem("M-drop")).toBeUndefined();
+
+    const newLog = loopDeps.__logs.find((l) => l.event === "watch_new_items");
+    const removedLog = loopDeps.__logs.find((l) => l.event === "watch_removed_items");
+    const editedLog = loopDeps.__logs.find((l) => l.event === "watch_edited_item");
+    expect(newLog?.newIds).toEqual(["M-add"]);
+    expect(removedLog?.removedIds).toEqual(["M-drop"]);
+    expect(editedLog?.itemId).toBe("M-keep");
+    expect(editedLog?.changedFields).toContain("dependencies");
+  });
 });

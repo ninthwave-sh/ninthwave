@@ -20,6 +20,7 @@ import {
   isWorkerAliveWithCache,
   forkDaemon,
   cleanOrphanedWorktrees,
+  diffWorkItem,
   buildSessionEndedMetadata,
   parseWatchArgs,
   resolveConnectMode,
@@ -1668,6 +1669,60 @@ describe("TUI item selection helpers", () => {
 
   it("normalizeSelectedItemId clears selection when the status list is empty", () => {
     expect(normalizeSelectedItemId([], "H-TI-3", ["H-TI-1", "H-TI-3", "H-TI-2"])).toBeUndefined();
+  });
+});
+
+describe("diffWorkItem", () => {
+  it("returns null when nothing structural changed", () => {
+    const before = makeWorkItem("X-1", ["X-0"]);
+    const after = makeWorkItem("X-1", ["X-0"]);
+    expect(diffWorkItem(before, after)).toBeNull();
+  });
+
+  it("ignores rawText-only changes", () => {
+    const before = makeWorkItem("X-1");
+    const after = { ...makeWorkItem("X-1"), rawText: "## X-1\nDifferent body" };
+    expect(diffWorkItem(before, after)).toBeNull();
+  });
+
+  it("detects dependency edits and reports before/after", () => {
+    const before = makeWorkItem("X-1", ["A", "B"]);
+    const after = makeWorkItem("X-1", ["B", "C"]);
+    const result = diffWorkItem(before, after);
+    expect(result).not.toBeNull();
+    expect(result!.changedFields).toContain("dependencies");
+    expect(result!.dependencies?.before).toEqual(["A", "B"]);
+    expect(result!.dependencies?.after).toEqual(["B", "C"]);
+  });
+
+  it("treats reordered dependency arrays as unchanged", () => {
+    const before = makeWorkItem("X-1", ["A", "B"]);
+    const after = makeWorkItem("X-1", ["B", "A"]);
+    expect(diffWorkItem(before, after)).toBeNull();
+  });
+
+  it("detects priority, title, and lineage changes", () => {
+    const before = makeWorkItem("X-1");
+    const after: WorkItem = {
+      ...makeWorkItem("X-1"),
+      priority: "low",
+      title: "Updated title",
+      lineageToken: "00000000-0000-4000-8000-000000000001",
+    };
+    const result = diffWorkItem(before, after);
+    expect(result).not.toBeNull();
+    expect(result!.changedFields).toEqual(
+      expect.arrayContaining(["priority", "title", "lineageToken"]),
+    );
+    expect(result!.dependencies).toBeUndefined();
+  });
+
+  it("detects requiresManualReview toggling", () => {
+    const before = makeWorkItem("X-1");
+    const after: WorkItem = { ...makeWorkItem("X-1"), requiresManualReview: true };
+    const result = diffWorkItem(before, after);
+    expect(result).not.toBeNull();
+    expect(result!.changedFields).toContain("requiresManualReview");
   });
 });
 

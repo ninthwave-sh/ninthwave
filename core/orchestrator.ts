@@ -227,6 +227,31 @@ export class Orchestrator {
     });
   }
 
+  /**
+   * Remove a tracked item from orchestration. Used by watch-mode reconcile
+   * when a work-item file is deleted or renamed mid-session, so zombie entries
+   * do not wedge the dep graph. Callers are responsible for deciding whether
+   * removal is appropriate (e.g., preserving terminal-state items for history).
+   * Returns true if an item was removed, false if no such item existed.
+   */
+  removeItem(id: string): boolean {
+    return this.items.delete(id);
+  }
+
+  /**
+   * Replace the parsed `workItem` payload for an existing tracked item without
+   * resetting its lifecycle state, counters, or workspace refs. Used by
+   * watch-mode reconcile to pick up dependency or other parsed-field edits
+   * that happened to the file on disk after the item was first added.
+   * Returns true if the payload was replaced, false if no such item existed.
+   */
+  replaceWorkItem(id: string, workItem: WorkItem): boolean {
+    const item = this.items.get(id);
+    if (!item) return false;
+    item.workItem = workItem;
+    return true;
+  }
+
   /** Get the current state of an item. */
   getItem(id: string): OrchestratorItem | undefined {
     return this.items.get(id);

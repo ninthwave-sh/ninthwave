@@ -108,6 +108,100 @@ export function syncWorkerDisplay(
   }
 }
 
+// ── Watch-mode reconcile ───────────────────────────────────────────
+
+/**
+ * States to preserve when a tracked work-item file disappears from disk.
+ * Items in these states are either fully complete or post-merge -- the
+ * file's absence is expected (the merge commit removed it from origin/main)
+ * and dropping the entry would lose history without unblocking anything.
+ */
+const RECONCILE_PRESERVE_STATES: Set<OrchestratorItemState> = new Set([
+  "merged",
+  "forward-fix-pending",
+  "fix-forward-failed",
+  "fixing-forward",
+  "done",
+  "blocked",
+  "stuck",
+]);
+
+/** Field-level diff for a single edited work item. */
+export interface WatchReconcileEdit {
+  id: string;
+  /** Names of structural fields that changed (e.g., "dependencies", "priority"). */
+  changedFields: string[];
+  /** Before/after dependency arrays when the dependencies field changed. */
+  dependencies?: { before: string[]; after: string[] };
+}
+
+/** Result of a single reconcile pass over the work-items directory. */
+export interface WatchReconcileResult {
+  added: WorkItem[];
+  removed: string[];
+  edited: WatchReconcileEdit[];
+}
+
+const EMPTY_RECONCILE: WatchReconcileResult = { added: [], removed: [], edited: [] };
+
+/** Sort + compare two string arrays without mutating the inputs. */
+function arraysEqualSorted(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const aSorted = [...a].sort();
+  const bSorted = [...b].sort();
+  for (let i = 0; i < aSorted.length; i++) {
+    if (aSorted[i] !== bSorted[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Compare two parsed work-item payloads on the structural fields the
+ * orchestrator's lifecycle cares about. Returns `null` when nothing material
+ * has changed; otherwise returns the list of changed field names plus a
+ * before/after snapshot for the dependencies field (the most operationally
+ * important diff).
+ */
+export function diffWorkItem(
+  before: WorkItem,
+  after: WorkItem,
+): { changedFields: string[]; dependencies?: { before: string[]; after: string[] } } | null {
+  const changed: string[] = [];
+  let depDetail: { before: string[]; after: string[] } | undefined;
+
+  if (!arraysEqualSorted(before.dependencies, after.dependencies)) {
+    changed.push("dependencies");
+    depDetail = {
+      before: [...before.dependencies].sort(),
+      after: [...after.dependencies].sort(),
+    };
+  }
+  if (!arraysEqualSorted(before.bundleWith, after.bundleWith)) {
+    changed.push("bundleWith");
+  }
+  if (before.priority !== after.priority) {
+    changed.push("priority");
+  }
+  if (before.status !== after.status) {
+    changed.push("status");
+  }
+  if ((before.lineageToken ?? "") !== (after.lineageToken ?? "")) {
+    changed.push("lineageToken");
+  }
+  if (Boolean(before.requiresManualReview) !== Boolean(after.requiresManualReview)) {
+    changed.push("requiresManualReview");
+  }
+  if (before.title !== after.title) {
+    changed.push("title");
+  }
+  if (before.domain !== after.domain) {
+    changed.push("domain");
+  }
+
+  if (changed.length === 0) return null;
+  return depDetail ? { changedFields: changed, dependencies: depDetail } : { changedFields: changed };
+}
+
 // ── Adaptive poll interval ─────────────────────────────────────────
 
 /** PR-polling states: items in these states trigger GitHub API calls each cycle. */
@@ -802,27 +896,84 @@ export async function orchestrateLoop(
     log,
   });
 
-  const scanForNewWatchItems = (): WorkItem[] => {
-    if (!config.watch || !deps.scanWorkItems) return [];
+  const reconcileWatchItems = (): WatchReconcileResult => {
+    if (!config.watch || !deps.scanWorkItems) return EMPTY_RECONCILE;
 
     const freshItems = deps.scanWorkItems();
-    const existingIds = new Set(orch.getAllItems().map((i) => i.id));
-    const newItems = freshItems.filter((item) => !existingIds.has(item.id));
-    if (newItems.length === 0) return [];
+    const freshById = new Map<string, WorkItem>();
+    for (const item of freshItems) freshById.set(item.id, item);
+
+    const tracked = orch.getAllItems();
+    const trackedById = new Map(tracked.map((i) => [i.id, i] as const));
+
+    const newItems: WorkItem[] = [];
+    for (const fresh of freshItems) {
+      if (!trackedById.has(fresh.id)) newItems.push(fresh);
+    }
+
+    const removed: string[] = [];
+    for (const trackedItem of tracked) {
+      if (freshById.has(trackedItem.id)) continue;
+      // Preserve items that have already settled or are post-merge -- the
+      // file disappearing from origin/main after merge is normal, not a
+      // signal to forget the item's history.
+      if (RECONCILE_PRESERVE_STATES.has(trackedItem.state)) continue;
+      removed.push(trackedItem.id);
+    }
+
+    const edited: WatchReconcileEdit[] = [];
+    for (const fresh of freshItems) {
+      const existing = trackedById.get(fresh.id);
+      if (!existing) continue;
+      const diff = diffWorkItem(existing.workItem, fresh);
+      if (diff) edited.push({ id: fresh.id, ...diff });
+    }
+
+    if (newItems.length === 0 && removed.length === 0 && edited.length === 0) {
+      return EMPTY_RECONCILE;
+    }
 
     for (const item of newItems) {
       orch.addItem(item);
     }
+    for (const id of removed) {
+      orch.removeItem(id);
+    }
+    for (const edit of edited) {
+      const fresh = freshById.get(edit.id);
+      if (fresh) orch.replaceWorkItem(edit.id, fresh);
+    }
 
-    log({
-      ts: new Date().toISOString(),
-      level: "info",
-      event: "watch_new_items",
-      newIds: newItems.map((item) => item.id),
-      count: newItems.length,
-    });
+    if (newItems.length > 0) {
+      log({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "watch_new_items",
+        newIds: newItems.map((item) => item.id),
+        count: newItems.length,
+      });
+    }
+    if (removed.length > 0) {
+      log({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "watch_removed_items",
+        removedIds: removed,
+        count: removed.length,
+      });
+    }
+    for (const edit of edited) {
+      log({
+        ts: new Date().toISOString(),
+        level: "info",
+        event: "watch_edited_item",
+        itemId: edit.id,
+        changedFields: edit.changedFields,
+        ...(edit.dependencies ? { dependencies: edit.dependencies } : {}),
+      });
+    }
 
-    return newItems;
+    return { added: newItems, removed, edited };
   };
 
   try {
@@ -899,7 +1050,7 @@ export async function orchestrateLoop(
           }
 
           lastWatchScanMs = Date.now();
-          if (scanForNewWatchItems().length > 0) {
+          if (reconcileWatchItems().added.length > 0) {
             foundNew = true;
           }
         }
@@ -952,7 +1103,7 @@ export async function orchestrateLoop(
         const nowWatchScanMs = Date.now();
         if (nowWatchScanMs - lastWatchScanMs >= watchIntervalMs) {
           lastWatchScanMs = nowWatchScanMs;
-          scanForNewWatchItems();
+          reconcileWatchItems();
         }
       }
 
