@@ -238,6 +238,10 @@ Keep subject lines under 72 characters.
 
 Check the project instruction file for the exact test commands. Use YOUR_PARTITION for database and port isolation where applicable.
 
+**Test command selection.** Prefer the project's fastest verification command for in-worker checks when one is documented in the project instruction file (for example, a unit-only target like `bun run test:unit`, `pnpm test:unit`, or `pytest -x` rather than the full suite). The full suite is the authoritative gate, but CI runs it on the PR you open -- duplicating it locally on every iteration burns shell timeouts without changing the outcome. Reserve full-suite local runs for work items that explicitly demand full-suite coverage, or when a fast verification target is not documented for the project. When in doubt, run the fast target locally and rely on CI for the full suite.
+
+**Shell timeout.** When you invoke tests through a shell tool that supports timeouts, set the timeout to the longest practical value available (the same pattern documented for `nw inbox --wait`). Test suites can legitimately take several minutes; cutting them short with a default 120s shell timeout produces false-timeout reruns rather than real signal.
+
 Before you run tests, check for pending orchestrator messages:
 
 ```bash
