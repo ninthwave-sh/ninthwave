@@ -301,10 +301,13 @@ import {
   computeDefaultMaxInflight,
   listWorktreeIds,
   listOpenItemIds,
+  diffWorkItem,
   type CleanOrphanedDeps,
   type OrchestrateLoopDeps,
   type OrchestrateLoopConfig,
   type OrchestrateLoopResult,
+  type WatchReconcileEdit,
+  type WatchReconcileResult,
 } from "../orchestrate-event-loop.ts";
 // ── Re-exports: orchestrate-event-loop ──────────────────────────────
 export {
@@ -317,10 +320,13 @@ export {
   computeDefaultMaxInflight,
   listWorktreeIds,
   listOpenItemIds,
+  diffWorkItem,
   type CleanOrphanedDeps,
   type OrchestrateLoopDeps,
   type OrchestrateLoopConfig,
   type OrchestrateLoopResult,
+  type WatchReconcileEdit,
+  type WatchReconcileResult,
 } from "../orchestrate-event-loop.ts";
 
 interface ResolveRestartRecoveryOptions {

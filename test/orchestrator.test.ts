@@ -146,6 +146,37 @@ describe("Orchestrator", () => {
     expect(orch.getItemsByState("ready")).toHaveLength(1);
   });
 
+  it("removeItem drops a tracked entry and returns whether it existed", () => {
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.addItem(makeWorkItem("H-1-2"));
+
+    expect(orch.removeItem("H-1-1")).toBe(true);
+    expect(orch.getItem("H-1-1")).toBeUndefined();
+    expect(orch.getAllItems().map((i) => i.id)).toEqual(["H-1-2"]);
+
+    expect(orch.removeItem("H-1-1")).toBe(false);
+    expect(orch.removeItem("does-not-exist")).toBe(false);
+  });
+
+  it("replaceWorkItem swaps the parsed payload without resetting lifecycle state", () => {
+    orch.addItem(makeWorkItem("H-1-1"));
+    const original = orch.getItem("H-1-1")!;
+    original.retryCount = 7;
+    original.workspaceRef = "workspace:42";
+    orch.hydrateState("H-1-1", "implementing");
+
+    const updated = makeWorkItem("H-1-1", ["H-1-0"]);
+    expect(orch.replaceWorkItem("H-1-1", updated)).toBe(true);
+
+    const after = orch.getItem("H-1-1")!;
+    expect(after.workItem.dependencies).toEqual(["H-1-0"]);
+    expect(after.state).toBe("implementing");
+    expect(after.retryCount).toBe(7);
+    expect(after.workspaceRef).toBe("workspace:42");
+
+    expect(orch.replaceWorkItem("missing", updated)).toBe(false);
+  });
+
   // ── 2. Queued → Ready when deps are met ────────────────────────
 
   it("promotes queued items to ready when deps are met", () => {
