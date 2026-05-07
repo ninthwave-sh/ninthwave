@@ -162,7 +162,7 @@ Sometimes a work item requires no code change. Valid reasons include:
 The no-op PR template (replace the standard Phase 9 template):
 
 ```bash
-gh pr create --label "domain:YOUR_DOMAIN" --title "chore: close YOUR_WORK_ITEM_ID -- no code change needed" --body "$(cat <<'EOF'
+nw pr-create --label "domain:YOUR_DOMAIN" --title "chore: close YOUR_WORK_ITEM_ID -- no code change needed" --body "$(cat <<'EOF'
 ## Summary
 Closes YOUR_WORK_ITEM_ID: <title>
 
@@ -315,12 +315,16 @@ If `git diff origin/main -- .ninthwave/work/` shows unrelated work item drift, d
 git push -u origin ninthwave/YOUR_WORK_ITEM_ID
 ```
 
+### Use `nw pr-create`, not raw `gh pr create`
+
+Always create PRs through `nw pr-create`. It accepts the exact same flags as `gh pr create` and forwards them, but it routes through the shared rate-limit-aware retry pathway -- a GraphQL rate-limit hit is absorbed by the orchestrator's backoff/retry logic instead of consuming your prescribed retries. Real (non-rate-limit) failures still surface to you immediately.
+
 ### Stacked PRs (BASE_BRANCH)
 
 If your system prompt includes `BASE_BRANCH: <branch>`, you are stacked on a dependency branch. Create the PR against the dependency branch instead of main:
 
 ```bash
-gh pr create --base $BASE_BRANCH --title "..." --body "..."
+nw pr-create --base $BASE_BRANCH --title "..." --body "..."
 ```
 
 This gives reviewers a clean diff showing only your changes, not the dependency's changes.
@@ -328,16 +332,16 @@ This gives reviewers a clean diff showing only your changes, not the dependency'
 Before you use `--base $BASE_BRANCH`, confirm the dependency branch is still live. If the dependency has already merged, do **not** keep targeting the stale branch just because `BASE_BRANCH` was present in your startup prompt.
 
 - If `gh pr list --head "$BASE_BRANCH" --state merged --json number --limit 1` shows a merged PR for the dependency branch, create your PR normally without `--base`.
-- If `gh pr create --base $BASE_BRANCH ...` fails because the base branch is gone or stale, fetch the default branch, rebase onto it, and retry `gh pr create` without `--base`.
+- If `nw pr-create --base $BASE_BRANCH ...` fails because the base branch is gone or stale, fetch the default branch, rebase onto it, and retry `nw pr-create` without `--base`.
 
 If `BASE_BRANCH` is **not** set in your system prompt, create the PR normally (no `--base` flag needed -- it defaults to main).
 
 ### PR body template
 
-Create the PR with `gh pr create`. Use a HEREDOC for the body. Include the `--label` flag for the domain label:
+Create the PR with `nw pr-create`. Use a HEREDOC for the body. Include the `--label` flag for the domain label:
 
 ```bash
-gh pr create --label "domain:YOUR_DOMAIN" --title "fix|feat|refactor|test: <description> (YOUR_WORK_ITEM_ID)" --body "$(cat <<'EOF'
+nw pr-create --label "domain:YOUR_DOMAIN" --title "fix|feat|refactor|test: <description> (YOUR_WORK_ITEM_ID)" --body "$(cat <<'EOF'
 ## Summary
 Implements YOUR_WORK_ITEM_ID: <title>
 
@@ -370,9 +374,9 @@ EOF
 
 Choose the right PR title prefix based on the change type (`fix:`, `feat:`, `refactor:`, `test:`, `docs:`, `chore:`).
 
-If `gh pr create` fails with a rate limit or transient API error, retry up to 3 times with 30-second waits between attempts.
+`nw pr-create` already handles GraphQL rate-limit failures with backoff and retry, so you do not need to wrap it in your own retry loop. If it ultimately fails after the shared backoff exhausts, surface that error -- do not silently re-run it. For non-rate-limit transient errors (e.g., a one-off network blip), one retry is fine.
 
-After `gh pr create` returns the PR URL, extract the PR number and report it:
+After `nw pr-create` returns the PR URL, extract the PR number and report it:
 
 ```bash
 PR_NUM=$(gh pr view --json number --jq '.number')
@@ -499,7 +503,7 @@ This can arrive as either a structured `[ORCHESTRATOR]` message or a plain-langu
      ```bash
      gh pr list --head "$BASE_BRANCH" --state merged --json number --limit 1
      ```
-     If that returns a merged PR, the dependency landed since you started. Treat this as a non-stacked rebase: rebase onto main, clear `BASE_BRANCH` for the rest of this session, and drop `--base $BASE_BRANCH` from any subsequent `gh pr edit`/`gh pr create` calls so future PR updates do not retarget the deleted branch.
+     If that returns a merged PR, the dependency landed since you started. Treat this as a non-stacked rebase: rebase onto main, clear `BASE_BRANCH` for the rest of this session, and drop `--base $BASE_BRANCH` from any subsequent `gh pr edit`/`nw pr-create` calls so future PR updates do not retarget the deleted branch.
        ```bash
        BASE_BRANCH=""
        git fetch origin main --quiet && git rebase origin/main
@@ -544,4 +548,4 @@ Ignore comments prefixed with `[Orchestrator]` -- these are audit trail entries 
 - **Do NOT expand scope** beyond the work item. Note related issues in the PR body but don't fix them. The only allowed expansion is into a neighbour work item, and only when CI cannot be green otherwise; in that case pull just enough scope forward to restore green and document why in the PR body.
 - **Do NOT run shipping/deploy workflows**. Version bumping is deferred to post-merge.
 - **Keep changes scoped** to files mentioned in the work item.
-- **Every work item must result in a PR.** Your work is incomplete until `gh pr create` has run successfully. Do not stop after implementing and testing -- commit, push, and open the PR.
+- **Every work item must result in a PR.** Your work is incomplete until `nw pr-create` has run successfully. Do not stop after implementing and testing -- commit, push, and open the PR.
