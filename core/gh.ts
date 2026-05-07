@@ -708,6 +708,102 @@ export async function queryRateLimitAsync(repoRoot: string): Promise<RateLimitIn
   }
 }
 
+// ── Rate-limit-aware gh retry ──────────────────────────────────────
+//
+// Shared retry pathway for gh CLI commands -- especially write-path calls
+// like `gh pr create` that the rate-limit-aware request queue does not
+// (cannot) cover when the caller is a separate process (e.g. a worker
+// shell invoking `gh` directly).
+//
+// Detects rate-limit failures via the same classifier the read path uses
+// (`classifyGhFailure`), then waits for the GitHub budget reset window
+// before retrying, instead of letting the caller burn its prescribed
+// retries on a known-recoverable error class.
+
+export interface GhRetryOptions {
+  cwd: string;
+  /** Per-attempt timeout for the underlying gh process. */
+  timeout?: number;
+  /** Maximum number of rate-limit retries (default 5). Non-rate-limit failures bubble up immediately. */
+  maxRetries?: number;
+  /** Upper bound on a single backoff sleep in milliseconds (default 6 minutes). */
+  maxWaitMs?: number;
+  /** Floor for a single backoff sleep in milliseconds (default 5 seconds). */
+  minWaitMs?: number;
+  /** Optional retry observer (for logging/telemetry). */
+  onRetry?: (info: { attempt: number; waitMs: number; reason: GhFailureKind; stderr: string }) => void;
+  /** Test seam: override the gh runner. */
+  runAsyncImpl?: (cmd: string, args: string[], opts?: { cwd?: string; timeout?: number }) => Promise<RunResult>;
+  /** Test seam: override the rate_limit query. */
+  queryRateLimitImpl?: (repoRoot: string) => Promise<RateLimitInfo | null>;
+  /** Test seam: override sleep. */
+  sleepImpl?: (ms: number) => Promise<void>;
+  /** Test seam: override Date.now. */
+  nowImpl?: () => number;
+}
+
+/**
+ * Run a gh command with rate-limit-aware backoff and retry.
+ *
+ * Behavior:
+ * - On exit code 0, returns immediately.
+ * - On a rate-limit failure (classified by `classifyGhFailure`), queries
+ *   the rate_limit endpoint, sleeps until the budget resets (clamped to
+ *   `[minWaitMs, maxWaitMs]`), then retries up to `maxRetries` times.
+ *   If the rate_limit endpoint cannot be reached, falls back to capped
+ *   exponential backoff.
+ * - On any other failure, returns immediately so the caller can handle
+ *   it -- non-rate-limit errors are not silently retried.
+ *
+ * This is the shared rate-limit pathway both the orchestrator's direct
+ * `gh pr create` call (review-inbox) and the worker-facing `nw pr-create`
+ * CLI use, so a rate-limit hit in either context is handled the same way.
+ */
+export async function runGhWithRateLimitRetry(
+  args: string[],
+  opts: GhRetryOptions,
+): Promise<RunResult> {
+  const maxRetries = opts.maxRetries ?? 5;
+  const maxWaitMs = opts.maxWaitMs ?? 6 * 60_000;
+  const minWaitMs = opts.minWaitMs ?? 5_000;
+  const runner = opts.runAsyncImpl ?? runAsync;
+  const queryRate = opts.queryRateLimitImpl ?? queryRateLimitAsync;
+  const sleepFn = opts.sleepImpl ?? defaultSleep;
+  const now = opts.nowImpl ?? Date.now;
+
+  let lastResult: RunResult | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const result = await runner("gh", args, { cwd: opts.cwd, timeout: opts.timeout });
+    lastResult = result;
+    if (result.exitCode === 0) return result;
+
+    const kind = classifyGhFailure(result.stderr);
+    if (kind !== "rate-limit") return result;
+    if (attempt === maxRetries) return result;
+
+    // Compute wait: prefer the actual reset window; fall back to capped exponential backoff.
+    let waitMs = Math.min(maxWaitMs, Math.max(minWaitMs, 30_000 * Math.pow(2, attempt)));
+    const rateInfo = await queryRate(opts.cwd);
+    if (rateInfo && rateInfo.remaining === 0 && typeof rateInfo.reset === "number") {
+      const resetMs = rateInfo.reset * 1000;
+      const nowMs = now();
+      if (resetMs > nowMs) {
+        waitMs = Math.min(maxWaitMs, Math.max(minWaitMs, resetMs - nowMs + 1000));
+      }
+    }
+
+    opts.onRetry?.({ attempt, waitMs, reason: kind, stderr: result.stderr });
+    await sleepFn(waitMs);
+  }
+
+  // Unreachable in practice -- the loop returns on success or final attempt.
+  return lastResult ?? { stdout: "", stderr: "runGhWithRateLimitRetry: no attempts made", exitCode: 1 };
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
 /**
  * Resolve the GitHub token to use for gh CLI commands.
  * Only checks the NINTHWAVE_GITHUB_TOKEN env var.

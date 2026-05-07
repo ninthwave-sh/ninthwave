@@ -34,6 +34,7 @@ import { cmdStop } from "./commands/stop.ts";
 import { cmdRetry } from "./commands/retry.ts";
 import { cmdDoctor } from "./commands/doctor.ts";
 import { cmdHeartbeat } from "./commands/heartbeat.ts";
+import { cmdPrCreate } from "./commands/pr-create.ts";
 import { cmdFeedbackDone } from "./commands/feedback-done.ts";
 import { cmdInbox } from "./commands/inbox.ts";
 import { cmdLogs } from "./commands/logs.ts";
@@ -460,6 +461,23 @@ export const COMMAND_REGISTRY: ReadonlyArray<CommandEntry> = [
     examples: [
       'nw heartbeat --progress 0.5 --label "Writing tests"',
       'nw heartbeat --progress 1.0 --label "PR created" --pr 42',
+    ],
+  },
+  {
+    name: "pr-create",
+    usage: "pr-create [gh pr create args...]",
+    description: "Wrap `gh pr create` with rate-limit-aware retries (workers should prefer this)",
+    group: "advanced",
+    needsRoot: true,
+    needsWork: false,
+    handler: async (ctx) => {
+      const exitCode = await cmdPrCreate(ctx.args, ctx.projectRoot);
+      if (exitCode !== 0) process.exit(exitCode);
+    },
+    flags: {},
+    examples: [
+      'nw pr-create --label "domain:foo" --title "fix: bar" --body "..."',
+      "nw pr-create --base ninthwave/H-1 --title \"...\" --body \"...\"",
     ],
   },
   {
