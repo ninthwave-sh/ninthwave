@@ -144,6 +144,36 @@ Work from the bottom of the stack up:
 6. **Frontend components** -- UI
 7. **Integration/polish** -- wiring and final touches
 
+#### Validate factual claims against the actual codebase
+
+When a work item description, sketch, or acceptance criterion makes a concrete claim about the existing codebase -- a schema column, a package version's runtime behaviour, a duplicated pipeline, a route handler, a function signature -- read the code to confirm the claim before writing the work item. Do not rely on documentation, your own training data, or reasonable-looking guesses.
+
+Examples of failures this catches:
+- Acceptance criteria reference a column (e.g., `excluded_from_net_worth`) that does not exist on the schema, so the test plan is unverifiable.
+- Implementation sketch ("delete `config.headers['Content-Type']` in a request interceptor") is wrong because the installed library re-sets the header later in the pipeline. Read `node_modules/<package>/` (or the installed source for other languages) for libraries with non-trivial middleware behaviour.
+- Spec asserts "6 pages duplicate this pipeline" but a code walk shows only 1 does.
+
+For schema-dependent items: check the actual `*.ex` / `models.py` / type definitions. For package-integration items: read the installed source, not the docs. For "duplicated code" claims: confirm with grep or a code walk before quantifying.
+
+#### Refactor work items: prefer qualitative acceptance over numeric LOC
+
+Numeric line-reduction targets (`>= 150 lines net reduction`) on refactor-style items are a recurring pitfall. Refactor items typically ship with guardrails (`do not touch field bodies`, `parity preserving`); those guardrails cap the extractable surface. When the LOC target is unreachable under the item's own guardrails, every implementer faces the same false choice -- violate guardrails to hit the number, or burn cycles arguing the target was aspirational -- and reviewers re-litigate the trade-off on every PR in the wave.
+
+Default to qualitative acceptance: "no direct `EntityCreateModal` import; identity state flows via shared hook; shell forwards `ai=` prop". State the structural property the refactor must achieve, not the byte count it should produce.
+
+If a numeric target is genuinely useful as a sanity check, label it aspirational ("target ~150 lines reduction; verify reachability under the item's guardrails before relying on the number") rather than as an acceptance gate.
+
+#### Cutover-style risk signal
+
+If a draft work item is scoped as a single-PR cutover that spans frontend + backend + docs + e2e, or that requires deleting and re-wiring components in the same pass, treat it as a sizing failure and split. A single implementer session cannot reliably finish 4-8+ hours of coordinated cross-layer change in one shot without sacrificing test coverage or scope fidelity.
+
+Decompose into adjacent items with explicit milestones, e.g.:
+- backend dispatch refactor + tests (independently mergeable)
+- frontend cutover that depends on the backend
+- docs + e2e validation that depend on both
+
+Each adjacent item should remain independently testable and PR-sized per the sizing guidelines above.
+
 #### Manual review override
 
 When a work item is unusually sensitive or risky, include:

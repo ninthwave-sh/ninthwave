@@ -111,6 +111,8 @@ nw heartbeat --progress 0.0 --label "Starting"
 
 > **Note:** Dependency installation (npm/pnpm install, mix deps.get, etc.) and gitignored config file setup are handled automatically by the project's bootstrap hook (`.ninthwave/hooks/post-worktree-create`) before your session starts. You do not need to run install commands unless the work item specifically changes dependencies.
 
+> **Boundary guard: stay within `${PROJECT_ROOT}`.** Every Read and Edit you perform must target a path inside `${PROJECT_ROOT}`. The Read/Edit tools accept absolute paths anywhere on disk without warning, so it is your responsibility to enforce the worktree boundary. Before each edit, confirm the file's absolute path is a child of `${PROJECT_ROOT}`. If you find yourself about to edit a sibling repo path (e.g., the hub repo's working tree at a path that does not start with `${PROJECT_ROOT}`), STOP -- those edits will silently land on the wrong branch, will not be committed on your PR, and will require manual recovery.
+
 - Implement the fix, feature, test, refactor, or documentation change described in the work item
 - Follow all project conventions from the project instruction file
 - Keep changes tightly scoped to files mentioned in the work item
@@ -289,6 +291,8 @@ nw heartbeat --progress 0.85 --label "Checked diff"
 ## 8. Remove Your Work Item File
 
 Before creating the PR, delete your work item file so that merging the PR automatically marks the item as done.
+
+> **CRITICAL: delete only from your worktree.** Never use `${HUB_ROOT}` paths or absolute paths into the hub repo's `.ninthwave/work/`. A deletion outside your worktree does not propagate when the PR merges -- the hub file resurrects on the next sync, and the orchestrator stalls on a phantom item. Always `cd ${PROJECT_ROOT}` first and use the relative path `.ninthwave/work/...` exactly as shown below.
 
 Your CWD may have drifted to a subdirectory (e.g., `apps/web/`) during testing. Return to the worktree root first:
 ```bash
