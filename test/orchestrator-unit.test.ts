@@ -660,6 +660,93 @@ describe("evaluateMerge", () => {
     expect(orch.getItem("H-1-2")!.state).toBe("reviewing");
     expect(actions.filter((a) => a.type === "launch-review" && a.itemId === "H-1-2")).toHaveLength(1);
   });
+
+  // ── workspace guard: don't auto-merge while implementer is editing ──
+  // Regression test for H-ORCH-14. When CHANGES_REQUESTED respawns the
+  // implementer to address feedback and the worker is actively editing
+  // (workspaceRef set), a same-poll flip to APPROVED + CI pass must NOT
+  // auto-merge. Merging mid-edit tears down the worktree before the
+  // worker can push, landing partial work on main.
+
+  it("workspace guard: auto strategy holds in review-pending while implementer is editing (APPROVED + CI pass)", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "review-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    // Live worker actively addressing earlier feedback
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open", isMergeable: true, reviewDecision: "APPROVED" }]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("review-pending");
+    expect(actions.some((a) => a.type === "merge")).toBe(false);
+  });
+
+  it("workspace guard: bypass strategy holds in review-pending while implementer is editing", () => {
+    // Edge case from H-ORCH-14 test plan: bypass must respect the same guard,
+    // since admin merge tears down the worktree just like a normal auto-merge.
+    const orch = new Orchestrator({ mergeStrategy: "bypass", bypassEnabled: true });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "review-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open", isMergeable: true, reviewDecision: "APPROVED" }]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("review-pending");
+    expect(actions.some((a) => a.type === "merge")).toBe(false);
+  });
+
+  it("workspace guard: merge proceeds on next poll once workspaceRef clears", () => {
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "review-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    orch.getItem("H-1-1")!.workspaceRef = "workspace:1";
+
+    // First poll: blocked by workspace guard
+    const blocked = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open", isMergeable: true, reviewDecision: "APPROVED" }]),
+    );
+    expect(orch.getItem("H-1-1")!.state).toBe("review-pending");
+    expect(blocked.some((a) => a.type === "merge")).toBe(false);
+
+    // Worker parks/pushes/dies and workspaceRef clears
+    orch.getItem("H-1-1")!.workspaceRef = undefined;
+
+    // Next poll: merge proceeds
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open", isMergeable: true, reviewDecision: "APPROVED" }]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("merging");
+    expect(actions.some((a) => a.type === "merge" && a.itemId === "H-1-1" && a.prNumber === 42)).toBe(true);
+  });
+
+  it("workspace guard: regression -- normal review-then-merge still works (no live worker)", () => {
+    // Regression check: items in review-pending with no live worker (typical
+    // post-park state after AI review approves) still auto-merge as before.
+    const orch = new Orchestrator({ mergeStrategy: "auto" });
+    orch.addItem(makeWorkItem("H-1-1"));
+    orch.getItem("H-1-1")!.reviewCompleted = true;
+    orch.hydrateState("H-1-1", "review-pending");
+    orch.getItem("H-1-1")!.prNumber = 42;
+    // No workspaceRef -- worker has parked
+
+    const actions = orch.processTransitions(
+      snapshotWith([{ id: "H-1-1", ciStatus: "pass", prState: "open", isMergeable: true, reviewDecision: "APPROVED" }]),
+    );
+
+    expect(orch.getItem("H-1-1")!.state).toBe("merging");
+    expect(actions.some((a) => a.type === "merge" && a.itemId === "H-1-1" && a.prNumber === 42)).toBe(true);
+  });
 });
 
 // ── setMergeStrategy ────────────────────────────────────────────────

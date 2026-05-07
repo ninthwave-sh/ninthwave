@@ -1478,6 +1478,21 @@ export class Orchestrator {
       && snap?.ciStatus === "pass"
       && (this.config.mergeStrategy === "auto" || this.config.mergeStrategy === "bypass");
     if ((snap?.reviewDecision === "APPROVED" && snap?.ciStatus === "pass") || canAutoMerge) {
+      // Workspace guard: a live worker (workspaceRef set) is actively addressing
+      // earlier feedback in this worktree. Don't auto-merge mid-edit, even when
+      // the reviewer flipped to APPROVED in this poll cycle -- merging tears
+      // down the worktree before the worker can push its in-flight commit and
+      // partial work lands on main. continuePendingFeedbackHandoff (above) only
+      // covers the pre-launch window (needsFeedbackResponse=true); once the
+      // feedback message has been delivered that gate clears and we would race
+      // straight into evaluateMerge without this guard. Hold in review-pending;
+      // the next poll merges once the worker pushes/parks/dies (workspaceRef
+      // cleared) or sends a feedback-done signal (handled at top of this fn).
+      // Bypass strategy must respect the same guard -- admin-merge mid-edit has
+      // the same teardown race as a normal auto-merge.
+      if (item.workspaceRef) {
+        return actions;
+      }
       actions.push(...this.evaluateMerge(item, snap, snap?.eventTime, now));
       return actions;
     }
